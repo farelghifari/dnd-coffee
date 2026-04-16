@@ -5,11 +5,16 @@ import {
   getStockLogs, 
   getAttendanceLogs,
   getSystemLogs,
+  getSalesLogs,
   updateAttendanceLogStatus,
-  getDailyWorkDuration,
+  subscribeToInventoryTransactions,
+  subscribeToAttendanceLogs,
+  subscribeToSystemLogs,
+  subscribeToSalesLogs,
   type StockLog,
   type AttendanceLog,
-  type SystemLog
+  type SystemLog,
+  type SalesLog
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -36,7 +41,9 @@ import {
   ShieldCheck,
   Settings,
   CalendarDays,
-  Clock
+  Clock,
+  Coffee,
+  ShoppingCart
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, subDays, startOfDay, endOfDay, isSameDay, differenceInMinutes } from "date-fns"
@@ -45,6 +52,7 @@ export default function LogsPage() {
   const [stockLogs, setStockLogs] = useState<StockLog[]>([])
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([])
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([])
+  const [salesLogs, setSalesLogs] = useState<SalesLog[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedType, setSelectedType] = useState<"all" | "in" | "out" | "waste" | "opname">("all")
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
@@ -52,24 +60,55 @@ export default function LogsPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const fetchData = async (isSilent = false) => {
-      if (!isSilent) setIsLoading(true)
-      const [stockData, attendanceData, systemData] = await Promise.all([
+    const fetchData = async () => {
+      setIsLoading(true)
+      const [stockData, attendanceData, systemData, salesData] = await Promise.all([
         getStockLogs(),
         getAttendanceLogs(),
-        getSystemLogs()
+        getSystemLogs(),
+        getSalesLogs()
       ])
       setStockLogs(stockData)
       setAttendanceLogs(attendanceData)
       setSystemLogs(systemData)
-      if (!isSilent) setIsLoading(false)
+      setSalesLogs(salesData)
+      setIsLoading(false)
     }
     fetchData()
     
-    // Refresh data every 10 seconds for real-time sync (silent)
-    const interval = setInterval(() => fetchData(true), 10000)
-    return () => clearInterval(interval)
+    // REALTIME: Subscribe to all log tables for instant auto-refresh
+    const unsubStock = subscribeToInventoryTransactions(() => {
+      getStockLogs().then(setStockLogs)
+    })
+    
+    const unsubAttendance = subscribeToAttendanceLogs(() => {
+      getAttendanceLogs().then(setAttendanceLogs)
+    })
+    
+    const unsubSystem = subscribeToSystemLogs(() => {
+      getSystemLogs().then(setSystemLogs)
+    })
+    
+    const unsubSales = subscribeToSalesLogs(() => {
+      getSalesLogs().then(setSalesLogs)
+    })
+    
+    return () => {
+      unsubStock()
+      unsubAttendance()
+      unsubSystem()
+      unsubSales()
+    }
   }, [])
+
+  // Format price in IDR (Rupiah) - no decimals
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      minimumFractionDigits: 0,
+    }).format(price)
+  }
 
   // Filter stock logs by date and other criteria
   const filteredStockLogs = useMemo(() => {
@@ -100,6 +139,27 @@ export default function LogsPage() {
       return matchesDate && matchesSearch
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }, [attendanceLogs, selectedDate, searchQuery])
+
+  // Filter sales/menu logs by date
+  const filteredSalesLogs = useMemo(() => {
+    return salesLogs.filter((log) => {
+      const logDate = new Date(log.created_at)
+      const dateStart = startOfDay(selectedDate)
+      const dateEnd = endOfDay(selectedDate)
+      
+      const matchesDate = logDate >= dateStart && logDate <= dateEnd
+      const matchesSearch = (log.menu_name || "").toLowerCase().includes(searchQuery.toLowerCase())
+      
+      return matchesDate && matchesSearch
+    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  }, [salesLogs, selectedDate, searchQuery])
+
+  // Sales summary for selected date
+  const salesSummary = useMemo(() => {
+    const totalQty = filteredSalesLogs.reduce((sum, log) => sum + log.quantity, 0)
+    const totalRevenue = filteredSalesLogs.reduce((sum, log) => sum + log.total_price, 0)
+    return { totalQty, totalRevenue }
+  }, [filteredSalesLogs])
 
   // Helper to calculate shift duration from clock-in to clock-out
   const getShiftDuration = (log: AttendanceLog): { session: string | null; daily: string | null; isOvertime: boolean } => {
@@ -152,7 +212,7 @@ export default function LogsPage() {
     if (!confirm(`Mark this entry as ${status}?`)) return
     const success = await updateAttendanceLogStatus(id, status)
     if (success) {
-      // Refresh local state or rely on the 10s interval
+      // Refresh local state or rely on realtime subscription
       setAttendanceLogs(prev => prev.map(l => l.id === id ? { ...l, status } : l))
     } else {
       alert("Failed to update status")
@@ -271,7 +331,7 @@ export default function LogsPage() {
     <div>
       <header className="mb-8">
         <h1 className="text-3xl font-light tracking-tight">Activity Logs</h1>
-        <p className="text-muted-foreground">Stock movements and attendance records</p>
+        <p className="text-muted-foreground">Stock movements, attendance, menu sales, and system records</p>
       </header>
 
       {/* Date Navigation */}
@@ -337,6 +397,10 @@ export default function LogsPage() {
             <TabsTrigger value="attendance" className="rounded-sm">
               <Users className="w-4 h-4 mr-2" />
               Attendance
+            </TabsTrigger>
+            <TabsTrigger value="menu" className="rounded-sm">
+              <Coffee className="w-4 h-4 mr-2" />
+              Menu
             </TabsTrigger>
             <TabsTrigger value="system" className="rounded-sm">
               <Activity className="w-4 h-4 mr-2" />
@@ -534,6 +598,80 @@ export default function LogsPage() {
                       </div>
                     )
                   })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* NEW: Menu / Sales Logs Tab */}
+        <TabsContent value="menu">
+          {/* Summary bar */}
+          {filteredSalesLogs.length > 0 && (
+            <div className="flex items-center gap-4 mb-4">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-sm bg-muted">
+                <ShoppingCart className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">{salesSummary.totalQty} items sold</span>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2 rounded-sm bg-muted">
+                <span className="text-sm font-medium">{formatPrice(salesSummary.totalRevenue)}</span>
+              </div>
+            </div>
+          )}
+
+          <Card className="rounded-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Coffee className="w-5 h-5" />
+                Menu Sales Logs ({filteredSalesLogs.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {filteredSalesLogs.length === 0 ? (
+                <div className="text-center py-8">
+                  <Coffee className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No menu sales found for this date</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                  {filteredSalesLogs.map((log) => (
+                    <div 
+                      key={log.id}
+                      className="flex items-center justify-between p-4 rounded-sm border border-border hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-sm bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                          <Coffee className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{log.menu_name || "Unknown"}</p>
+                            <Badge variant="outline" className="rounded-sm text-xs bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300">
+                              Sale
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {log.quantity}x &middot; {formatPrice(log.total_price)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-mono font-medium">
+                          {new Date(log.created_at).toLocaleTimeString("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false
+                          })}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(log.created_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric"
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

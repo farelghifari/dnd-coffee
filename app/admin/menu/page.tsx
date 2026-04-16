@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { 
-  getInventory, 
-  getMenuItems, 
-  addMenuItem, 
-  updateMenuItem, 
+import {
+  getInventory,
+  getMenuItems,
+  addMenuItem,
+  updateMenuItem,
   deleteMenuItem,
   saveMenuRecipes,
   getMenuRecipes,
@@ -39,9 +39,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { 
-  Coffee, 
-  Search, 
+import {
+  Coffee,
+  Search,
   Plus,
   Filter,
   Pencil,
@@ -63,19 +63,19 @@ export default function MenuPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [menuHpp, setMenuHpp] = useState<Record<string, number>>({})
   const [isLoading, setIsLoading] = useState(true)
-  
+
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<typeof categories[number]>("all")
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<string | null>(null)
-  
+
   // Form state
   const [formName, setFormName] = useState("")
   const [formCategory, setFormCategory] = useState<"coffee" | "non-coffee" | "food">("coffee")
   const [formPrice, setFormPrice] = useState("")
   const [formIngredients, setFormIngredients] = useState<IngredientWithUnit[]>([])
-  
+
   // Ingredients modal state
   const [isIngredientsModalOpen, setIsIngredientsModalOpen] = useState(false)
   const [ingredientsMenuId, setIngredientsMenuId] = useState<string | null>(null)
@@ -94,7 +94,7 @@ export default function MenuPage() {
   // On change: update only affected row, NEVER reload page
   useEffect(() => {
     fetchData()
-    
+
     // Subscribe to inventory changes for ingredient data
     const unsubInventory = subscribeToInventoryItems((payload) => {
       if (payload?.new) {
@@ -117,7 +117,7 @@ export default function MenuPage() {
         getInventory().then(setInventory)
       }
     })
-    
+
     // Subscribe to menu_items changes
     const unsubMenu = subscribeToMenuItems?.((payload) => {
       if (payload?.new) {
@@ -144,8 +144,8 @@ export default function MenuPage() {
           fetchMenuHpp(menus)
         })
       }
-    }) || (() => {})
-    
+    }) || (() => { })
+
     return () => {
       unsubInventory()
       unsubMenu()
@@ -189,20 +189,20 @@ export default function MenuPage() {
   // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
   const handleAddItem = async () => {
     if (!formName || !formPrice || !formCategory) return
-    
+
     const result = await addMenuItem({
       name: formName,
       type: formCategory,
       category: formCategory,
       price: parseInt(formPrice, 10),
     })
-    
+
     // Reset form
     setFormName("")
     setFormCategory("coffee")
     setFormPrice("")
     setIsAddModalOpen(false)
-    
+
     // CORE RULE: REFRESH PAGE after add
     if (result) {
       window.location.reload()
@@ -213,21 +213,21 @@ export default function MenuPage() {
   const handleEditItem = async () => {
     // VALIDATION: name, category (must not be null), and price are required
     if (!editingItem || !formName || !formCategory || !formPrice) return
-    
+
     const result = await updateMenuItem(editingItem, {
       name: formName,
       type: formCategory,
       category: formCategory,
       price: parseInt(formPrice, 10),
     })
-    
+
     // Reset form
     setFormName("")
     setFormCategory("coffee")
     setFormPrice("")
     setEditingItem(null)
     setIsEditModalOpen(false)
-    
+
     // CORE RULE: REFRESH PAGE after edit
     if (result) {
       window.location.reload()
@@ -252,7 +252,7 @@ export default function MenuPage() {
       }
     }
   }
-  
+
   // Open ingredients modal
   const openIngredientsModal = async (item: MenuItem) => {
     setIngredientsMenuId(item.id)
@@ -269,21 +269,21 @@ export default function MenuPage() {
     setFormIngredients(ingredientsWithUnit)
     setIsIngredientsModalOpen(true)
   }
-  
+
   // Add ingredient row with unit - unit will be set when inventory item is selected
   const addIngredientRow = () => {
-    setFormIngredients([...formIngredients, { 
-      inventory_item_id: "", 
+    setFormIngredients([...formIngredients, {
+      inventory_item_id: "",
       quantity: 0,
       unit: "pcs" // Placeholder - will be updated when inventory item is selected
     }])
   }
-  
+
   // Remove ingredient row
   const removeIngredientRow = (index: number) => {
     setFormIngredients(formIngredients.filter((_, i) => i !== index))
   }
-  
+
   // Update ingredient (quantity will be converted to base unit on save)
   // IMPORTANT: When selecting inventory item, set unit based on inventory_items.unit
   const updateIngredient = (index: number, field: keyof IngredientWithUnit, value: string | number) => {
@@ -303,12 +303,12 @@ export default function MenuPage() {
     }
     setFormIngredients(updated)
   }
-  
+
   // Save ingredients (convert to base unit: kg→gram, liter→ml)
   // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
   const handleSaveIngredients = async () => {
     if (!ingredientsMenuId) return
-    
+
     // Filter out empty ingredients and convert to base unit
     const validIngredients: MenuRecipeIngredient[] = formIngredients
       .filter(ing => ing.inventory_item_id && ing.quantity > 0)
@@ -316,13 +316,13 @@ export default function MenuPage() {
         inventory_item_id: ing.inventory_item_id,
         quantity: toBaseUnit(ing.quantity, ing.unit)
       }))
-    
+
     const result = await saveMenuRecipes(ingredientsMenuId, validIngredients)
-    
+
     setIngredientsMenuId(null)
     setFormIngredients([])
     setIsIngredientsModalOpen(false)
-    
+
     // CORE RULE: REFRESH PAGE after saving ingredients
     if (result) {
       window.location.reload()
@@ -394,17 +394,17 @@ export default function MenuPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-medium">{formatPrice(item.price)}</span>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-8 w-8"
                     onClick={() => openEditModal(item)}
                   >
                     <Pencil className="w-4 h-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     className="h-8 w-8 text-destructive"
                     onClick={() => handleDeleteItem(item.id)}
                   >
@@ -425,7 +425,7 @@ export default function MenuPage() {
                   </p>
                 )}
               </div>
-              
+
               {item.recipe && (
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
@@ -449,9 +449,9 @@ export default function MenuPage() {
               {!item.recipe && (
                 <p className="text-sm text-muted-foreground">No recipe defined</p>
               )}
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 className="mt-3 w-full rounded-sm"
                 onClick={() => openIngredientsModal(item)}
               >
@@ -520,8 +520,8 @@ export default function MenuPage() {
             <Button variant="outline" onClick={() => setIsAddModalOpen(false)} className="rounded-sm">
               Cancel
             </Button>
-            <Button 
-              onClick={handleAddItem} 
+            <Button
+              onClick={handleAddItem}
               disabled={!formName || !formCategory || !formPrice}
               className="rounded-sm"
             >
@@ -582,8 +582,8 @@ export default function MenuPage() {
             <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="rounded-sm">
               Cancel
             </Button>
-            <Button 
-              onClick={handleEditItem} 
+            <Button
+              onClick={handleEditItem}
               disabled={!formName || !formCategory || !formPrice}
               className="rounded-sm"
             >
@@ -605,8 +605,8 @@ export default function MenuPage() {
           <div className="grid gap-4 py-4 max-h-[400px] overflow-y-auto">
             {formIngredients.map((ing, idx) => (
               <div key={idx} className="flex items-center gap-2">
-                <Select 
-                  value={ing.inventory_item_id} 
+                <Select
+                  value={ing.inventory_item_id}
                   onValueChange={(v) => updateIngredient(idx, "inventory_item_id", v)}
                 >
                   <SelectTrigger className="flex-1 rounded-sm">
@@ -627,13 +627,13 @@ export default function MenuPage() {
                   onChange={(e) => updateIngredient(idx, "quantity", e.target.value)}
                   className="w-20 rounded-sm"
                 />
-{/* Unit dropdown - only show allowed units based on selected inventory item */}
+                {/* Unit dropdown - only show allowed units based on selected inventory item */}
                 {(() => {
                   const invItem = inventory.find(i => i.id === ing.inventory_item_id)
                   const allowedUnits = invItem ? getAllowedUnitsForItem(invItem.unit) : ['pcs']
                   return (
-                    <Select 
-                      value={ing.unit} 
+                    <Select
+                      value={ing.unit}
                       onValueChange={(v) => updateIngredient(idx, "unit", v)}
                       disabled={!ing.inventory_item_id}
                     >
@@ -650,9 +650,9 @@ export default function MenuPage() {
                     </Select>
                   )
                 })()}
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-9 w-9 text-destructive"
                   onClick={() => removeIngredientRow(idx)}
                 >

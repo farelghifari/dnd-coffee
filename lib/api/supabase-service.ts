@@ -1455,6 +1455,51 @@ export function subscribeToInventoryItems(callback: (payload?: RealtimePayload) 
   }
 }
 
+export function subscribeToAttendanceLogs(callback: (payload?: RealtimePayload) => void) {
+  if (!isSupabaseConfigured()) return () => {}
+  
+  const channel = supabase
+    .channel('attendance_logs_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'attendance_logs' },
+      (payload) => {
+        callback({
+          new: payload.new as Record<string, unknown>,
+          old: payload.old as Record<string, unknown>,
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE'
+        })
+      }
+    )
+    .subscribe()
+  
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}
+
+export function subscribeToSystemLogs(callback: (payload?: RealtimePayload) => void) {
+  if (!isSupabaseConfigured()) return () => {}
+  
+  const channel = supabase
+    .channel('system_logs_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'system_logs' },
+      (payload) => {
+        callback({
+          new: payload.new as Record<string, unknown>,
+          old: payload.old as Record<string, unknown>,
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE'
+        })
+      }
+    )
+    .subscribe()
+  
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}
 
 
 // ========== STOCK LOGS (for local compatibility) ==========
