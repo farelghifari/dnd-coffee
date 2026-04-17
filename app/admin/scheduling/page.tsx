@@ -46,7 +46,7 @@ import {
   Plus,
   Clock
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -73,9 +73,13 @@ export default function SchedulingPage() {
   const [shiftConfigs, setShiftConfigs] = useState<ShiftConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
   
-  const [currentMonthStart, setCurrentMonthStart] = useState(() => {
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
     const today = new Date()
-    return new Date(today.getFullYear(), today.getMonth(), 1)
+    const day = today.getDay()
+    const diff = today.getDate() - day // Monday as start of week or Sunday? The template uses 0=Sunday (SHORT_DAYS). Let's use Sunday.
+    const sunday = new Date(today.setDate(diff))
+    sunday.setHours(0,0,0,0)
+    return sunday
   })
   
   const [draggedEmployee, setDraggedEmployee] = useState<string | null>(null)
@@ -106,47 +110,48 @@ export default function SchedulingPage() {
     fetchData()
   }, [])
 
-  // Generate month dates
-  const monthDates = useMemo(() => {
+  // Generate week dates
+  const weekDates = useMemo(() => {
     const dates: { date: Date; dateStr: string; dayOfWeek: number; isCurrentMonth: boolean }[] = []
     
-    // Find the first day of the month
-    const firstDayOfMonth = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), 1)
-    
-    // Find the first Sunday before or on the first day of the month
-    const startDate = new Date(firstDayOfMonth)
-    startDate.setDate(firstDayOfMonth.getDate() - firstDayOfMonth.getDay())
-    
-    for (let i = 0; i < 42; i++) {
-      const date = new Date(startDate)
-      date.setDate(startDate.getDate() + i)
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(currentWeekStart)
+      date.setDate(currentWeekStart.getDate() + i)
       dates.push({
         date,
-        dateStr: date.toISOString().split("T")[0],
+        dateStr: getLocalYYYYMMDD(date),
         dayOfWeek: date.getDay(),
-        isCurrentMonth: date.getMonth() === currentMonthStart.getMonth()
+        isCurrentMonth: true // In week view, all are "current"
       })
     }
     return dates
-  }, [currentMonthStart])
+  }, [currentWeekStart])
 
   // Get shifts for a specific date
   const getShiftsForDate = (dateStr: string) => {
     return shiftAssignments.filter(shift => shift.date === dateStr)
   }
 
-  // Navigate months
-  const goToPreviousMonth = () => {
-    setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - 1, 1))
+  // Navigate weeks
+  const goToPreviousWeek = () => {
+    const next = new Date(currentWeekStart)
+    next.setDate(currentWeekStart.getDate() - 7)
+    setCurrentWeekStart(next)
   }
 
-  const goToNextMonth = () => {
-    setCurrentMonthStart(new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1))
+  const goToNextWeek = () => {
+    const next = new Date(currentWeekStart)
+    next.setDate(currentWeekStart.getDate() + 7)
+    setCurrentWeekStart(next)
   }
 
-  const goToCurrentMonth = () => {
+  const goToCurrentWeek = () => {
     const today = new Date()
-    setCurrentMonthStart(new Date(today.getFullYear(), today.getMonth(), 1))
+    const day = today.getDay()
+    const diff = today.getDate() - day
+    const sunday = new Date(today.setDate(diff))
+    sunday.setHours(0,0,0,0)
+    setCurrentWeekStart(sunday)
   }
 
   // Drag and drop handlers
@@ -224,13 +229,22 @@ export default function SchedulingPage() {
 
     // Validate for full-time employees - max 2 shifts per day
     if (employee.employment_type === "full-time") {
-      const existingShiftsForDate = shiftAssignments.filter(
+      const existingShiftsByEmployee = shiftAssignments.filter(
         s => s.employee_id === selectedEmployeeId && s.date === selectedCell.date
       )
-      if (existingShiftsForDate.length >= 2) {
+      if (existingShiftsByEmployee.length >= 2) {
         alert("Full-time employees can only have a maximum of 2 shifts per day.")
         return
       }
+    }
+
+    // GENERAL LIMIT: Maximum 5 assignments per day
+    const allExistingShiftsForDate = shiftAssignments.filter(
+      s => s.date === selectedCell.date
+    )
+    if (!editingShift && allExistingShiftsForDate.length >= 5) {
+      alert("A maximum of 5 assignments is allowed per day.")
+      return
     }
 
     if (editingShift) {
@@ -369,14 +383,20 @@ export default function SchedulingPage() {
 
   // Check if date is today
   const isToday = (dateStr: string) => {
-    const today = new Date().toISOString().split("T")[0]
+    const today = getLocalYYYYMMDD()
     return dateStr === today
   }
 
-  // Format month range for header
-  const monthRangeStr = useMemo(() => {
-    return currentMonthStart.toLocaleDateString("en-US", { month: "long", year: "numeric" })
-  }, [currentMonthStart])
+  // Format week range for header
+  const weekRangeStr = useMemo(() => {
+    const endDate = new Date(currentWeekStart)
+    endDate.setDate(currentWeekStart.getDate() + 6)
+    
+    const startStr = currentWeekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    const endStr = endDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    
+    return `${startStr} - ${endStr}`
+  }, [currentWeekStart])
 
   if (isLoading) {
     return (
@@ -396,13 +416,13 @@ export default function SchedulingPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={goToPreviousMonth} className="rounded-sm">
+          <Button variant="outline" size="sm" onClick={goToPreviousWeek} className="rounded-sm">
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <Button variant="outline" size="sm" onClick={goToCurrentMonth} className="rounded-sm">
+          <Button variant="outline" size="sm" onClick={goToCurrentWeek} className="rounded-sm">
             Today
           </Button>
-          <Button variant="outline" size="sm" onClick={goToNextMonth} className="rounded-sm">
+          <Button variant="outline" size="sm" onClick={goToNextWeek} className="rounded-sm">
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
@@ -412,7 +432,7 @@ export default function SchedulingPage() {
       <div className="flex items-center justify-center mb-4">
         <div className="flex items-center gap-2 text-lg font-medium">
           <Calendar className="w-5 h-5" />
-          {monthRangeStr}
+          {weekRangeStr}
         </div>
       </div>
 
@@ -464,9 +484,9 @@ export default function SchedulingPage() {
               ))}
             </div>
             
-            {/* Month Calendar Grid */}
+            {/* Week Calendar Grid */}
             <div className="grid grid-cols-7 auto-rows-fr flex-1 overflow-y-auto">
-              {monthDates.map(({ date, dateStr, dayOfWeek, isCurrentMonth }) => {
+              {weekDates.map(({ date, dateStr, dayOfWeek, isCurrentMonth }) => {
                 const isWeekendDay = isWeekend(date)
                 const isTodayDate = isToday(dateStr)
                 return (

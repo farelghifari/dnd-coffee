@@ -18,7 +18,8 @@ import {
   Crown,
   ShieldCheck,
   Layers,
-  FileText
+  FileText,
+  Wallet
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -34,12 +35,14 @@ const baseNavItems = [
   { href: "/admin/scheduling", label: "Scheduling", icon: CalendarDays },
   { href: "/admin/overtime", label: "Overtime", icon: Clock },
   { href: "/admin/report", label: "Report", icon: FileText },
+  { href: "/admin/attendance-report", label: "Attendance Report", icon: ClipboardList },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/forecasting", label: "Forecasting", icon: TrendingUp },
   { href: "/admin/logs", label: "Logs", icon: ClipboardList },
 ]
 
 // Settings menu item - only for main_super_admin (not temporary super_admin)
+const payrollNavItem = { href: "/admin/payroll", label: "Payroll", icon: Wallet }
 const settingsNavItem = { href: "/admin/settings", label: "Settings", icon: Settings }
 
 export function AdminSidebar() {
@@ -49,9 +52,9 @@ export function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false)
   
   // Build nav items based on role
-  // Settings is ONLY visible to main_super_admin (not temporary super_admin or admin)
+  // Payroll & Settings are ONLY visible to main_super_admin
   const navItems = isMainSuperAdmin() 
-    ? [...baseNavItems, settingsNavItem] 
+    ? [...baseNavItems, payrollNavItem, settingsNavItem] 
     : baseNavItems
 
   const handleLogout = () => {

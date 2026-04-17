@@ -113,16 +113,22 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
       const hasShift = await hasShiftOnDate(employeeId, today)
 
       if (selectedAction === "clock-in") {
-        // Add attendance log regardless
+        // Add attendance log
         const attendanceLog = await addAttendanceLog({
           employee_id: employeeId,
           employee_name: employeeName,
           type: selectedAction
         })
         
+        // Calculate current status (lateness etc)
+        const duration = await getDailyWorkDuration(employeeId, today)
+        
         if (hasShift) {
-          // Normal clock-in - employee has shift
-          setShowSuccessMessage(`${employeeName} clocked in successfully`)
+          if (duration.isLate) {
+            setShowWarningMessage(`${employeeName} clocked in successfully — LATE (> 15 mins)`)
+          } else {
+            setShowSuccessMessage(`${employeeName} clocked in successfully — Punctual`)
+          }
         } else {
           // No shift - create overtime request
           if (attendanceLog) {
@@ -136,15 +142,7 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
             })
           }
           
-          // Show warning that overtime request was created
-          setShowWarningMessage(`${employeeName} clocked in (No shift scheduled - Overtime request submitted for approval)`)
-          setSelectedAction(null)
-          setTimeout(() => {
-            setShowWarningMessage(null)
-            setCurrentEmployeeId(null)
-            setCurrentEmployeeName(null)
-          }, 4000)
-          return
+          setShowWarningMessage(`${employeeName} clocked in (No shift scheduled — Overtime request submitted for approval)`)
         }
       } else {
         // Clock-out - always allowed
@@ -154,27 +152,17 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           type: selectedAction
         })
         
-        // Calculate daily duration
-        const today = new Date().toISOString().split("T")[0]
+        // Calculate regulated duration
         const duration = await getDailyWorkDuration(employeeId, today)
-        const hours = Math.floor(duration.totalMinutes / 60)
-        const mins = duration.totalMinutes % 60
+        const regHours = Math.floor(duration.regularMinutes / 60)
+        const regMins = duration.regularMinutes % 60
+        const otHours = Math.floor(duration.overtimeMinutes / 60)
+        const otMins = duration.overtimeMinutes % 60
         
         if (duration.overtimeMinutes > 0) {
-          const hasShift = await hasShiftOnDate(employeeId, today)
-          if (!hasShift) {
-            // Outside shift + over 8h = overtime
-            const otHours = Math.floor(duration.overtimeMinutes / 60)
-            const otMins = duration.overtimeMinutes % 60
-            setShowWarningMessage(`${employeeName} clocked out — Total: ${hours}h ${mins}m (Overtime: ${otHours}h ${otMins}m — Pending approval)`)
-            // Create overtime request for the excess
-            const lastLog = await addAttendanceLog({ employee_id: employeeId, employee_name: employeeName, type: 'clock-out' })
-            // Note: overtime request already exists from clock-in if outside shift
-          } else {
-            setShowSuccessMessage(`${employeeName} clocked out — Total today: ${hours}h ${mins}m`)
-          }
+          setShowWarningMessage(`${employeeName} clocked out — Regular: ${regHours}h ${regMins}m | OT: ${otHours}h ${otMins}m (Pending Approval)`)
         } else {
-          setShowSuccessMessage(`${employeeName} clocked out — Total today: ${hours}h ${mins}m`)
+          setShowSuccessMessage(`${employeeName} clocked out — Shift Total: ${regHours}h ${regMins}m`)
         }
       }
       

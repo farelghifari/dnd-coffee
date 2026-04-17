@@ -15,6 +15,12 @@ import {
   deleteMenuItem,
   saveMenuRecipes,
   getMenuRecipes,
+  getMonthlyOpex,
+  addMonthlyOpex,
+  deleteMonthlyOpex,
+  getInventoryOpnames,
+  addInventoryOpname,
+  uploadOpexAttachment,
   subscribeToInventoryTransactions,
   subscribeToInventoryItems,
   toBaseUnit,
@@ -24,6 +30,8 @@ import {
   type InventoryItem,
   type MenuItem,
   type MenuRecipeIngredient,
+  type MonthlyOpex,
+  type InventoryOpname,
   type DisplayUnit
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -57,6 +65,16 @@ import {
   PackagePlus,
   ArrowDownCircle,
   Coffee,
+  AlertTriangle,
+  ChevronRight,
+  Calculator,
+  Calendar,
+  History,
+  ClipboardCheck,
+  FileText,
+  Image as ImageIcon,
+  Upload,
+  ArrowRightLeft,
   X
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
@@ -71,7 +89,6 @@ import { useAuth } from "@/lib/auth-context"
 
 const inventoryCategories = ["all", "beans", "milk", "syrup", "cups", "food"] as const
 const categoryOptions = ["beans", "milk", "syrup", "cups", "food"] as const
-// Standard unit options for inventory - these are the base units that define the item type
 const unitOptions: DisplayUnit[] = ["gram", "ml", "pcs", "kg", "liter"]
 const menuCategories = ["all", "coffee", "non-coffee", "food"] as const
 
@@ -80,49 +97,44 @@ export default function InventoryPage() {
   const canEdit = isSuperAdmin()
   const actorName = user?.name || user?.nickname || "System"
   
-  // Main data
-  const [inventory, setInventory] = useState<InventoryItem[]>([])
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState("")
-  
-  // Tab state
   const [activeTab, setActiveTab] = useState("raw-materials")
-  
-  // Raw Materials filters
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [filteredInventory, setFilteredInventory] = useState<InventoryItem[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
+  const [filteredMenu, setFilteredMenu] = useState<MenuItem[]>([])
+  const [monthlyOpex, setMonthlyOpex] = useState<MonthlyOpex[]>([])
+  const [opnameHistory, setOpnameHistory] = useState<InventoryOpname[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState<typeof inventoryCategories[number]>("all")
-  
-  // Menu filters
+  const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [menuSearchQuery, setMenuSearchQuery] = useState("")
-  const [selectedMenuCategory, setSelectedMenuCategory] = useState<typeof menuCategories[number]>("all")
-  
-  // Raw Materials modals
+  const [selectedMenuCategory, setSelectedMenuCategory] = useState<string>("all")
+  const [error, setError] = useState<string | null>(null)
+
+  // Modals
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
   const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false)
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false)
   const [isStockOutModalOpen, setIsStockOutModalOpen] = useState(false)
-  const [editingItemId, setEditingItemId] = useState<string | null>(null)
-  
-  // Menu modals
   const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
   const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
-  const [editingMenuId, setEditingMenuId] = useState<string | null>(null)
-  
-  // Raw Materials form with display unit selection
+  const [isAddOpexModalOpen, setIsAddOpexModalOpen] = useState(false)
+  const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
+
+  // Forms
   const [formData, setFormData] = useState({
+    id: "",
     name: "",
-    category: "food" as "beans" | "milk" | "syrup" | "cups" | "food",
-    unit: "pcs" as string,
-    displayUnit: "pcs" as DisplayUnit,
+    category: "beans" as typeof categoryOptions[number],
+    unit: "gram",
+    displayUnit: "gram" as DisplayUnit,
     currentStock: "",
+    dailyUsage: "",
     minStock: "",
     maxStock: "",
-    dailyUsage: "",
     unitCost: ""
   })
-  
-  // Stock In form - creates batch entry (main stock entry point)
+
   const [stockInForm, setStockInForm] = useState({
     itemId: "",
     quantity: "",
@@ -133,315 +145,292 @@ export default function InventoryPage() {
     expiredDate: "",
     notes: ""
   })
-  
-  // Stock Out Manual form
+
   const [stockOutForm, setStockOutForm] = useState({
     itemId: "",
     quantity: "",
     displayUnit: "pcs" as DisplayUnit,
     reason: ""
   })
-  
-  // Menu form (with ingredients inline)
+
   const [menuForm, setMenuForm] = useState({
+    id: "",
     name: "",
     category: "coffee" as "coffee" | "non-coffee" | "food",
     price: "",
     ingredients: [] as MenuRecipeIngredient[]
   })
 
-  const fetchData = async () => {
-    setIsLoading(true)
-    const [inventoryData, menuData] = await Promise.all([
-      getInventory(),
-      getMenuItems()
-    ])
-    setInventory(inventoryData)
-    setMenuItems(menuData)
-    setIsLoading(false)
-  }
+  const [opexForm, setOpexForm] = useState({
+    month: new Date().toISOString().slice(0, 7), // YYYY-MM
+    category: "Gaji",
+    amount: "",
+    notes: ""
+  })
+  const [opexFile, setOpexFile] = useState<File | null>(null)
 
-  // STEP 4: Realtime subscriptions - update UI only, no full page reload
-  // On change: update only affected row, NEVER reload page
+  const [opnameForm, setOpnameForm] = useState({
+    itemId: "",
+    actualStock: "",
+    displayUnit: "pcs" as DisplayUnit,
+    reason: ""
+  })
+
+  const opexCategories = ["Gaji", "Sewa", "Listrik/Air", "Pajak", "Marketing", "Maintenance", "Lainnya"]
+
   useEffect(() => {
     fetchData()
-    
-    // Subscribe to inventory_items changes - update only affected row
-    const unsubInventoryItems = subscribeToInventoryItems((payload) => {
-      if (payload?.new) {
-        // Update or insert the affected item only
-        setInventory(prev => {
-          const newItem = (payload.new as unknown) as InventoryItem
-          const existingIndex = prev.findIndex(item => item.id === newItem.id)
-          if (existingIndex >= 0) {
-            // Update existing item
-            const updated = [...prev]
-            updated[existingIndex] = { ...newItem, current_stock: newItem.stock }
-            return updated
-          } else {
-            // Insert new item
-            return [...prev, { ...newItem, current_stock: newItem.stock }]
-          }
-        })
-      } else if (payload?.old && payload?.eventType === 'DELETE') {
-        // Remove deleted item
-        const oldItem = (payload.old as unknown) as InventoryItem
-        setInventory(prev => prev.filter(item => item.id !== oldItem.id))
-      } else {
-        // Fallback: refetch all if payload is incomplete
-        getInventory().then(setInventory)
-      }
-    })
-    
-    // Subscribe to inventory_transactions changes - refetch inventory to get updated stock
-    const unsubInventoryTx = subscribeToInventoryTransactions(() => {
-      // Transactions affect stock levels, so we need to refetch inventory
-      getInventory().then(setInventory)
-    })
-    
+
+    const unsubscribeTransactions = subscribeToInventoryTransactions(() => fetchData())
+    const unsubscribeInventory = subscribeToInventoryItems(() => fetchData())
+
     return () => {
-      unsubInventoryItems()
-      unsubInventoryTx()
+      unsubscribeTransactions()
+      unsubscribeInventory()
     }
   }, [])
 
-  // ========== RAW MATERIALS ==========
-  const filteredInventory = inventory.filter((item) => {
-    const matchesSearch = (item.name || "").toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesCategory = selectedCategory === "all" || item.category === selectedCategory
-    return matchesSearch && matchesCategory
-  })
+  useEffect(() => {
+    let result = inventory
 
-  const getHealthBadge = (health: "healthy" | "warning" | "critical") => {
-    const styles = {
-      healthy: "bg-[var(--status-healthy)]/10 text-[var(--status-healthy)]",
-      warning: "bg-[var(--status-warning)]/10 text-[var(--status-warning)]",
-      critical: "bg-[var(--status-critical)]/10 text-[var(--status-critical)]",
+    if (selectedCategory !== "all") {
+      result = result.filter(item => item.category === selectedCategory)
     }
-    return styles[health]
+
+    if (searchQuery) {
+      result = result.filter(item => 
+        item.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+
+    setFilteredInventory(result)
+  }, [inventory, searchQuery, selectedCategory])
+
+  useEffect(() => {
+    let result = menuItems
+
+    if (selectedMenuCategory !== "all") {
+      result = result.filter(item => item.category === selectedMenuCategory)
+    }
+
+    if (menuSearchQuery) {
+      result = result.filter(item => 
+        item.name.toLowerCase().includes(menuSearchQuery.toLowerCase())
+      )
+    }
+
+    setFilteredMenu(result)
+  }, [menuItems, menuSearchQuery, selectedMenuCategory])
+
+  const fetchData = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const [invData, menuData, opexData, opnameData] = await Promise.all([
+        getInventory(),
+        getMenuItems(),
+        getMonthlyOpex(),
+        getInventoryOpnames()
+      ])
+      
+      const menusWithRecipes = await Promise.all(
+        menuData.map(async (menu) => {
+          const recipe = await getMenuRecipes(menu.id)
+          return { 
+            ...menu, 
+            type: menu.type || menu.category || 'coffee',
+            recipe: { ingredients: recipe || [] } 
+          } as MenuItem
+        })
+      )
+      
+      setInventory(invData)
+      setMenuItems(menusWithRecipes)
+      setMonthlyOpex(opexData)
+      setOpnameHistory(opnameData)
+    } catch (err) {
+      console.error("Error fetching data:", err)
+      setError("Failed to load inventory data")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const resetItemForm = () => {
     setFormData({
+      id: "",
       name: "",
-      category: "food",
-      unit: "pcs",
-      displayUnit: "pcs",
+      category: "beans",
+      unit: "gram",
+      displayUnit: "gram",
       currentStock: "",
+      dailyUsage: "",
       minStock: "",
       maxStock: "",
-      dailyUsage: "",
       unitCost: ""
     })
-  }
-
-  // INVENTORY FLOW: Add item using upsert_inventory()
-  // Convert to base unit before saving (kg→gram, liter→ml)
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleAddItem = async () => {
-    if (!formData.name || !formData.currentStock) return
-    setError("")
-    
-    // Convert display unit to base unit
-    const stockInBaseUnit = toBaseUnit(
-      parseFloat(formData.currentStock) || 0,
-      formData.displayUnit
-    )
-    
-    // Call upsert_inventory() - no id means insert
-    const result = await upsertInventory({
-      name: formData.name,
-      category: formData.category,
-      unit: formData.displayUnit, // Store display unit for reference
-      stock: stockInBaseUnit,
-      min_stock: parseFloat(formData.minStock) || 0,
-      max_stock: parseFloat(formData.maxStock) || 0,
-      daily_usage: parseFloat(formData.dailyUsage) || 0,
-      unit_cost: parseFloat(formData.unitCost) || 0
-    }, actorName)
-
-    
-    if (!result) {
-      setError("Failed to add inventory item")
-      return
-    }
-    
-    resetItemForm()
-    setIsAddItemModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after add
-    window.location.reload()
-  }
-
-  const openEditItemModal = (item: InventoryItem) => {
-    setEditingItemId(item.id)
-    // Determine display unit from stored unit
-    const displayUnit = (item.unit as DisplayUnit) || 'pcs'
-    setFormData({
-      name: item.name,
-      category: item.category,
-      unit: item.unit,
-      displayUnit: displayUnit,
-      currentStock: (item.current_stock ?? 0) .toString(),
-      minStock: (item.min_stock ?? 0).toString(),
-      maxStock: (item.max_stock ?? 0).toString(),
-      dailyUsage: (item.daily_usage ?? 0).toString(),
-      unitCost: (item.unit_cost ?? 0).toString()
-    })
-    setIsEditItemModalOpen(true)
-  }
-
-  // INVENTORY FLOW: Edit item using upsert_inventory()
-  // Convert to base unit before saving (kg→gram, liter→ml)
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleEditItem = async () => {
-    if (!editingItemId || !formData.name || !formData.currentStock) return
-    setError("")
-    
-    // Convert display unit to base unit
-    const stockInBaseUnit = toBaseUnit(
-      parseFloat(formData.currentStock) || 0,
-      formData.displayUnit
-    )
-    
-    // Call upsert_inventory() with id means update
-    const result = await upsertInventory({
-      id: editingItemId || undefined,
-      name: formData.name,
-      category: formData.category,
-      unit: formData.displayUnit,
-      stock: stockInBaseUnit,
-      min_stock: parseFloat(formData.minStock) || 0,
-      max_stock: parseFloat(formData.maxStock) || 0,
-      daily_usage: parseFloat(formData.dailyUsage) || 0,
-      unit_cost: parseFloat(formData.unitCost) || 0
-    }, actorName)
-
-    
-    if (!result) {
-      setError("Failed to update inventory item")
-      return
-    }
-    
-    resetItemForm()
-    setEditingItemId(null)
-    setIsEditItemModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after edit
-    window.location.reload()
-  }
-
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleDeleteItem = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this inventory item?")) return
-    const result = await deleteInventoryItem(id)
-    // CORE RULE: REFRESH PAGE after delete
-    if (result) {
-      window.location.reload()
-    }
-  }
-
-  // STOCK IN FLOW: Create batch entry via addBatch()
-  // This is the ONLY entry point for adding stock
-  // addBatch() will: 1) Insert into inventory_batches, 2) Update inventory_items.stock, 3) Insert inventory_transaction
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleStockIn = async () => {
-    if (!stockInForm.itemId || !stockInForm.quantity || !stockInForm.unitCost || !stockInForm.supplierName || !stockInForm.expiredDate) return
-    setError("")
-    
-    const result = await addBatch({
-      item_id: stockInForm.itemId,
-      quantity: parseFloat(stockInForm.quantity) || 0,
-      unit: stockInForm.displayUnit,
-      unit_cost: parseFloat(stockInForm.unitCost) || 0,
-      supplier_name: stockInForm.supplierName,
-      received_date: stockInForm.receivedDate,
-      expired_date: stockInForm.expiredDate,
-      notes: stockInForm.notes || undefined
-    }, actorName)
-
-    
-    if (!result) {
-      setError("Failed to add stock")
-      return
-    }
-    
-    setStockInForm({ 
-      itemId: "", 
-      quantity: "", 
-      displayUnit: "pcs", 
-      unitCost: "",
-      supplierName: "",
-      receivedDate: new Date().toISOString().split("T")[0],
-      expiredDate: "",
-      notes: ""
-    })
-    setIsAddStockModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after stock in
-    window.location.reload()
-  }
-
-  // INVENTORY FLOW: Stock Out Manual - convert to base unit, call stock_out_manual()
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleStockOutManual = async () => {
-    if (!stockOutForm.itemId || !stockOutForm.quantity) return
-    setError("")
-    
-    // Convert to base unit before saving
-    const quantityInBaseUnit = toBaseUnit(
-      parseFloat(stockOutForm.quantity) || 0,
-      stockOutForm.displayUnit
-    )
-    
-    const result = await stockOutManual(
-      stockOutForm.itemId,
-      quantityInBaseUnit,
-      stockOutForm.reason || 'manual',
-      actorName
-    )
-
-    
-    if (!result) {
-      setError("Failed to remove stock")
-      return
-    }
-    
-    setStockOutForm({ itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
-    setIsStockOutModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after stock out
-    window.location.reload()
-  }
-
-  // ========== MENU ITEMS ==========
-  const filteredMenu = menuItems.filter((item) => {
-    const matchesSearch = (item.name || "").toLowerCase().includes(menuSearchQuery.toLowerCase())
-    const matchesCategory = selectedMenuCategory === "all" || item.category === selectedMenuCategory
-    return matchesSearch && matchesCategory
-  })
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      minimumFractionDigits: 0,
-    }).format(price)
+    setError(null)
   }
 
   const resetMenuForm = () => {
     setMenuForm({
+      id: "",
       name: "",
       category: "coffee",
       price: "",
       ingredients: []
     })
+    setError(null)
   }
 
+  const handleAddItem = async () => {
+    if (!formData.name || !formData.currentStock) return
+    
+    try {
+      const baseStock = toBaseUnit(parseFloat(formData.currentStock), formData.displayUnit)
+      const baseDaily = toBaseUnit(parseFloat(formData.dailyUsage || "0"), formData.displayUnit)
+      const baseMin = toBaseUnit(parseFloat(formData.minStock || "0"), formData.displayUnit)
+      const baseMax = toBaseUnit(parseFloat(formData.maxStock || "0"), formData.displayUnit)
+      
+      await upsertInventory({
+        name: formData.name,
+        category: formData.category,
+        unit: formData.unit,
+        stock: baseStock,
+        daily_usage: baseDaily,
+        min_stock: baseMin,
+        max_stock: baseMax,
+        unit_cost: parseFloat(formData.unitCost || "0"),
+        last_updated: new Date().toISOString()
+      } as any)
+      
+      setIsAddItemModalOpen(false)
+      resetItemForm()
+      fetchData()
+    } catch (err) {
+      setError("Failed to add inventory item")
+    }
+  }
+
+  const handleEditItem = async () => {
+    if (!formData.id || !formData.name || !formData.currentStock) return
+    
+    try {
+      const baseStock = toBaseUnit(parseFloat(formData.currentStock), formData.displayUnit)
+      const baseDaily = toBaseUnit(parseFloat(formData.dailyUsage || "0"), formData.displayUnit)
+      const baseMin = toBaseUnit(parseFloat(formData.minStock || "0"), formData.displayUnit)
+      const baseMax = toBaseUnit(parseFloat(formData.maxStock || "0"), formData.displayUnit)
+
+      await upsertInventory({
+        id: formData.id,
+        name: formData.name,
+        category: formData.category,
+        unit: formData.unit,
+        stock: baseStock,
+        daily_usage: baseDaily,
+        min_stock: baseMin,
+        max_stock: baseMax,
+        unit_cost: parseFloat(formData.unitCost || "0"),
+        last_updated: new Date().toISOString()
+      } as any)
+      
+      setIsEditItemModalOpen(false)
+      resetItemForm()
+      fetchData()
+    } catch (err) {
+      setError("Failed to update inventory item")
+    }
+  }
+
+  const openEditItemModal = (item: InventoryItem) => {
+    const dUnit = getDefaultDisplayUnit(item.unit)
+    setFormData({
+      id: item.id,
+      name: item.name,
+      category: item.category as any,
+      unit: item.unit,
+      displayUnit: dUnit,
+      currentStock: fromBaseUnit(item.stock || 0, dUnit).toString(),
+      dailyUsage: fromBaseUnit(item.daily_usage || 0, dUnit).toString(),
+      minStock: fromBaseUnit(item.min_stock || 0, dUnit).toString(),
+      maxStock: fromBaseUnit(item.max_stock || 0, dUnit).toString(),
+      unitCost: (item.unit_cost || 0).toString()
+    })
+    setIsEditItemModalOpen(true)
+  }
+
+  const handleDeleteItem = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this item? This will also affect existing recipes.")) return
+    try {
+      await deleteInventoryItem(id)
+      fetchData()
+    } catch (err) {
+      setError("Failed to delete item")
+    }
+  }
+
+  // Stock In (Purchase/Stock Add)
+  const handleStockIn = async () => {
+    if (!stockInForm.itemId || !stockInForm.quantity || !stockInForm.unitCost) return
+    
+    try {
+      const baseQty = toBaseUnit(parseFloat(stockInForm.quantity), stockInForm.displayUnit)
+      
+      await addBatch({
+        item_id: stockInForm.itemId,
+        quantity: baseQty,
+        unit: stockInForm.displayUnit,
+        unit_cost: parseFloat(stockInForm.unitCost),
+        supplier_name: stockInForm.supplierName,
+        received_date: stockInForm.receivedDate,
+        expired_date: stockInForm.expiredDate,
+        notes: stockInForm.notes
+      }, actorName)
+      
+      setIsAddStockModalOpen(false)
+      setStockInForm({ 
+        itemId: "", 
+        quantity: "", 
+        displayUnit: "pcs", 
+        unitCost: "", 
+        supplierName: "", 
+        receivedDate: new Date().toISOString().split("T")[0], 
+        expiredDate: "", 
+        notes: "" 
+      })
+      fetchData()
+    } catch (err) {
+      setError("Failed to add stock")
+    }
+  }
+
+  // Stock Out (Manual Waste/Damage)
+  const handleStockOutManual = async () => {
+    if (!stockOutForm.itemId || !stockOutForm.quantity) return
+    
+    try {
+      const baseQty = toBaseUnit(parseFloat(stockOutForm.quantity), stockOutForm.displayUnit)
+      
+      await stockOutManual(
+        stockOutForm.itemId,
+        baseQty,
+        stockOutForm.reason,
+        actorName
+      )
+      
+      setIsStockOutModalOpen(false)
+      setStockOutForm({ itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
+      fetchData()
+    } catch (err) {
+      setError("Failed to remove stock")
+    }
+  }
+
+  // Menu Handling
   const addIngredientRow = () => {
     setMenuForm(prev => ({
       ...prev,
-      ingredients: [...prev.ingredients, { inventory_item_id: "", quantity: 0 }]
+      ingredients: [...prev.ingredients, { inventory_item_id: "", quantity: 0, unit: "pcs" as DisplayUnit }]
     }))
   }
 
@@ -452,99 +441,185 @@ export default function InventoryPage() {
     }))
   }
 
-  const updateIngredient = (index: number, field: keyof MenuRecipeIngredient, value: string | number) => {
+  const updateIngredient = (index: number, field: string, value: any) => {
     setMenuForm(prev => {
-      const updated = [...prev.ingredients]
-      if (field === "inventory_item_id") {
-        updated[index].inventory_item_id = value as string
+      const newIngredients = [...prev.ingredients]
+      if (field === 'inventory_item_id') {
+        const item = inventory.find(i => i.id === value)
+        newIngredients[index] = { 
+          ...newIngredients[index], 
+          [field]: value,
+          unit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' as DisplayUnit
+        }
       } else {
-        updated[index].quantity = typeof value === "string" ? parseFloat(value) || 0 : value
+        newIngredients[index] = { ...newIngredients[index], [field]: value }
       }
-      return { ...prev, ingredients: updated }
+      return { ...prev, ingredients: newIngredients }
     })
   }
 
-  // MENU FLOW: Add Menu with ingredients (quantity MUST be in base unit)
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
+  const toggleIngredientUnit = (index: number) => {
+    setMenuForm(prev => {
+      const newIngredients = [...prev.ingredients];
+      const currentUnit = newIngredients[index].unit;
+      const currentQty = newIngredients[index].quantity || 0;
+      
+      if (currentUnit === 'gram') {
+        newIngredients[index].unit = 'kg' as DisplayUnit;
+        newIngredients[index].quantity = currentQty / 1000;
+      } else if (currentUnit === 'kg') {
+        newIngredients[index].unit = 'gram' as DisplayUnit;
+        newIngredients[index].quantity = currentQty * 1000;
+      } else if (currentUnit === 'ml') {
+        newIngredients[index].unit = 'liter' as DisplayUnit;
+        newIngredients[index].quantity = currentQty / 1000;
+      } else if (currentUnit === 'liter') {
+        newIngredients[index].unit = 'ml' as DisplayUnit;
+        newIngredients[index].quantity = currentQty * 1000;
+      }
+      return { ...prev, ingredients: newIngredients };
+    });
+  };
+
   const handleAddMenu = async () => {
     if (!menuForm.name || !menuForm.price) return
-    setError("")
-    
-    // Step 1: Insert into menu_items
-    const menuResult = await addMenuItem({
-      name: menuForm.name,
-      type: menuForm.category,
-      category: menuForm.category,
-      price: parseInt(menuForm.price, 10)
-    })
-    
-    if (!menuResult) {
+    try {
+      const menuId = await addMenuItem({
+        name: menuForm.name,
+        type: menuForm.category,
+        price: parseFloat(menuForm.price),
+        status: 'active'
+      })
+      
+      if (menuId && menuForm.ingredients.length > 0) {
+        // Convert quantities to base unit (g/ml) for DB
+        const baseIngredients = menuForm.ingredients.map(ing => ({
+          inventory_item_id: ing.inventory_item_id,
+          quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit)
+        }))
+        await saveMenuRecipes(menuId, baseIngredients)
+      }
+      
+      setIsAddMenuModalOpen(false)
+      resetMenuForm()
+      fetchData()
+    } catch (err) {
       setError("Failed to add menu item")
-      return
     }
-    
-    // Step 2: Insert into menu_recipes (ingredient quantity in base unit)
-    const validIngredients = menuForm.ingredients.filter(ing => ing.inventory_item_id && ing.quantity > 0)
-    if (validIngredients.length > 0) {
-      await saveMenuRecipes(menuResult.id, validIngredients)
-    }
-    
-    resetMenuForm()
-    setIsAddMenuModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after menu add
-    window.location.reload()
   }
 
-  const openEditMenuModal = async (item: MenuItem) => {
-    setEditingMenuId(item.id)
-    const recipes = await getMenuRecipes(item.id)
+  const handleEditMenu = async () => {
+    if (!menuForm.id || !menuForm.name || !menuForm.price) return
+    try {
+      await updateMenuItem(menuForm.id, {
+        name: menuForm.name,
+        type: menuForm.category,
+        price: parseFloat(menuForm.price)
+      })
+      
+      const baseIngredients = menuForm.ingredients.map(ing => ({
+        inventory_item_id: ing.inventory_item_id,
+        quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit)
+      }))
+      await saveMenuRecipes(menuForm.id, baseIngredients)
+      
+      setIsEditMenuModalOpen(false)
+      resetMenuForm()
+      fetchData()
+    } catch (err) {
+      setError("Failed to update menu item")
+    }
+  }
+
+  const openEditMenuModal = (item: MenuItem) => {
     setMenuForm({
+      id: item.id,
       name: item.name,
-      category: (item.category as any) || (item.type as any) || "coffee",
+      category: (item.type || item.category) as any,
       price: item.price.toString(),
-      ingredients: recipes
+      ingredients: (item.recipe?.ingredients || []).map(ing => {
+        const invItem = inventory.find(i => i.id === ing.inventory_item_id)
+        const dUnit = getDefaultDisplayUnit(invItem?.unit || 'pcs')
+        return {
+          inventory_item_id: ing.inventory_item_id,
+          quantity: fromBaseUnit(ing.quantity, dUnit),
+          unit: dUnit as DisplayUnit
+        }
+      })
     })
     setIsEditMenuModalOpen(true)
   }
 
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleEditMenu = async () => {
-    if (!editingMenuId || !menuForm.name || !menuForm.price) return
-    setError("")
-    
-    // Update menu_items
-    const result = await updateMenuItem(editingMenuId, {
-      name: menuForm.name,
-      category: menuForm.category,
-      price: parseInt(menuForm.price, 10)
-    })
-    
-    if (!result) {
-      setError("Failed to update menu item")
-      return
-    }
-    
-    // Update menu_recipes (ingredient quantity in base unit)
-    const validIngredients = menuForm.ingredients.filter(ing => ing.inventory_item_id && ing.quantity > 0)
-    await saveMenuRecipes(editingMenuId, validIngredients)
-    
-    resetMenuForm()
-    setEditingMenuId(null)
-    setIsEditMenuModalOpen(false)
-    
-    // CORE RULE: REFRESH PAGE after menu edit
-    window.location.reload()
-  }
-
-  // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
   const handleDeleteMenu = async (id: string) => {
     if (!confirm("Are you sure you want to delete this menu item?")) return
-    const result = await deleteMenuItem(id)
-    // CORE RULE: REFRESH PAGE after menu delete
-    if (result) {
-      window.location.reload()
+    try {
+      await deleteMenuItem(id)
+      fetchData()
+    } catch (err) {
+      setError("Failed to delete menu item")
     }
+  }
+
+  // Monthly Opex / BOP Handling
+  const handleAddOpex = async () => {
+    if (!opexForm.amount) return
+    try {
+      let attachmentUrl = undefined
+      if (opexFile) {
+        attachmentUrl = await uploadOpexAttachment(opexFile) || undefined
+      }
+
+      await addMonthlyOpex({
+        month: opexForm.month,
+        category: opexForm.category,
+        amount: parseFloat(opexForm.amount),
+        notes: opexForm.notes,
+        attachment_url: attachmentUrl
+      })
+      
+      setIsAddOpexModalOpen(false)
+      setOpexForm({ ...opexForm, amount: "", notes: "" })
+      setOpexFile(null)
+      fetchData()
+    } catch (err) {
+      setError("Failed to add operational expense")
+    }
+  }
+
+  // Stock Opname Handling
+  const handleAddOpname = async () => {
+    if (!opnameForm.itemId || !opnameForm.actualStock) return
+    
+    try {
+      const item = inventory.find(i => i.id === opnameForm.itemId)
+      if (!item) return
+      
+      const theoretical = item.stock || 0
+      const actual = toBaseUnit(parseFloat(opnameForm.actualStock), opnameForm.displayUnit)
+      
+      await addInventoryOpname({
+        item_id: opnameForm.itemId,
+        theoretical_stock: theoretical,
+        actual_stock: actual,
+        difference: actual - theoretical,
+        reason: opnameForm.reason,
+        actor_name: actorName
+      })
+      
+      setIsRecordOpnameModalOpen(false)
+      setOpnameForm({ itemId: "", actualStock: "", displayUnit: "pcs", reason: "" })
+      fetchData()
+    } catch (err) {
+      setError("Failed to record stock opname")
+    }
+  }
+
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0
+    }).format(price)
   }
 
   if (isLoading) {
@@ -574,11 +649,17 @@ export default function InventoryPage() {
             <Coffee className="w-4 h-4" />
             Menu Items
           </TabsTrigger>
+          <TabsTrigger value="overheads" className="gap-2">
+            <Calculator className="w-4 h-4" />
+            Overheads (BOP)
+          </TabsTrigger>
+          <TabsTrigger value="opname" className="gap-2">
+            <ClipboardCheck className="w-4 h-4" />
+            Stock Take (Opname)
+          </TabsTrigger>
         </TabsList>
 
-        {/* ========== RAW MATERIALS TAB ========== */}
         <TabsContent value="raw-materials">
-          {/* Header Actions */}
           {canEdit && (
             <div className="flex gap-2 mb-6">
               <Button className="rounded-sm" onClick={() => { setStockInForm({ itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
@@ -596,7 +677,6 @@ export default function InventoryPage() {
             </div>
           )}
 
-          {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -626,7 +706,6 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          {/* Inventory Table */}
           <Card className="rounded-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -654,30 +733,20 @@ export default function InventoryPage() {
                       const daysRemaining = getDaysRemaining(item)
 
                       return (
-                        <tr 
-                          key={item.id} 
-                          className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors"
-                        >
-                          <td className="py-4 px-4">
-                            <span className="font-medium">{item.name}</span>
-                          </td>
-                          <td className="py-4 px-4">
-                            <span className="text-sm text-muted-foreground capitalize">{item.category}</span>
-                          </td>
+                        <tr key={item.id} className="border-b border-border hover:bg-muted/50 transition-colors">
+                          <td className="py-4 px-4"><span className="font-medium">{item.name}</span></td>
+                          <td className="py-4 px-4 text-sm text-muted-foreground capitalize">{item.category}</td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {item.current_stock} {item.unit}
+                            {parseFloat(fromBaseUnit(item.stock ?? 0, (item.unit as DisplayUnit) || 'pcs').toFixed(4))} {item.unit}
                           </td>
                           <td className="py-4 px-4 text-right font-mono text-muted-foreground">
-                            {item.daily_usage} {item.unit}/day
+                            {parseFloat(fromBaseUnit(item.daily_usage ?? 0, (item.unit as DisplayUnit) || 'pcs').toFixed(4))} {item.unit}/day
                           </td>
-                          <td className="py-4 px-4 text-right font-mono">
-                            {daysRemaining}
-                          </td>
+                          <td className="py-4 px-4 text-right font-mono">{daysRemaining}</td>
                           <td className="py-4 px-4 text-center">
-                            <span className={cn(
-                              "inline-block px-3 py-1 rounded-sm text-xs font-medium capitalize",
-                              getHealthBadge(health)
-                            )}>
+                            <span className={cn("inline-block px-3 py-1 rounded-sm text-xs font-medium capitalize", 
+                              health === 'critical' ? 'bg-destructive/10 text-destructive' : 
+                              health === 'warning' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500')}>
                               {health}
                             </span>
                           </td>
@@ -685,27 +754,14 @@ export default function InventoryPage() {
                             {canEdit ? (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <button className="p-1 hover:bg-muted rounded-sm">
-                                    <MoreVertical className="w-4 h-4" />
-                                  </button>
+                                  <button className="p-1 hover:bg-muted rounded-sm"><MoreVertical className="w-4 h-4" /></button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="rounded-sm">
-                                  <DropdownMenuItem onClick={() => openEditItemModal(item)}>
-                                    <Pencil className="w-4 h-4 mr-2" />
-                                    Edit
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    className="text-destructive"
-                                    onClick={() => handleDeleteItem(item.id)}
-                                  >
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Delete
-                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openEditItemModal(item)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
+                                  <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteItem(item.id)}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
+                            ) : <span>-</span>}
                           </td>
                         </tr>
                       )
@@ -717,50 +773,31 @@ export default function InventoryPage() {
           </Card>
         </TabsContent>
 
-        {/* ========== MENU ITEMS TAB ========== */}
         <TabsContent value="menu-items">
-          {/* Header Actions - Setup Only (no sales) */}
           {canEdit && (
             <div className="flex gap-2 mb-6">
               <Button className="rounded-sm" onClick={() => { resetMenuForm(); setIsAddMenuModalOpen(true); }}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Menu
+                <Plus className="w-4 h-4 mr-2" />Add Menu
               </Button>
             </div>
           )}
 
-          {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search menu..."
-                value={menuSearchQuery}
-                onChange={(e) => setMenuSearchQuery(e.target.value)}
-                className="pl-9 rounded-sm"
-              />
+              <Input placeholder="Search menu..." value={menuSearchQuery} onChange={(e) => setMenuSearchQuery(e.target.value)} className="pl-9 rounded-sm" />
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0">
+            <div className="flex items-center gap-2 overflow-x-auto">
               <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
               {menuCategories.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setSelectedMenuCategory(category)}
-                  className={cn(
-                    "px-4 py-1.5 rounded-sm text-sm capitalize whitespace-nowrap transition-colors",
-                    selectedMenuCategory === category
-                      ? "bg-foreground text-background"
-                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                  )}
-                >
-                  {category === "non-coffee" ? "Non-Coffee" : category}
+                <button key={category} onClick={() => setSelectedMenuCategory(category)} className={cn("px-4 py-1.5 rounded-sm text-sm capitalize transition-colors", selectedMenuCategory === category ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground")}>
+                  {category}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Menu Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[calc(100vh-450px)] overflow-y-auto pb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredMenu.map((item) => (
               <Card key={item.id} className="rounded-sm">
                 <CardHeader>
@@ -772,862 +809,248 @@ export default function InventoryPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-lg font-medium">{formatPrice(item.price)}</span>
                       {canEdit && (
-                        <>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8"
-                            onClick={() => openEditMenuModal(item)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8 text-destructive"
-                            onClick={() => handleDeleteMenu(item.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditMenuModal(item)}><Pencil className="w-4 h-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteMenu(item.id)}><Trash2 className="w-4 h-4" /></Button>
+                        </div>
                       )}
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {item.recipe && item.recipe.ingredients.length > 0 ? (
-                    <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-                        Recipe
-                      </p>
-                      <ul className="space-y-1">
-                        {item.recipe.ingredients.map((ing, idx) => {
-                          const invItem = inventory.find((i) => i.id === ing.item_id)
-                          return (
-                            <li key={idx} className="text-sm flex justify-between">
-                              <span>{invItem?.name || "Unknown"}</span>
-                              <span className="text-muted-foreground font-mono">
-                                {ing.amount} {invItem?.unit}
-                              </span>
-                            </li>
-                          )
-                        })}
-                      </ul>
+                  <div className="p-3 bg-secondary/20 rounded-sm border border-border">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">COGS Breakdown</span>
+                      <span className="text-xs font-mono text-primary font-bold">
+                        {formatPrice(
+                          (item.recipe?.ingredients?.reduce((acc: number, ing: MenuRecipeIngredient) => {
+                            const invItem = inventory.find(i => i.id === ing.inventory_item_id);
+                            return acc + (invItem?.unit_cost || 0) * ing.quantity;
+                          }, 0) || 0)
+                        )}
+                      </span>
                     </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No recipe defined</p>
-                  )}
+                    <div className="space-y-1">
+                      {item.recipe && item.recipe.ingredients.length > 0 ? (
+                        item.recipe.ingredients.map((ing: MenuRecipeIngredient, idx: number) => {
+                          const invItem = inventory.find(i => i.id === ing.inventory_item_id);
+                          return (
+                            <div key={idx} className="flex justify-between text-[11px]">
+                              <span className="text-muted-foreground">{invItem?.name || "Unknown"} ({ing.quantity} {ing.unit || invItem?.unit})</span>
+                              <span className="font-mono">{formatPrice((invItem?.unit_cost || 0) * ing.quantity)}</span>
+                            </div>
+                          );
+                        })
+                      ) : <div className="text-[11px] text-muted-foreground italic">No ingredients defined</div>}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
+        </TabsContent>
 
-          {filteredMenu.length === 0 && (
-            <div className="text-center py-12">
-              <Coffee className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No menu items found</p>
-            </div>
-          )}
+        <TabsContent value="overheads">
+          <div className="flex justify-between items-center mb-6">
+            <Button className="rounded-sm" onClick={() => setIsAddOpexModalOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />Add Overhead
+            </Button>
+            <Card className="bg-secondary/20 border-none">
+              <CardContent className="p-4 flex items-center gap-4">
+                <Calculator className="w-5 h-5" />
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">Total Monthly BOP</p>
+                  <p className="text-xl font-mono font-bold">{formatPrice(monthlyOpex.reduce((sum, item) => sum + (item.amount || 0), 0))}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-          {/* Note: Sales functionality moved to Report page */}
-          <p className="text-sm text-muted-foreground mt-6 text-center">
-            To record sales, go to the Report page.
-          </p>
+          <Card className="rounded-sm">
+            <CardHeader><CardTitle>Operational Expense Logs</CardTitle></CardHeader>
+            <CardContent>
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Date</th>
+                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Category</th>
+                    <th className="text-right py-3 px-4 text-sm text-muted-foreground">Amount</th>
+                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Notes/Receipt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyOpex.map((opex) => (
+                    <tr key={opex.id} className="border-b border-border">
+                      <td className="py-4 px-4 text-xs">{new Date(opex.created_at).toLocaleDateString()}</td>
+                      <td className="py-4 px-4"><span className="px-2 py-1 bg-secondary rounded text-[10px] uppercase">{opex.category}</span></td>
+                      <td className="py-4 px-4 text-right font-mono">{formatPrice(opex.amount)}</td>
+                      <td className="py-4 px-4">
+                        <div className="flex flex-col gap-1">
+                          {opex.notes && <span className="text-xs">{opex.notes}</span>}
+                          {opex.attachment_url && <a href={opex.attachment_url} target="_blank" rel="noreferrer" className="text-[10px] text-primary hover:underline flex items-center gap-1"><ImageIcon className="w-3 h-3"/>View Receipt</a>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="opname">
+          <div className="flex justify-between items-center mb-6">
+            <Button className="rounded-sm" onClick={() => setIsRecordOpnameModalOpen(true)}>
+              <ClipboardCheck className="w-4 h-4 mr-2" />Start New Opname
+            </Button>
+          </div>
+
+          <Card className="rounded-sm">
+            <CardHeader><CardTitle className="flex items-center gap-2"><History className="w-5 h-5"/>History</CardTitle></CardHeader>
+            <CardContent>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-3 px-4 text-muted-foreground">Date</th>
+                    <th className="text-left py-3 px-4 text-muted-foreground">Item</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">System</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Actual</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Waste</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {opnameHistory.map((opname) => {
+                    const item = inventory.find(i => i.id === opname.item_id);
+                    const unit = (item?.unit as DisplayUnit) || 'pcs';
+                    return (
+                      <tr key={opname.id} className="border-b border-border">
+                        <td className="py-4 px-4 text-xs">{new Date(opname.created_at).toLocaleString()}</td>
+                        <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
+                        <td className="py-4 px-4 text-right font-mono">{parseFloat(fromBaseUnit(opname.theoretical_stock, unit).toFixed(4))} {unit}</td>
+                        <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(fromBaseUnit(opname.actual_stock, unit).toFixed(4))} {unit}</td>
+                        <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
+                          {opname.difference > 0 ? '+' : ''}{parseFloat(fromBaseUnit(opname.difference, unit).toFixed(4))} {unit}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
       {/* ========== MODALS ========== */}
-
-      {/* Add Inventory Item Modal */}
-      <Dialog open={isAddItemModalOpen} onOpenChange={setIsAddItemModalOpen}>
+      
+      {/* Add/Edit Item Modal */}
+      <Dialog open={isAddItemModalOpen || isEditItemModalOpen} onOpenChange={(open) => { if (!open) { setIsAddItemModalOpen(false); setIsEditItemModalOpen(false); resetItemForm(); }}}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Add Inventory Item</DialogTitle>
-            <DialogDescription>
-              Add a new raw material to your inventory.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <div className="grid gap-2">
-              <Label htmlFor="name">Item Name *</Label>
-              <Input
-                id="name"
-                placeholder="e.g. Coffee Beans"
-                value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-            
+          <DialogHeader><DialogTitle>{isEditItemModalOpen ? "Edit" : "Add"} Inventory Item</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Input placeholder="Item Name" value={formData.name} onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))} />
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="category">Category *</Label>
-                <Select 
-                  value={formData.category} 
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, category: v as typeof formData.category }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categoryOptions.map((cat) => (
-                      <SelectItem key={cat} value={cat} className="capitalize">
-                        {cat}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="unit">Unit *</Label>
-                <Select 
-                  value={formData.unit} 
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, unit: v }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {unitOptions.map((unit) => (
-                      <SelectItem key={unit} value={unit}>
-                        {unit}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <Select value={formData.category} onValueChange={(v) => setFormData(p => ({ ...p, category: v as any }))}>
+                <SelectTrigger><SelectValue placeholder="Category"/></SelectTrigger>
+                <SelectContent>{categoryOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
+              <Select value={formData.displayUnit} onValueChange={(v) => setFormData(p => ({ ...p, unit: v, displayUnit: v as DisplayUnit }))}>
+                <SelectTrigger><SelectValue/></SelectTrigger>
+                <SelectContent>{unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="currentStock">Initial Stock *</Label>
-                <Input
-                  id="currentStock"
-                  type="number"
-                  placeholder="e.g. 10"
-                  value={formData.currentStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, currentStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="dailyUsage">Daily Usage</Label>
-                <Input
-                  id="dailyUsage"
-                  type="number"
-                  placeholder="e.g. 5"
-                  value={formData.dailyUsage}
-                  onChange={(e) => setFormData(prev => ({ ...prev, dailyUsage: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="minStock">Min Stock</Label>
-                <Input
-                  id="minStock"
-                  type="number"
-                  placeholder="e.g. 3"
-                  value={formData.minStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, minStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="maxStock">Max Stock</Label>
-                <Input
-                  id="maxStock"
-                  type="number"
-                  placeholder="e.g. 30"
-                  value={formData.maxStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, maxStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="unitCost">Unit Cost (IDR)</Label>
-              <Input
-                id="unitCost"
-                type="number"
-                placeholder="e.g. 15000"
-                value={formData.unitCost}
-                onChange={(e) => setFormData(prev => ({ ...prev, unitCost: e.target.value }))}
-                className="rounded-sm"
-              />
+              <Input type="number" placeholder="Stock" value={formData.currentStock} onChange={(e) => setFormData(p => ({...p, currentStock: e.target.value}))} />
+              <Input type="number" placeholder="Unit Cost" value={formData.unitCost} onChange={(e) => setFormData(p => ({...p, unitCost: e.target.value}))} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddItemModalOpen(false)} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleAddItem} 
-              disabled={!formData.name || !formData.currentStock}
-              className="rounded-sm"
-            >
-              Add Item
-            </Button>
+            <Button onClick={isEditItemModalOpen ? handleEditItem : handleAddItem}>{isEditItemModalOpen ? "Save" : "Add"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Edit Inventory Item Modal */}
-      <Dialog open={isEditItemModalOpen} onOpenChange={setIsEditItemModalOpen}>
-        <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Edit Inventory Item</DialogTitle>
-            <DialogDescription>
-              Update the inventory item details.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-name">Item Name *</Label>
-              <Input
-                id="edit-name"
-                placeholder="e.g. Coffee Beans"
-                value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-category">Category *</Label>
-                <Select 
-                  value={formData.category} 
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, category: v as typeof formData.category }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categoryOptions.map((cat) => (
-                      <SelectItem key={cat} value={cat} className="capitalize">
-                        {cat}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="edit-unit">Unit *</Label>
-                <Select 
-                  value={formData.unit} 
-                  onValueChange={(v) => setFormData(prev => ({ ...prev, unit: v }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {unitOptions.map((unit) => (
-                      <SelectItem key={unit} value={unit}>
-                        {unit}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-currentStock">Current Stock *</Label>
-                <Input
-                  id="edit-currentStock"
-                  type="number"
-                  placeholder="e.g. 10"
-                  value={formData.currentStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, currentStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="edit-dailyUsage">Daily Usage</Label>
-                <Input
-                  id="edit-dailyUsage"
-                  type="number"
-                  placeholder="e.g. 5"
-                  value={formData.dailyUsage}
-                  onChange={(e) => setFormData(prev => ({ ...prev, dailyUsage: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-minStock">Min Stock</Label>
-                <Input
-                  id="edit-minStock"
-                  type="number"
-                  placeholder="e.g. 3"
-                  value={formData.minStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, minStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="edit-maxStock">Max Stock</Label>
-                <Input
-                  id="edit-maxStock"
-                  type="number"
-                  placeholder="e.g. 30"
-                  value={formData.maxStock}
-                  onChange={(e) => setFormData(prev => ({ ...prev, maxStock: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="edit-unitCost">Unit Cost (IDR)</Label>
-              <Input
-                id="edit-unitCost"
-                type="number"
-                placeholder="e.g. 15000"
-                value={formData.unitCost}
-                onChange={(e) => setFormData(prev => ({ ...prev, unitCost: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsEditItemModalOpen(false); resetItemForm(); }} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleEditItem} 
-              disabled={!formData.name || !formData.currentStock}
-              className="rounded-sm"
-            >
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Stock In Modal - MAIN ENTRY POINT FOR ADDING STOCK */}
-      {/* Creates batch entry via addBatch() - auto-generates batch number */}
+      
+      {/* Stock In Modal */}
       <Dialog open={isAddStockModalOpen} onOpenChange={setIsAddStockModalOpen}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Stock In</DialogTitle>
-            <DialogDescription>
-              Add new stock to inventory. This creates a batch entry with auto-generated batch number.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <div className="grid gap-2">
-              <Label htmlFor="stockin-item">Item *</Label>
-              <Select 
-                value={stockInForm.itemId} 
-                onValueChange={(v) => {
-                  // When item is selected, auto-set the display unit based on inventory item's unit
-                  const selectedItem = inventory.find(i => i.id === v)
-                  const defaultUnit = selectedItem ? getDefaultDisplayUnit(selectedItem.unit) : 'pcs'
-                  setStockInForm(prev => ({ ...prev, itemId: v, displayUnit: defaultUnit }))
-                }}
-              >
-                <SelectTrigger className="rounded-sm">
-                  <SelectValue placeholder="Select item" />
-                </SelectTrigger>
-                <SelectContent>
-                  {inventory.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name} ({item.current_stock} {item.unit})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-2">
-                <Label htmlFor="stockin-quantity">Quantity *</Label>
-                <Input
-                  id="stockin-quantity"
-                  type="number"
-                  placeholder="e.g. 10"
-                  value={stockInForm.quantity}
-                  onChange={(e) => setStockInForm(prev => ({ ...prev, quantity: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              {/* Unit dropdown - only show allowed units based on selected item */}
-              <div className="grid gap-2">
-                <Label htmlFor="stockin-unit">Unit</Label>
-                {(() => {
-                  const selectedItem = inventory.find(i => i.id === stockInForm.itemId)
-                  const allowedUnits = selectedItem ? getAllowedUnitsForItem(selectedItem.unit) : ['pcs']
-                  return (
-                    <Select 
-                      value={stockInForm.displayUnit} 
-                      onValueChange={(v) => setStockInForm(prev => ({ ...prev, displayUnit: v as DisplayUnit }))}
-                      disabled={!stockInForm.itemId}
-                    >
-                      <SelectTrigger className="rounded-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allowedUnits.map((unit) => (
-                          <SelectItem key={unit} value={unit}>
-                            {unit}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )
-                })()}
-              </div>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label htmlFor="stockin-unitcost">Unit Cost (IDR) *</Label>
-              <Input
-                id="stockin-unitcost"
-                type="number"
-                placeholder="e.g. 15000"
-                value={stockInForm.unitCost}
-                onChange={(e) => setStockInForm(prev => ({ ...prev, unitCost: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="stockin-supplier">Supplier Name *</Label>
-              <Input
-                id="stockin-supplier"
-                placeholder="e.g. PT Supplier Indonesia"
-                value={stockInForm.supplierName}
-                onChange={(e) => setStockInForm(prev => ({ ...prev, supplierName: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-2">
-                <Label htmlFor="stockin-received">Received Date *</Label>
-                <Input
-                  id="stockin-received"
-                  type="date"
-                  value={stockInForm.receivedDate}
-                  onChange={(e) => setStockInForm(prev => ({ ...prev, receivedDate: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="stockin-expired">Expired Date *</Label>
-                <Input
-                  id="stockin-expired"
-                  type="date"
-                  value={stockInForm.expiredDate}
-                  onChange={(e) => setStockInForm(prev => ({ ...prev, expiredDate: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="stockin-notes">Notes</Label>
-              <Textarea
-                id="stockin-notes"
-                placeholder="Optional notes..."
-                value={stockInForm.notes}
-                onChange={(e) => setStockInForm(prev => ({ ...prev, notes: e.target.value }))}
-                className="rounded-sm"
-                rows={2}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddStockModalOpen(false)} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleStockIn} 
-              disabled={!stockInForm.itemId || !stockInForm.quantity || !stockInForm.unitCost || !stockInForm.supplierName || !stockInForm.expiredDate}
-              className="rounded-sm"
-            >
-              Stock In
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Stock Out Manual Modal */}
-      <Dialog open={isStockOutModalOpen} onOpenChange={setIsStockOutModalOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Stock Out (Manual)</DialogTitle>
-            <DialogDescription>
-              Remove stock manually (waste, damage, etc). Converts to base unit.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
+          <DialogHeader><DialogTitle>Stock In</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="stockout-item">Item *</Label>
-              <Select 
-                value={stockOutForm.itemId} 
-                onValueChange={(v) => {
-                  // When item is selected, auto-set the display unit based on inventory item's unit
-                  const selectedItem = inventory.find(i => i.id === v)
-                  const defaultUnit = selectedItem ? getDefaultDisplayUnit(selectedItem.unit) : 'pcs'
-                  setStockOutForm(prev => ({ ...prev, itemId: v, displayUnit: defaultUnit }))
-                }}
-              >
-                <SelectTrigger className="rounded-sm">
-                  <SelectValue placeholder="Select item" />
-                </SelectTrigger>
-                <SelectContent>
-                  {inventory.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name} ({item.current_stock} {item.unit})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-2">
-                <Label htmlFor="stockout-quantity">Quantity *</Label>
-                <Input
-                  id="stockout-quantity"
-                  type="number"
-                  placeholder="e.g. 5"
-                  value={stockOutForm.quantity}
-                  onChange={(e) => setStockOutForm(prev => ({ ...prev, quantity: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-              {/* Unit dropdown - only show allowed units based on selected item */}
-              <div className="grid gap-2">
-                <Label htmlFor="stockout-unit">Unit</Label>
-                {(() => {
-                  const selectedItem = inventory.find(i => i.id === stockOutForm.itemId)
-                  const allowedUnits = selectedItem ? getAllowedUnitsForItem(selectedItem.unit) : ['pcs']
-                  return (
-                    <Select 
-                      value={stockOutForm.displayUnit} 
-                      onValueChange={(v) => setStockOutForm(prev => ({ ...prev, displayUnit: v as DisplayUnit }))}
-                      disabled={!stockOutForm.itemId}
-                    >
-                      <SelectTrigger className="rounded-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allowedUnits.map((unit) => (
-                          <SelectItem key={unit} value={unit}>
-                            {unit}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )
-                })()}
-              </div>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label htmlFor="stockout-reason">Reason</Label>
-              <Select 
-                value={stockOutForm.reason} 
-                onValueChange={(v) => setStockOutForm(prev => ({ ...prev, reason: v }))}
-              >
-                <SelectTrigger className="rounded-sm">
-                  <SelectValue placeholder="Select reason" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="waste">Waste</SelectItem>
-                  <SelectItem value="damage">Damage</SelectItem>
-                  <SelectItem value="expired">Expired</SelectItem>
-                  <SelectItem value="adjustment">Stock Adjustment</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <Select value={stockInForm.itemId} onValueChange={(v) => {
+              const item = inventory.find(i => i.id === v);
+              setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+            }}>
+              <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
+              <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="number" placeholder="Quantity" value={stockInForm.quantity} onChange={(e) => setStockInForm(p => ({ ...p, quantity: e.target.value }))} />
+            <Input placeholder="Supplier" value={stockInForm.supplierName} onChange={(e) => setStockInForm(p => ({ ...p, supplierName: e.target.value }))} />
+            <Input type="date" value={stockInForm.expiredDate} onChange={(e) => setStockInForm(p => ({ ...p, expiredDate: e.target.value }))} />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsStockOutModalOpen(false)} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleStockOutManual} 
-              disabled={!stockOutForm.itemId || !stockOutForm.quantity}
-              className="rounded-sm"
-              variant="destructive"
-            >
-              Remove Stock
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleStockIn}>Stock In</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add Menu Modal - FLOW 1 (with ingredients) */}
-      <Dialog open={isAddMenuModalOpen} onOpenChange={setIsAddMenuModalOpen}>
+      {/* Add Menu Modal */}
+      <Dialog open={isAddMenuModalOpen || isEditMenuModalOpen} onOpenChange={(o) => { if(!o) { setIsAddMenuModalOpen(false); setIsEditMenuModalOpen(false); resetMenuForm(); }}}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Add Menu Item</DialogTitle>
-            <DialogDescription>
-              Create a new menu item with its recipe.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
+          <DialogHeader><DialogTitle>{isEditMenuModalOpen ? "Edit" : "Add"} Menu</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <div className="grid gap-2">
-              <Label htmlFor="menu-name">Name *</Label>
-              <Input
-                id="menu-name"
-                placeholder="e.g. Vanilla Latte"
-                value={menuForm.name}
-                onChange={(e) => setMenuForm(prev => ({ ...prev, name: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="menu-category">Category *</Label>
-                <Select 
-                  value={menuForm.category} 
-                  onValueChange={(v) => setMenuForm(prev => ({ ...prev, category: v as typeof menuForm.category }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="coffee">Coffee</SelectItem>
-                    <SelectItem value="non-coffee">Non-Coffee</SelectItem>
-                    <SelectItem value="food">Food</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="menu-price">Price (IDR) *</Label>
-                <Input
-                  id="menu-price"
-                  type="number"
-                  placeholder="e.g. 35000"
-                  value={menuForm.price}
-                  onChange={(e) => setMenuForm(prev => ({ ...prev, price: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            {/* Ingredients Section */}
-            <div className="grid gap-2">
+            <Input placeholder="Menu Name" value={menuForm.name} onChange={(e) => setMenuForm(p => ({ ...p, name: e.target.value }))} />
+            <Input type="number" placeholder="Price" value={menuForm.price} onChange={(e) => setMenuForm(p => ({ ...p, price: e.target.value }))} />
+            <div className="space-y-2">
               <Label>Ingredients</Label>
-              <div className="space-y-2">
-                {menuForm.ingredients.map((ing, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Select 
-                      value={ing.inventory_item_id} 
-                      onValueChange={(v) => updateIngredient(idx, "inventory_item_id", v)}
-                    >
-                      <SelectTrigger className="flex-1 rounded-sm">
-                        <SelectValue placeholder="Select item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {inventory.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name} ({item.unit})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      placeholder="Qty"
-                      value={ing.quantity || ""}
-                      onChange={(e) => updateIngredient(idx, "quantity", e.target.value)}
-                      className="w-24 rounded-sm"
-                    />
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-9 w-9 text-destructive shrink-0"
-                      onClick={() => removeIngredientRow(idx)}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={addIngredientRow} className="rounded-sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Ingredient
-                </Button>
-              </div>
+              {menuForm.ingredients.map((ing, idx) => (
+                <div key={idx} className="flex gap-1">
+                  <Select value={ing.inventory_item_id} onValueChange={(v) => updateIngredient(idx, 'inventory_item_id', v)}>
+                    <SelectTrigger className="flex-1"><SelectValue placeholder="Item"/></SelectTrigger>
+                    <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input className="w-20" type="number" value={ing.quantity} onChange={(e) => updateIngredient(idx, 'quantity', e.target.value)} />
+                  <Button variant="ghost" size="icon" onClick={() => removeIngredientRow(idx)}><X className="w-4 h-4"/></Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={addIngredientRow}><Plus className="w-4 h-4 mr-2"/>Add</Button>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddMenuModalOpen(false)} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleAddMenu} 
-              disabled={!menuForm.name || !menuForm.price}
-              className="rounded-sm"
-            >
-              Save
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={isEditMenuModalOpen ? handleEditMenu : handleAddMenu}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit Menu Modal */}
-      <Dialog open={isEditMenuModalOpen} onOpenChange={setIsEditMenuModalOpen}>
-        <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Edit Menu Item</DialogTitle>
-            <DialogDescription>
-              Update the menu item and its recipe.
-            </DialogDescription>
-          </DialogHeader>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-sm">
-              {error}
-            </div>
-          )}
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <div className="grid gap-2">
-              <Label htmlFor="edit-menu-name">Name *</Label>
-              <Input
-                id="edit-menu-name"
-                placeholder="e.g. Vanilla Latte"
-                value={menuForm.name}
-                onChange={(e) => setMenuForm(prev => ({ ...prev, name: e.target.value }))}
-                className="rounded-sm"
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-menu-category">Category *</Label>
-                <Select 
-                  value={menuForm.category} 
-                  onValueChange={(v) => setMenuForm(prev => ({ ...prev, category: v as typeof menuForm.category }))}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="coffee">Coffee</SelectItem>
-                    <SelectItem value="non-coffee">Non-Coffee</SelectItem>
-                    <SelectItem value="food">Food</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="edit-menu-price">Price (IDR) *</Label>
-                <Input
-                  id="edit-menu-price"
-                  type="number"
-                  placeholder="e.g. 35000"
-                  value={menuForm.price}
-                  onChange={(e) => setMenuForm(prev => ({ ...prev, price: e.target.value }))}
-                  className="rounded-sm"
-                />
-              </div>
-            </div>
-
-            {/* Ingredients Section */}
-            <div className="grid gap-2">
-              <Label>Ingredients</Label>
-              <div className="space-y-2">
-                {menuForm.ingredients.map((ing, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Select 
-                      value={ing.inventory_item_id} 
-                      onValueChange={(v) => updateIngredient(idx, "inventory_item_id", v)}
-                    >
-                      <SelectTrigger className="flex-1 rounded-sm">
-                        <SelectValue placeholder="Select item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {inventory.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name} ({item.unit})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      placeholder="Qty"
-                      value={ing.quantity || ""}
-                      onChange={(e) => updateIngredient(idx, "quantity", e.target.value)}
-                      className="w-24 rounded-sm"
-                    />
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="h-9 w-9 text-destructive shrink-0"
-                      onClick={() => removeIngredientRow(idx)}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={addIngredientRow} className="rounded-sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Ingredient
-                </Button>
-              </div>
-            </div>
+      {/* Record Opname Modal */}
+      <Dialog open={isRecordOpnameModalOpen} onOpenChange={setIsRecordOpnameModalOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-sm">
+          <DialogHeader><DialogTitle>Stock Take (Opname)</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Select value={opnameForm.itemId} onValueChange={(v) => {
+              const item = inventory.find(i => i.id === v);
+              setOpnameForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+            }}>
+              <SelectTrigger><SelectValue placeholder="Item"/></SelectTrigger>
+              <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="number" placeholder="Actual Stock Count" value={opnameForm.actualStock} onChange={(e) => setOpnameForm(p => ({ ...p, actualStock: e.target.value }))} />
+            <Textarea placeholder="Reason" value={opnameForm.reason} onChange={(e) => setOpnameForm(p => ({ ...p, reason: e.target.value }))} />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setIsEditMenuModalOpen(false); resetMenuForm(); }} className="rounded-sm">
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleEditMenu} 
-              disabled={!menuForm.name || !menuForm.price}
-              className="rounded-sm"
-            >
-              Save Changes
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button onClick={handleAddOpname}>Record Audit</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Add Overhead Modal */}
+      <Dialog open={isAddOpexModalOpen} onOpenChange={setIsAddOpexModalOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-sm">
+          <DialogHeader><DialogTitle>Add Overhead</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Input type="month" value={opexForm.month} onChange={(e) => setOpexForm(p => ({...p, month: e.target.value}))} />
+            <Select value={opexForm.category} onValueChange={(v) => setOpexForm(p => ({ ...p, category: v }))}>
+              <SelectTrigger><SelectValue/></SelectTrigger>
+              <SelectContent>{opexCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+            <Input type="number" placeholder="Amount" value={opexForm.amount} onChange={(e) => setOpexForm(p => ({...p, amount: e.target.value}))} />
+            <Input type="file" onChange={(e) => setOpexFile(e.target.files?.[0] || null)} />
+          </div>
+          <DialogFooter><Button onClick={handleAddOpex}>Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

@@ -433,12 +433,12 @@ export default function MenuPage() {
                   </p>
                   <ul className="space-y-1">
                     {item.recipe.ingredients.map((ing, idx) => {
-                      const invItem = inventory.find((i) => i.id === ing.item_id)
+                      const invItem = inventory.find((i) => i.id === ing.inventory_item_id)
                       return (
                         <li key={idx} className="text-sm flex justify-between">
-                          <span>{getIngredientName(ing.item_id)}</span>
+                          <span>{getIngredientName(ing.inventory_item_id)}</span>
                           <span className="text-muted-foreground font-mono">
-                            {ing.amount} {invItem?.unit}
+                            {ing.quantity} {invItem?.unit}
                           </span>
                         </li>
                       )

@@ -22,12 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  addBatch,
-  stockOutManual,
-  toBaseUnit,
-  type DisplayUnit
-} from "@/lib/api/supabase-service"
+// Duplicate imports removed
 import {
   Table,
   TableBody,
@@ -65,14 +60,21 @@ import {
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 import {
-  inventoryBatches as initialBatches,
-  batchMovements as initialMovements,
-  inventory,
+  getBatches,
+  getInventory,
+  addBatch,
+  stockOutManual,
+  toBaseUnit,
+  type DisplayUnit,
+  type InventoryItem
+} from "@/lib/api/supabase-service"
+import {
   type InventoryBatch,
   type BatchMovement,
   type BatchStatus,
   getDaysUntilExpiry,
 } from "@/lib/data"
+import { useEffect } from "react"
 
 const statusConfig: Record<BatchStatus, { label: string; color: string; icon: React.ReactNode }> = {
   active: { label: "Active", color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20", icon: <CheckCircle className="w-3 h-3" /> },
@@ -93,13 +95,55 @@ export default function BatchesPage() {
   const { isSuperAdmin } = useAuth()
   const canEdit = isSuperAdmin()
   
-  const [batches, setBatches] = useState<InventoryBatch[]>(initialBatches)
-  const [movements, setMovements] = useState<BatchMovement[]>(initialMovements)
+  const [batches, setBatches] = useState<InventoryBatch[]>([])
+  const [movements, setMovements] = useState<BatchMovement[]>([])
+  const [inventoryList, setInventoryList] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedStatus, setSelectedStatus] = useState<string>("all")
   const [selectedItem, setSelectedItem] = useState<string>("all")
   const [selectedBatch, setSelectedBatch] = useState<InventoryBatch | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true)
+      const [fetchedBatches, fetchedInventory] = await Promise.all([
+        getBatches(),
+        getInventory()
+      ])
+      const mappedBatches: InventoryBatch[] = fetchedBatches.map((b: any) => {
+        let status: BatchStatus = "active"
+        const remaining = Number(b.remaining_quantity)
+        const daysToExpiry = getDaysUntilExpiry(b.expired_date)
+        if (remaining <= 0) status = "depleted"
+        else if (daysToExpiry <= 0) status = "expired"
+
+        return {
+          id: b.id,
+          batchNumber: b.batch_number,
+          inventoryItemId: b.item_id,
+          inventoryItemName: b.inventory_items?.name || 'Unknown',
+          supplier: b.supplier_name,
+          initialQuantity: Number(b.quantity),
+          currentQuantity: remaining,
+          unitCost: Number(b.cost_per_unit),
+          receivedDate: b.received_date,
+          expiryDate: b.expired_date,
+          status,
+          notes: b.notes,
+          createdAt: b.created_at,
+          updatedAt: b.created_at
+        }
+      })
+      
+      setBatches(mappedBatches)
+      setInventoryList(fetchedInventory)
+      setIsLoading(false)
+    }
+    fetchData()
+  }, [])
+
   
   // Record Movement form state
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false)
@@ -118,9 +162,9 @@ export default function BatchesPage() {
   // Filter batches
   const filteredBatches = batches.filter((batch) => {
     const matchesSearch = 
-      batch.batchNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      batch.inventoryItemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      batch.supplier.toLowerCase().includes(searchQuery.toLowerCase())
+      (batch.batchNumber || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (batch.inventoryItemName || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (batch.supplier || "").toLowerCase().includes(searchQuery.toLowerCase())
     const matchesStatus = selectedStatus === "all" || batch.status === selectedStatus
     const matchesItem = selectedItem === "all" || batch.inventoryItemId === selectedItem
     return matchesSearch && matchesStatus && matchesItem
@@ -394,7 +438,7 @@ export default function BatchesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Items</SelectItem>
-                {inventory.map((item) => (
+                {inventoryList.map((item) => (
                   <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
                 ))}
               </SelectContent>

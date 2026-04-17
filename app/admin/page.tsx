@@ -14,6 +14,7 @@ import {
   getLowStockItems,
   getOperationalCapacity,
   getPurchaseRecommendations,
+  getAttendanceStats,
   type InventoryItem,
   type Employee,
   type StockLog,
@@ -34,11 +35,12 @@ export default function AdminDashboard() {
   const [todayAttendance, setTodayAttendance] = useState<AttendanceLog[]>([])
   const [pendingOvertimeRequests, setPendingOvertimeRequests] = useState<OvertimeRequest[]>([])
   const [onShiftEmployees, setOnShiftEmployees] = useState<Employee[]>([])
+  const [latenessStats, setLatenessStats] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true)
+    const fetchData = async (silent = false) => {
+      if (!silent) setIsLoading(true)
       const [
         inventoryData,
         employeesData,
@@ -46,7 +48,8 @@ export default function AdminDashboard() {
         menuData,
         attendanceData,
         overtimeData,
-        onShiftData
+        onShiftData,
+        attendanceStatsData
       ] = await Promise.all([
         getInventory(),
         getActiveEmployees(),
@@ -54,7 +57,8 @@ export default function AdminDashboard() {
         getMenuItems(),
         getTodayAttendance(),
         getPendingOvertimeRequests(),
-        getOnShiftEmployees()
+        getOnShiftEmployees(),
+        getAttendanceStats()
       ])
       
       setInventory(inventoryData)
@@ -64,13 +68,14 @@ export default function AdminDashboard() {
       setTodayAttendance(attendanceData)
       setPendingOvertimeRequests(overtimeData)
       setOnShiftEmployees(onShiftData)
-      setIsLoading(false)
+      setLatenessStats(attendanceStatsData)
+      if (!silent) setIsLoading(false)
     }
     
     fetchData()
     
     // Refresh data every 10 seconds for real-time sync
-    const interval = setInterval(fetchData, 10000)
+    const interval = setInterval(() => fetchData(true), 10000)
     return () => clearInterval(interval)
   }, [])
 
@@ -419,6 +424,49 @@ export default function AdminDashboard() {
                 ))
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Punctuality Monitor */}
+        <Card className="rounded-sm">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <CardTitle>Punctuality Monitor</CardTitle>
+              </div>
+              <Link href="/admin/attendance-report">
+                <Button variant="ghost" size="sm" className="text-xs">Details</Button>
+              </Link>
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Late Counts This Month</p>
+          </CardHeader>
+          <CardContent>
+            {latenessStats.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No lateness recorded this month</p>
+            ) : (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {latenessStats.slice(0, 5).map((stat) => (
+                  <div 
+                    key={stat.name} 
+                    className="flex items-center justify-between p-3 rounded-sm bg-muted/50 border-l-2 border-amber-500"
+                  >
+                    <div>
+                      <p className="font-medium text-sm">{stat.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {Math.round(stat.totalHours)}h worked so far
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold text-amber-600">
+                        {stat.lateCount}x Late
+                      </span>
+                      <p className="text-[10px] text-muted-foreground">This period</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

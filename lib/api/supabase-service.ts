@@ -9,6 +9,7 @@ import {
   overtimeRequests as mockOvertimeRequests,
   shiftConfigs as mockShiftConfigs
 } from '@/lib/data'
+import { getLocalYYYYMMDD } from '@/lib/utils'
 
 // Storage keys for localStorage fallback
 const STORAGE_KEYS = {
@@ -164,7 +165,28 @@ export interface InventoryTransaction {
   quantity: number
 }
 
-// For local compatibility
+// DB Schema: monthly_opex(id, month, category, amount, notes, attachment_url)
+export interface MonthlyOpex {
+  id: string
+  month: string // YYYY-MM
+  category: string
+  amount: number
+  notes?: string
+  attachment_url?: string
+  created_at: string
+}
+
+export interface InventoryOpname {
+  id: string
+  item_id: string
+  theoretical_stock: number
+  actual_stock: number
+  difference: number
+  reason?: string
+  actor_name: string
+  created_at: string
+}
+
 export interface StockLog {
   id: string
   item_id: string
@@ -200,7 +222,7 @@ export interface MenuItem {
   status: "active" | "inactive"
   // For local/fallback compatibility
   category?: "coffee" | "non-coffee" | "food"
-  recipe?: { ingredients: { item_id: string; amount: number }[] }
+  recipe?: { ingredients: MenuRecipeIngredient[] }
 }
 
 // DB Schema: shift_configs(id, name, start_time, end_time, day_type)
@@ -251,6 +273,25 @@ export interface SystemLog {
   target: string // What was changed (item name, employee name, etc.)
   details: string // Description of the change
   timestamp: string
+}
+
+// DB Schema: payrolls
+export interface PayrollRecord {
+  id?: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  total_hours: number
+  ot_hours: number
+  salary_hourly: number
+  adjustment: number
+  total_payroll: number
+  status: "draft" | "settled"
+  created_at?: string
+  updated_at?: string
+  // Enhanced frontend fields
+  employee_name?: string
+  employment_type?: "full-time" | "part-time"
 }
 
 // ========== EMPLOYEES ==========
@@ -808,6 +849,10 @@ export async function updateInventoryItem(id: string, updates: Partial<Inventory
     if (updates.unit !== undefined) dbUpdates.unit = updates.unit
     if (updates.stock !== undefined) dbUpdates.stock = updates.stock
     if (updates.current_stock !== undefined) dbUpdates.stock = updates.current_stock
+    if (updates.min_stock !== undefined) dbUpdates.min_stock = updates.min_stock
+    if (updates.max_stock !== undefined) dbUpdates.max_stock = updates.max_stock
+    if (updates.daily_usage !== undefined) dbUpdates.daily_usage = updates.daily_usage
+    if (updates.unit_cost !== undefined) dbUpdates.unit_cost = updates.unit_cost
     
     const { data, error } = await supabase
       .from('inventory_items')
@@ -1175,6 +1220,7 @@ export async function sellMenu(menuId: string, quantity: number): Promise<boolea
 export interface MenuRecipeIngredient {
   inventory_item_id: string
   quantity: number
+  unit?: DisplayUnit
 }
 
 // FIX RECIPE NOT SHOWING: Properly save recipes with verification
@@ -1199,7 +1245,8 @@ export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecip
       const recipesToInsert = ingredients.map(ing => ({
         menu_item_id: menuItemId,
         inventory_item_id: ing.inventory_item_id,
-        quantity: ing.quantity
+        quantity: ing.quantity,
+        unit: ing.unit || 'pcs'
       }))
       
       const { error: insertError } = await supabase
@@ -1244,7 +1291,7 @@ export async function getMenuRecipes(menuItemId: string): Promise<MenuRecipeIngr
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('menu_recipes')
-      .select('inventory_item_id, quantity')
+      .select('inventory_item_id, quantity, unit')
       .eq('menu_item_id', menuItemId)
     
     if (error) {
@@ -1252,7 +1299,13 @@ export async function getMenuRecipes(menuItemId: string): Promise<MenuRecipeIngr
       return []
     }
     
-    return data || []
+    // Map data from database to UI format
+    return (data || []).map((row: any) => ({
+      inventory_item_id: row.inventory_item_id,
+      // Convert quantity back from base unit to display unit
+      quantity: fromBaseUnit(row.quantity, (row.unit || 'pcs') as DisplayUnit),
+      unit: (row.unit || 'pcs') as DisplayUnit
+    }))
   }
   
   return []
@@ -1763,51 +1816,387 @@ export async function updateAttendanceLogStatus(id: string, status: string): Pro
 // Calculate total daily work duration for an employee (in minutes)
 // Pairs clock-in/out events chronologically, skips rejected logs
 // Returns: { totalMinutes, regularMinutes (max 480 = 8h), overtimeMinutes }
+// Calculate total daily work duration for an employee (in minutes)
+// Pairs clock-in/out events chronologically, skips rejected logs
+// REGULATION: Counts from shift start, caps at shift end, flags lateness
 export async function getDailyWorkDuration(employeeId: string, date: string): Promise<{
   totalMinutes: number
   regularMinutes: number
   overtimeMinutes: number
-  sessions: { clockIn: string; clockOut: string | null; minutes: number }[]
+  isLate: boolean
+  sessions: { 
+    clockIn: string; 
+    clockOut: string | null; 
+    minutes: number;
+    regularMinutes: number;
+    overtimeMinutes: number;
+    isLate: boolean;
+    isAutoClockOut: boolean;
+  }[]
 }> {
-  const MAX_REGULAR_MINUTES = 480 // 8 hours
-
   const logs = await getAttendanceLogsByDate(date)
+  const shifts = await getShiftsByEmployee(employeeId)
+  const dayShift = shifts.find(s => s.date === date)
+  
   const employeeLogs = logs
     .filter(l => l.employee_id === employeeId && l.status !== 'rejected')
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
 
-  const sessions: { clockIn: string; clockOut: string | null; minutes: number }[] = []
-  let currentClockIn: string | null = null
+  const sessions: any[] = []
+  let currentInLog: AttendanceLog | null = null
 
   for (const log of employeeLogs) {
     const action = log.action || log.type
     if (action === 'clock-in') {
-      currentClockIn = log.timestamp
-    } else if (action === 'clock-out' && currentClockIn) {
-      const mins = Math.round(
-        (new Date(log.timestamp).getTime() - new Date(currentClockIn).getTime()) / 60000
-      )
-      sessions.push({ clockIn: currentClockIn, clockOut: log.timestamp, minutes: Math.max(0, mins) })
-      currentClockIn = null
+      currentInLog = log
+    } else if (action === 'clock-out' && currentInLog) {
+      const sessionData = calculateRegulatedSession(currentInLog, log, dayShift)
+      sessions.push(sessionData)
+      currentInLog = null
     }
   }
 
   // If still clocked in (no clock-out yet), calculate running duration
-  if (currentClockIn) {
-    const now = new Date()
-    const mins = Math.round((now.getTime() - new Date(currentClockIn).getTime()) / 60000)
-    sessions.push({ clockIn: currentClockIn, clockOut: null, minutes: Math.max(0, mins) })
+  if (currentInLog) {
+    const sessionData = calculateRegulatedSession(currentInLog, null, dayShift)
+    sessions.push(sessionData)
   }
 
   const totalMinutes = sessions.reduce((sum, s) => sum + s.minutes, 0)
-  const regularMinutes = Math.min(totalMinutes, MAX_REGULAR_MINUTES)
-  const overtimeMinutes = Math.max(0, totalMinutes - MAX_REGULAR_MINUTES)
+  const regularMinutes = sessions.reduce((sum, s) => sum + s.regularMinutes, 0)
+  const overtimeMinutes = sessions.reduce((sum, s) => sum + s.overtimeMinutes, 0)
+  const isLate = sessions.some(s => s.isLate)
 
-  return { totalMinutes, regularMinutes, overtimeMinutes, sessions }
+  return { totalMinutes, regularMinutes, overtimeMinutes, isLate, sessions }
+}
+
+// Helper for regulated session calculation
+function calculateRegulatedSession(
+  clockInLog: AttendanceLog, 
+  clockOutLog: AttendanceLog | null, 
+  shift?: ShiftAssignment,
+  otStatus: string = "none"
+) {
+  const clockIn = clockInLog.timestamp
+  let clockOut = clockOutLog?.timestamp || null
+  
+  const cIn = new Date(clockIn)
+  let cOut = clockOut ? new Date(clockOut) : new Date()
+  let isAutoClockOut = false
+
+  let shiftStart: Date | null = null
+  let shiftEnd: Date | null = null
+
+  if (shift) {
+    shiftStart = new Date(`${shift.date}T${shift.start_time}`)
+    shiftEnd = new Date(`${shift.date}T${shift.end_time}`)
+    
+    // Handle overnight shifts (e.g. 18:00 to 00:00)
+    if (shift.end_time <= shift.start_time) {
+      shiftEnd.setDate(shiftEnd.getDate() + 1)
+    }
+  }
+
+  if (!clockOut) {
+    if (shift && shiftEnd) {
+      const graceEnd = new Date(shiftEnd.getTime() + 15 * 60000)
+      if (cOut > graceEnd) {
+        cOut = graceEnd
+        isAutoClockOut = true // Forgot to clock out
+        clockOut = cOut.toISOString()
+      }
+    } else {
+      const maxEnd = new Date(cIn.getTime() + 8 * 60 * 60000)
+      if (cOut > maxEnd) {
+        cOut = maxEnd
+        isAutoClockOut = true // Auto-end after 8h if no shift
+        clockOut = cOut.toISOString()
+      }
+    }
+  }
+  
+  // Total actual working minutes of the session
+  const totalMins = Math.round((cOut.getTime() - cIn.getTime()) / 60000)
+  
+  let regMins = 0
+  let otMins = 0
+  let isLate = false
+  let lateMinutes = 0
+  let isPenalty = false // Late > 15m
+
+  if (shift && shiftStart && shiftEnd) {
+    // Rule 1 & 3 & 5 logic
+    
+    // Rule 3: Early Tap-In (up to 1h early allowed, but calculation starts from shiftStart)
+    const oneHourBefore = new Date(shiftStart.getTime() - 60 * 60000)
+    const effectiveStartForReg = new Date(Math.max(cIn.getTime(), shiftStart.getTime()))
+    
+    // Rule 2: Lateness detection (> 15 mins = Penalty)
+    const delay = Math.round((cIn.getTime() - shiftStart.getTime()) / 60000)
+    if (delay > 0) {
+      isLate = true
+      lateMinutes = delay
+      if (delay > 15) {
+        isPenalty = true // Penalty flag
+      }
+    }
+    
+    // Rule 5: Auto tap-out grace period (15m)
+    const graceEnd = new Date(shiftEnd.getTime() + 15 * 60000)
+    const effectiveEndForReg = new Date(Math.min(cOut.getTime(), shiftEnd.getTime()))
+    
+    if (effectiveEndForReg > effectiveStartForReg) {
+      regMins = Math.round((effectiveEndForReg.getTime() - effectiveStartForReg.getTime()) / 60000)
+      // Rule 1: Max 8 hours (480 mins) regular per day
+      // Note: Since this is per session, we should cap it in the daily sum too, but let's cap here for safety
+      regMins = Math.min(regMins, 480) 
+    }
+
+    if (clockOutLog && cOut > graceEnd) {
+      isAutoClockOut = true
+      // Auto tap-out means no overtime counted from this session
+      otMins = 0
+    } else if (otStatus === 'approved') {
+      // Rule 4: Only approved OT sessions count
+      // This session is flagged as approved OT (usually separate from reg shift)
+      // Any time outside the regular shift bounds in this session is OT
+      const nonRegMins = Math.max(0, totalMins - regMins)
+      otMins = nonRegMins
+    }
+  } else {
+    // No shift scheduled - session only counts if it's an approved OT
+    if (otStatus === 'approved') {
+      otMins = totalMins
+    }
+  }
+
+  return {
+    clockIn,
+    clockOut: clockOut,
+    minutes: totalMins,
+    regularMinutes: regMins,
+    overtimeMinutes: otMins,
+    isLate,
+    lateMinutes,
+    isPenalty,
+    isAutoClockOut,
+    otStatus
+  }
+}
+
+// Bulk fetch log range
+export async function getAttendanceLogsInRange(startDate: string, endDate: string): Promise<AttendanceLog[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('attendance_logs')
+      .select('*')
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .order('date', { ascending: true })
+      .order('time', { ascending: true })
+    
+    if (error) return []
+    return (data || []).map(log => ({
+      ...log,
+      employee_name: log.employee_name || 'Unknown',
+      type: log.action || log.type,
+      timestamp: `${log.date}T${log.time}`
+    }))
+  }
+  return []
+}
+
+// Bulk fetch shift range (FIXED TABLE NAME: 'shifts')
+export async function getShiftAssignmentsInRange(startDate: string, endDate: string): Promise<ShiftAssignment[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('shifts')
+      .select('*')
+      .gte('date', startDate)
+      .lte('date', endDate)
+    
+    if (error) return []
+    return data || []
+  }
+  return []
+}
+
+// Bulk fetch overtime range
+export async function getOvertimeRequestsInRange(startDate: string, endDate: string): Promise<OvertimeRequest[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('overtime_requests')
+      .select('*')
+      .gte('request_date', startDate)
+      .lte('request_date', endDate)
+    
+    if (error) return []
+    return data || []
+  }
+  return []
+}
+
+// New function for attendance report data (OPTIMIZED & FIXED)
+export async function getAttendanceReportData(startDate: string, endDate: string) {
+  const [employees, allLogs, allShifts, allOT] = await Promise.all([
+    getEmployees(),
+    getAttendanceLogsInRange(startDate, endDate),
+    getShiftAssignmentsInRange(startDate, endDate),
+    getOvertimeRequestsInRange(startDate, endDate)
+  ])
+  
+  const report = []
+  
+  // Group logs by employee_id and date
+  const logsMap = new Map<string, AttendanceLog[]>()
+  for (const log of allLogs) {
+    const key = `${log.employee_id}_${log.date}`
+    if (!logsMap.has(key)) logsMap.set(key, [])
+    logsMap.get(key)!.push(log)
+  }
+  
+  // Group shifts by employee_id and date
+  const shiftsMap = new Map<string, ShiftAssignment>()
+  for (const shift of allShifts) {
+    const key = `${shift.employee_id}_${shift.date}`
+    shiftsMap.set(key, shift)
+  }
+
+  // Create OT Map for quick lookup by attendance_log_id
+  const otMap = new Map<string, OvertimeRequest>()
+  for (const ot of allOT) {
+    if (ot.attendance_log_id) {
+       otMap.set(ot.attendance_log_id, ot)
+    }
+  }
+  
+  // Create a list of dates between start and end using local date logic
+  const dateList: string[] = []
+  
+  // Create dates from startDate to endDate safely in local context
+  const sParts = startDate.split('-').map(Number)
+  const eParts = endDate.split('-').map(Number)
+  const start = new Date(sParts[0], sParts[1]-1, sParts[2])
+  const end = new Date(eParts[0], eParts[1]-1, eParts[2])
+  
+  let curr = new Date(start)
+  while (curr <= end) {
+    // build YYYY-MM-DD manually to avoid any timezone shifting
+    const y = curr.getFullYear()
+    const m = String(curr.getMonth() + 1).padStart(2, '0')
+    const d = String(curr.getDate()).padStart(2, '0')
+    dateList.push(`${y}-${m}-${d}`)
+    curr.setDate(curr.getDate() + 1)
+  }
+  
+  // Iterate newest first
+  for (const dateStr of dateList.reverse()) {
+    for (const emp of employees) {
+      const key = `${emp.id}_${dateStr}`
+      const empDayLogs = logsMap.get(key) || []
+      const empDayShift = shiftsMap.get(key)
+      
+      if (empDayLogs.length > 0) {
+        // Calculate duration logic fully in-memory
+        const sessions: any[] = []
+        let currentInLog: AttendanceLog | null = null
+
+        const sortedLogs = [...empDayLogs].sort((a, b) => 
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        )
+
+        for (const log of sortedLogs) {
+          const action = log.action || log.type
+          if (action === 'clock-in') {
+            currentInLog = log
+          } else if (action === 'clock-out' && currentInLog) {
+            // Rule 4: Check if this session is an approved Overtime session
+            const otReq = otMap.get(currentInLog.id)
+            const otStatus = otReq?.status || 'none'
+
+            const sessionData = calculateRegulatedSession(currentInLog, log, empDayShift, otStatus)
+            sessions.push(sessionData)
+            currentInLog = null
+          }
+        }
+
+        if (currentInLog) {
+          const otReq = otMap.get(currentInLog.id)
+          const otStatus = otReq?.status || 'none'
+          const sessionData = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus)
+          sessions.push(sessionData)
+        }
+
+        if (sessions.length > 0) {
+          let regularMinutes = sessions.reduce((sum, s) => sum + s.regularMinutes, 0)
+          // Rule 1: Max 8 hours per day
+          regularMinutes = Math.min(regularMinutes, 480)
+          
+          const overtimeMinutes = sessions.reduce((sum, s) => sum + s.overtimeMinutes, 0)
+          const isLate = sessions.some(s => s.isLate)
+          const isPenalty = sessions.some(s => s.isPenalty)
+          const lateMinutes = sessions.reduce((max, s) => Math.max(max, s.lateMinutes || 0), 0)
+
+          report.push({
+            employee_id: emp.id,
+            employee_name: emp.name,
+            date: dateStr,
+            regularMinutes,
+            overtimeMinutes,
+            isLate,
+            isPenalty,
+            lateMinutes,
+            sessions
+          })
+        }
+      }
+    }
+  }
+  
+  return report
+}
+
+// New function for attendance statistics (Dashboard)
+export async function getAttendanceStats(employeeId?: string) {
+  const now = new Date()
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+  
+  const reportData = await getAttendanceReportData(firstDay, lastDay)
+  
+  if (employeeId) {
+    const empData = reportData.filter(r => r.employee_id === employeeId)
+    const totalRegHours = empData.reduce((sum, r) => sum + r.regularMinutes / 60, 0)
+    const totalOTHours = empData.reduce((sum, r) => sum + r.overtimeMinutes / 60, 0)
+    const lateCount = empData.filter(r => r.isLate).length
+    const penaltyCount = empData.filter(r => r.isPenalty).length
+    
+    return { 
+      totalHours: totalRegHours + totalOTHours, 
+      totalRegHours,
+      totalOTHours,
+      lateCount, 
+      penaltyCount,
+      entryCount: empData.length 
+    }
+  }
+  
+  // Admin stats: Ranking by lateness/penalty
+  const stats: Record<string, { name: string; lateCount: number; penaltyCount: number; totalHours: number }> = {}
+  for (const r of reportData) {
+    if (!stats[r.employee_id]) {
+      stats[r.employee_id] = { name: r.employee_name, lateCount: 0, penaltyCount: 0, totalHours: 0 }
+    }
+    if (r.isLate) stats[r.employee_id].lateCount++
+    if (r.isPenalty) stats[r.employee_id].penaltyCount++
+    stats[r.employee_id].totalHours += (r.regularMinutes + r.overtimeMinutes) / 60
+  }
+  
+  return Object.values(stats).sort((a, b) => b.penaltyCount - a.penaltyCount || b.lateCount - a.lateCount)
 }
 
 export async function getTodayAttendance(): Promise<AttendanceLog[]> {
-  const today = new Date().toISOString().split("T")[0]
+  const today = getLocalYYYYMMDD()
   return getAttendanceLogsByDate(today)
 }
 
@@ -1816,21 +2205,40 @@ export async function getTodayAttendance(): Promise<AttendanceLog[]> {
 
 export async function getMenuItems(): Promise<MenuItem[]> {
   if (isSupabaseConfigured()) {
-    const { data, error } = await supabase
+    // 1. Fetch menu items
+    const { data: menuData, error: menuError } = await supabase
       .from('menu_items')
       .select('*')
       .order('name', { ascending: true })
     
-    console.log("DATA (getMenuItems):", data)
-    console.log("ERROR (getMenuItems):", error)
-    
-    if (error) {
+    if (menuError || !menuData) {
+      console.log("ERROR (getMenuItems):", menuError)
       return []
     }
-    // Map type to category for compatibility
-    return (data || []).map(item => ({
+
+    // 2. Fetch all recipes
+    const { data: recipesData } = await supabase
+      .from('menu_recipes')
+      .select('*')
+      
+    // Group recipes by menu_item_id
+    const recipesByMenu: Record<string, any[]> = {}
+    if (recipesData) {
+      recipesData.forEach(r => {
+        if (!recipesByMenu[r.menu_item_id]) recipesByMenu[r.menu_item_id] = []
+        recipesByMenu[r.menu_item_id].push({
+          item_id: r.inventory_item_id,
+          amount: r.quantity,
+          unit: r.unit
+        })
+      })
+    }
+
+    // Map type to category, and attach grouped recipes
+    return menuData.map(item => ({
       ...item,
-      category: item.type
+      category: item.type,
+      recipe: recipesByMenu[item.id] ? { ingredients: recipesByMenu[item.id] } : undefined
     }))
   }
   
@@ -2063,49 +2471,73 @@ export async function addShiftAssignment(assignment: {
   shift_name?: string;
   day_of_week?: number;
 }): Promise<ShiftAssignment | null> {
-  console.log("[v0] addShiftAssignment called with:", assignment)
+  console.log("[v0] addShiftAssignment (UPSERT) called with:", assignment)
   
   if (isSupabaseConfigured()) {
-    // Build the insert object with only non-undefined values
-    const insertData: Record<string, unknown> = {
+    // Check if a shift already exists for this employee on this date
+    const { data: existing } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('employee_id', assignment.employee_id)
+      .eq('date', assignment.date)
+      .maybeSingle()
+
+    const shiftData: any = {
       employee_id: assignment.employee_id,
       employee_name: assignment.employee_name,
       date: assignment.date,
       start_time: assignment.start_time,
-      end_time: assignment.end_time
+      end_time: assignment.end_time,
+      shift_config_id: assignment.shift_config_id || null
     }
-    
-    // Only include shift_config_id if it exists (some DB schemas may not have this column)
-    if (assignment.shift_config_id) {
-      insertData.shift_config_id = assignment.shift_config_id
+
+    if (existing) {
+      console.log("[v0] Updating existing shift:", existing.id)
+      const { data, error } = await supabase
+        .from('shifts')
+        .update(shiftData)
+        .eq('id', existing.id)
+        .select()
+        .single()
+      
+      if (error) {
+        console.error("Shift update error:", error)
+        return null
+      }
+      return data
+    } else {
+      console.log("[v0] Inserting new shift")
+      const { data, error } = await supabase
+        .from('shifts')
+        .insert([shiftData])
+        .select()
+        .single()
+      
+      if (error) {
+        console.error("Shift insert error:", error)
+        return null
+      }
+      return data
     }
-    
-    console.log("[v0] Inserting shift data:", insertData)
-    
-    const { data, error } = await supabase
-      .from('shifts')
-      .insert([insertData])
-      .select()
-      .single()
-    
-    console.log("[v0] addShiftAssignment - DATA:", data)
-    console.log("[v0] addShiftAssignment - ERROR:", error)
-    
-    if (error) {
-      console.log("[v0] addShiftAssignment error details:", JSON.stringify(error, null, 2))
-      return null
-    }
-    return data
   }
   
+  // Fallback for localStorage
   const shifts = await getShiftAssignments()
-  const newShift: ShiftAssignment = {
-    ...assignment,
-    id: generateId('shift')
+  const existingIdx = shifts.findIndex(s => s.employee_id === assignment.employee_id && s.date === assignment.date)
+  
+  if (existingIdx >= 0) {
+    shifts[existingIdx] = { ...shifts[existingIdx], ...assignment }
+    setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
+    return shifts[existingIdx]
+  } else {
+    const newShift: ShiftAssignment = {
+      ...assignment,
+      id: generateId('shift')
+    }
+    shifts.push(newShift)
+    setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
+    return newShift
   }
-  shifts.push(newShift)
-  setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
-  return newShift
 }
 
 export async function deleteShiftAssignment(id: string): Promise<boolean> {
@@ -2417,7 +2849,7 @@ export async function getShiftConfigsByDayType(dayType: "weekday" | "weekend"): 
 
 // Get on-shift employees based on today's attendance
 export async function getOnShiftEmployees(): Promise<Employee[]> {
-  const today = new Date().toISOString().split("T")[0]
+  const today = getLocalYYYYMMDD()
   const todayLogs = await getAttendanceLogsByDate(today)
   const employees = await getActiveEmployees()
   
@@ -2677,6 +3109,7 @@ export async function getMenuHpp(menuId: string): Promise<number> {
 }
 
 // Manual HPP calculation when RPC is not available
+// Optionally includes overhead allocation (divided equally among totalMenusSold)
 async function calculateMenuHppManually(menuId: string): Promise<number> {
   const recipes = await getMenuRecipes(menuId)
   const inventory = await getInventory()
@@ -2690,6 +3123,24 @@ async function calculateMenuHppManually(menuId: string): Promise<number> {
   }
   
   return totalCost
+}
+
+// Full COGS calculation including overhead per menu item
+export async function getMenuCOGS(menuId: string, month?: string, totalMenusSold?: number): Promise<{ ingredientCost: number; overheadPerItem: number; totalCOGS: number }> {
+  const ingredientCost = await calculateMenuHppManually(menuId)
+  
+  let overheadPerItem = 0
+  if (month && totalMenusSold && totalMenusSold > 0) {
+    const opexList = await getMonthlyOpex(month)
+    const totalOverhead = opexList.reduce((sum, o) => sum + o.amount, 0)
+    overheadPerItem = totalOverhead / totalMenusSold
+  }
+  
+  return {
+    ingredientCost,
+    overheadPerItem,
+    totalCOGS: ingredientCost + overheadPerItem
+  }
 }
 
 // Bulk get HPP for multiple menus
@@ -2721,13 +3172,24 @@ export interface BulkSaleItem {
 
 export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
   if (isSupabaseConfigured()) {
-    // Try RPC first
-    const { error: rpcError } = await supabase.rpc('bulk_sell_menu', {
+    // Try new FIFO RPC first (process_menu_sales_fifo)
+    const { error: fifoError } = await supabase.rpc('process_menu_sales_fifo', {
       p_menu_ids: items.map(i => i.menu_id),
       p_quantities: items.map(i => i.quantity)
     })
     
-    console.log("ERROR (bulkSellMenu RPC):", rpcError)
+    if (!fifoError) {
+      console.log("SUCCESS: bulkSellMenu via FIFO RPC")
+      return true
+    }
+    
+    console.log("FIFO RPC not available, trying legacy bulk_sell_menu:", fifoError.message)
+    
+    // Try legacy RPC
+    const { error: rpcError } = await supabase.rpc('bulk_sell_menu', {
+      p_menu_ids: items.map(i => i.menu_id),
+      p_quantities: items.map(i => i.quantity)
+    })
     
     if (!rpcError) {
       return true
@@ -2962,23 +3424,131 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
 
 export async function getBatches(): Promise<InventoryBatch[]> {
   if (isSupabaseConfigured()) {
-    const { data, error } = await supabase
+    // Fetch batches
+    const { data: batchesData, error: batchesError } = await supabase
       .from('inventory_batches')
-      .select(`
-        *,
-        inventory_items (name, category, unit)
-      `)
+      .select('*')
       .order('created_at', { ascending: false })
     
-    if (error) {
-      console.log("ERROR (getBatches):", error)
+    if (batchesError || !batchesData) {
+      console.log("ERROR (getBatches):", batchesError)
       return []
     }
     
-    return data || []
+    // Fetch inventory items to join their names
+    const { data: itemsData } = await supabase
+      .from('inventory_items')
+      .select('id, name, category, unit')
+      
+    // Join manually
+    const itemMap = new Map()
+    if (itemsData) {
+      itemsData.forEach(item => itemMap.set(item.id, item))
+    }
+    
+    const mapped = batchesData.map(batch => ({
+      ...batch,
+      inventory_items: itemMap.get(batch.item_id) || { name: 'Unknown' }
+    }))
+    
+    return mapped
   }
   
+  
   // Fallback - return empty for localStorage
+  return []
+}
+
+// ========== PAYROLL ==========
+
+export async function getPayrolls(startDate: string, endDate: string): Promise<PayrollRecord[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('payrolls')
+      .select('*')
+      .lte('start_date', endDate)
+      .gte('end_date', startDate)
+    
+    if (error) {
+      console.error("ERROR (getPayrolls):", error)
+      return []
+    }
+    return data || []
+  }
+  return []
+}
+
+export async function upsertPayroll(payroll: PayrollRecord): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('payrolls')
+      .upsert({
+        ...payroll,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'employee_id,start_date,end_date'
+      })
+    
+    if (error) {
+      console.error("ERROR (upsertPayroll):", error.message, error.details, error.hint)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+export async function settlePayrollBatch(startDate: string, endDate: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('payrolls')
+      .update({ status: 'settled', updated_at: new Date().toISOString() })
+      .eq('start_date', startDate)
+      .eq('end_date', endDate)
+      .eq('status', 'draft')
+    
+    if (error) {
+      console.error("ERROR (settlePayrollBatch):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+export async function settlePayrollItems(employeeIds: string[], startDate: string, endDate: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('payrolls')
+      .update({ status: 'settled', updated_at: new Date().toISOString() })
+      .in('employee_id', employeeIds)
+      .eq('start_date', startDate)
+      .eq('end_date', endDate)
+      .eq('status', 'draft')
+    
+    if (error) {
+      console.error("ERROR (settlePayrollItems):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+export async function getEmployeePayrolls(employeeId: string): Promise<PayrollRecord[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('payrolls')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('end_date', { ascending: false })
+    
+    if (error) {
+      console.error("ERROR (getEmployeePayrolls):", error)
+      return []
+    }
+    return data || []
+  }
   return []
 }
 
@@ -3000,4 +3570,141 @@ export async function getBatchesByItem(itemId: string): Promise<InventoryBatch[]
   }
   
   return []
+}
+
+// ========== MONTHLY OPEX (OVERHEAD/BOP) ==========
+
+export async function getMonthlyOpex(month?: string): Promise<MonthlyOpex[]> {
+  if (isSupabaseConfigured()) {
+    let query = supabase.from('monthly_opex').select('*')
+    if (month) {
+      query = query.eq('month', month)
+    }
+    const { data, error } = await query.order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error("ERROR (getMonthlyOpex):", error)
+      return []
+    }
+    return data || []
+  }
+  return [] // Not supporting local fallback for Opex yet
+}
+
+export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id' | 'created_at'>): Promise<MonthlyOpex | null> {
+  if (isSupabaseConfigured()) {
+    const { data: result, error } = await supabase
+      .from('monthly_opex')
+      .insert([data])
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (addMonthlyOpex):", error)
+      return null
+    }
+    return result
+  }
+  return null
+}
+
+export async function deleteMonthlyOpex(id: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('monthly_opex')
+      .delete()
+      .eq('id', id)
+    
+    if (error) {
+      console.error("ERROR (deleteMonthlyOpex):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+// ========== STOCK OPNAME (WEEKLY) ==========
+
+export async function getInventoryOpnames(): Promise<InventoryOpname[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('inventory_opname')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error("ERROR (getInventoryOpnames):", error)
+      return []
+    }
+    return data || []
+  }
+  return []
+}
+
+export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'created_at'>): Promise<InventoryOpname | null> {
+  if (isSupabaseConfigured()) {
+    // 1. Insert Opname Record
+    const { data: result, error } = await supabase
+      .from('inventory_opname')
+      .insert([data])
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (addInventoryOpname):", error)
+      return null
+    }
+
+    // 2. Update Inventory Item Stock to match Actual Stock
+    const { error: updateError } = await supabase
+      .from('inventory_items')
+      .update({ stock: data.actual_stock, updated_at: new Date().toISOString() })
+      .eq('id', data.item_id)
+
+    if (updateError) {
+      console.error("ERROR (updating stock on opname):", updateError)
+    }
+
+    // 3. Log as Waste in transactions if difference is negative (or just log the adjustment)
+    if (data.difference !== 0) {
+      const type = data.difference < 0 ? 'waste' : 'in'
+      await supabase.from('inventory_transactions').insert([{
+        item_id: data.item_id,
+        type: type,
+        quantity: Math.abs(data.difference),
+        actor_name: data.actor_name,
+        created_at: new Date().toISOString()
+      }])
+    }
+
+    return result
+  }
+  return null
+}
+
+// ========== STORAGE (OPEX ATTACHMENTS) ==========
+
+export async function uploadOpexAttachment(file: File): Promise<string | null> {
+  if (isSupabaseConfigured()) {
+    const fileExt = file.name.split('.').pop()
+    const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`
+    const filePath = `${fileName}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('opex-attachments')
+      .upload(filePath, file)
+
+    if (uploadError) {
+      console.error("ERROR (uploadOpexAttachment):", uploadError)
+      return null
+    }
+
+    const { data } = supabase.storage
+      .from('opex-attachments')
+      .getPublicUrl(filePath)
+
+    return data.publicUrl
+  }
+  return null
 }

@@ -5,18 +5,21 @@ import { useAuth } from "@/lib/auth-context"
 import { 
   getEmployeeById,
   getAttendanceByEmployee,
+  getShiftsByEmployee,
   getInventory,
   getLowStockItems,
   getOnShiftEmployees,
   getOverallStockHealth,
   getStockHealth,
-  getShiftsByEmployee,
   getShiftConfigs,
+  getAttendanceStats,
+  getEmployeePayrolls,
   type Employee,
   type AttendanceLog,
   type InventoryItem,
   type ShiftAssignment,
-  type ShiftConfig
+  type ShiftConfig,
+  type PayrollRecord
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -30,11 +33,14 @@ import {
   Package,
   Bell,
   TrendingUp,
-  LayoutDashboard
+  LayoutDashboard,
+  Wallet,
+  Users
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { format } from "date-fns"
+import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 
 export default function EmployeeDashboard() {
   const { user, canAccessAdmin } = useAuth()
@@ -44,7 +50,16 @@ export default function EmployeeDashboard() {
   const [shiftConfigs, setShiftConfigs] = useState<ShiftConfig[]>([])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [onShift, setOnShift] = useState<Employee[]>([])
+  const [performanceStats, setPerformanceStats] = useState<{ 
+    totalHours: number; 
+    totalRegHours?: number;
+    totalOTHours?: number;
+    lateCount: number; 
+    penaltyCount?: number;
+    entryCount: number 
+  } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [myPayrolls, setMyPayrolls] = useState<PayrollRecord[]>([])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -55,14 +70,17 @@ export default function EmployeeDashboard() {
 
       setIsLoading(true)
       
-      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData] = await Promise.all([
+      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData] = await Promise.all([
         getEmployeeById(user.employeeId),
         getAttendanceByEmployee(user.employeeId),
         getShiftsByEmployee(user.employeeId),
         getInventory(),
         getOnShiftEmployees(),
-        getShiftConfigs()
+        getShiftConfigs(),
+        getAttendanceStats(user.employeeId),
+        getEmployeePayrolls(user.employeeId)
       ])
+
 
       setEmployee(employeeData)
       setMyAttendance(attendanceData)
@@ -70,14 +88,17 @@ export default function EmployeeDashboard() {
       setInventory(inventoryData)
       setOnShift(onShiftData)
       setShiftConfigs(configsData)
+      setPerformanceStats(statsData as any)
+      setMyPayrolls(payrollData)
       setIsLoading(false)
+
     }
 
     fetchData()
   }, [user?.employeeId])
 
   // Get today's attendance
-  const today = new Date().toISOString().split("T")[0]
+  const today = getLocalYYYYMMDD()
   const todayAttendance = myAttendance.filter(log => log.timestamp.startsWith(today))
   
   // Check if currently clocked in
@@ -247,6 +268,30 @@ export default function EmployeeDashboard() {
           </CardContent>
         </Card>
 
+        {/* My Performance */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">My Performance</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-2xl font-bold">{Math.round(performanceStats?.totalHours || 0)}h</span>
+                <Badge 
+                  variant={ (performanceStats?.lateCount || 0) > 0 ? "destructive" : "outline"}
+                  className="rounded-sm text-[10px]"
+                >
+                  {(performanceStats?.lateCount || 0)} LATE
+                </Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                This Month&apos;s Statistics
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Stock Health */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -278,6 +323,40 @@ export default function EmployeeDashboard() {
             <p className="text-xs text-muted-foreground">
               {onShift.map(e => e.nickname).join(", ") || "No one clocked in"}
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Salary & Payroll Card */}
+        <Card className="bg-green-50/50 border-green-200 dark:bg-green-950/20 dark:border-green-900 overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-3 opacity-10">
+            <Wallet size={64} className="text-green-600" />
+          </div>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-green-600" />
+              Latest Salary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {myPayrolls.filter(p => p.status === 'settled').length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-2xl font-bold text-green-700 dark:text-green-500">
+                  {new Intl.NumberFormat("id-ID", {
+                    style: "currency",
+                    currency: "IDR",
+                    minimumFractionDigits: 0
+                  }).format(myPayrolls.find(p => p.status === 'settled')?.total_payroll || 0)}
+                </div>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tight">
+                  Finalized Period: {myPayrolls.find(p => p.status === 'settled')?.end_date}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="text-2xl font-bold text-muted-foreground/30">—</div>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-tight">No Settled Payroll</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -374,7 +453,7 @@ export default function EmployeeDashboard() {
                           Low Stock Warning
                         </p>
                         <p className="text-sm text-yellow-600 dark:text-yellow-300">
-                          {lowStockItems.map(i => i.name).slice(0, 3).join(", ")}
+                          {lowStockItems.map((i: any) => i.name).slice(0, 3).join(", ")}
                           {lowStockItems.length > 3 && ` +${lowStockItems.length - 3} more`}
                         </p>
                       </div>
@@ -418,68 +497,96 @@ export default function EmployeeDashboard() {
         </Card>
       </div>
 
-      {/* My Assigned Shifts */}
-      {myShifts.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              My Assigned Shifts
-            </CardTitle>
-            <CardDescription>Your upcoming scheduled shifts</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[200px]">
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {myShifts
-                  .filter(shift => new Date(shift.date) >= new Date(new Date().toISOString().split("T")[0]))
-                  .slice(0, 9)
-                  .map((shift) => {
-                    const isToday = shift.date === new Date().toISOString().split("T")[0]
-                    const shiftType = getShiftType(shift)
-                    return (
-                      <div
-                        key={shift.id}
-                        className={`flex items-center justify-between p-3 border rounded-lg ${
-                          isToday ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" : ""
-                        }`}
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium">
-                              {format(new Date(shift.date), "EEE, MMM d")}
-                            </p>
-                            {isToday && <Badge className="bg-blue-500">Today</Badge>}
+      {/* My Assigned Shifts - Weekly Calendar View */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5" />
+            My Weekly Schedule
+          </CardTitle>
+          <CardDescription>Your schedule for the next 7 days</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            {(() => {
+              const dates = []
+              const today = new Date()
+              today.setHours(0, 0, 0, 0)
+              
+              for (let i = 0; i < 7; i++) {
+                const date = new Date(today)
+                date.setDate(today.getDate() + i)
+                const dateStr = getLocalYYYYMMDD(date)
+                const shiftsForDay = myShifts.filter(s => s.date === dateStr)
+                
+                dates.push({
+                  date,
+                  dateStr,
+                  shifts: shiftsForDay,
+                  isToday: i === 0
+                })
+              }
+              
+              return dates.map(({ date, dateStr, shifts, isToday }) => (
+                <div
+                  key={dateStr}
+                  className={cn(
+                    "flex flex-col p-3 border rounded-lg transition-all",
+                    isToday ? "bg-primary/5 border-primary/30 ring-1 ring-primary/20" : "bg-card",
+                    shifts.length === 0 ? "opacity-60" : "shadow-sm"
+                  )}
+                >
+                  <div className="flex flex-col mb-2">
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase tracking-wider",
+                      isToday ? "text-primary" : "text-muted-foreground"
+                    )}>
+                      {format(date, "EEEE")}
+                    </span>
+                    <span className="text-sm font-semibold">
+                      {format(date, "MMM d")}
+                    </span>
+                    {isToday && <Badge className="mt-1 h-4 text-[9px] w-fit px-1.5">Today</Badge>}
+                  </div>
+                  
+                  <div className="flex-1 space-y-2">
+                    {shifts.length > 0 ? (
+                      shifts.map(shift => {
+                        const shiftType = getShiftType(shift)
+                        return (
+                          <div key={shift.id} className="space-y-1">
                             <Badge 
                               variant="outline" 
-                              className={`text-[10px] ${shiftType === "Full Time" 
-                                ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300" 
-                                : "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300"
-                              }`}
+                              className={cn(
+                                "text-[9px] h-4 py-0 leading-none",
+                                shiftType === "Full Time" 
+                                  ? "bg-blue-50 text-blue-700 border-blue-200" 
+                                  : "bg-green-50 text-green-700 border-green-200"
+                              )}
                             >
                               {shiftType}
                             </Badge>
+                            <p className="text-xs font-medium leading-tight text-foreground/90">
+                              {getShiftDisplayName(shift)}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {shift.start_time}-{shift.end_time}
+                            </p>
                           </div>
-                          <p className="text-sm font-medium text-foreground/80">
-                            {getShiftDisplayName(shift)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {shift.start_time} - {shift.end_time}
-                          </p>
-                        </div>
+                        )
+                      })
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-2 h-full">
+                        <span className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Day Off</span>
                       </div>
-                    )
-                  })}
-              </div>
-              {myShifts.filter(shift => new Date(shift.date) >= new Date(new Date().toISOString().split("T")[0])).length === 0 && (
-                <div className="text-center py-4 text-muted-foreground">
-                  No upcoming shifts scheduled
+                    )}
+                  </div>
                 </div>
-              )}
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      )}
+              ))
+            })()}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Low Stock Items Detail */}
       {lowStockItems.length > 0 && (
@@ -494,7 +601,7 @@ export default function EmployeeDashboard() {
           <CardContent>
             <ScrollArea className="h-[200px]">
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {lowStockItems.map((item) => (
+                {lowStockItems.map((item: any) => (
                   <div
                     key={item.id}
                     className="flex items-center justify-between p-3 border rounded-lg"

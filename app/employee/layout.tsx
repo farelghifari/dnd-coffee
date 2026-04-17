@@ -53,7 +53,7 @@ function EmployeeLayoutContent({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <User className="h-4 w-4" />
-              <span>{user.email}</span>
+              <span>{user.nickname || user.name || user.email}</span>
             </div>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />
