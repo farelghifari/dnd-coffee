@@ -387,6 +387,12 @@ export default function SchedulingPage() {
     return dateStr === today
   }
 
+  // Check if date is in the past
+  const isPast = (dateStr: string) => {
+    const today = getLocalYYYYMMDD()
+    return dateStr < today
+  }
+
   // Format week range for header
   const weekRangeStr = useMemo(() => {
     const endDate = new Date(currentWeekStart)
@@ -496,7 +502,8 @@ export default function SchedulingPage() {
                     "border-r border-b flex flex-col min-h-[100px]",
                     !isCurrentMonth && "bg-muted/30 opacity-50",
                     isTodayDate && "bg-foreground/5",
-                    isWeekendDay && !isTodayDate && isCurrentMonth && "bg-orange-50/50 dark:bg-orange-950/10"
+                    isWeekendDay && !isTodayDate && isCurrentMonth && "bg-orange-50/50 dark:bg-orange-950/10",
+                    isPast(dateStr) && "bg-muted/10 grayscale-[0.2]"
                   )}
                 >
                   <div className="p-1 flex justify-end">
@@ -512,11 +519,11 @@ export default function SchedulingPage() {
                   <div
                     className={cn(
                       "flex-1 p-1 space-y-1 overflow-y-auto",
-                      canEdit && "cursor-pointer"
+                      canEdit && !isPast(dateStr) && "cursor-pointer"
                     )}
-                    onDragOver={canEdit ? handleDragOver : undefined}
-                    onDrop={canEdit ? () => handleDrop(dateStr, dayOfWeek) : undefined}
-                    onClick={canEdit ? () => handleCellClick(dateStr, dayOfWeek) : undefined}
+                    onDragOver={canEdit && !isPast(dateStr) ? handleDragOver : undefined}
+                    onDrop={canEdit && !isPast(dateStr) ? () => handleDrop(dateStr, dayOfWeek) : undefined}
+                    onClick={canEdit && !isPast(dateStr) ? () => handleCellClick(dateStr, dayOfWeek) : undefined}
                   >
                     {getShiftsForDate(dateStr).map((shift) => {
                       const slotInfo = getTimeSlotInfo(shift)
@@ -526,17 +533,18 @@ export default function SchedulingPage() {
                           className={cn(
                             "px-1.5 py-1 rounded-sm border relative group shrink-0",
                             slotInfo.color,
-                            canEdit && "cursor-pointer hover:brightness-95"
+                            canEdit && !isPast(dateStr) && "cursor-pointer hover:brightness-95",
+                            isPast(dateStr) && "opacity-70 cursor-default"
                           )}
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (canEdit) handleEditShiftClick(shift)
+                            if (canEdit && !isPast(dateStr)) handleEditShiftClick(shift)
                           }}
                           title={`${shift.start_time.substring(0,5)} - ${shift.end_time.substring(0,5)} | ${shift.employee_name}`}
                         >
-                          {canEdit && (
+                          {canEdit && !isPast(dateStr) && (
                             <button
-                              onClick={() => handleRemoveShift(shift.id)}
+                              onClick={(e) => { e.stopPropagation(); handleRemoveShift(shift.id); }}
                               className="absolute -top-1 -right-1 w-4 h-4 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
                             >
                               <X className="w-3 h-3" />

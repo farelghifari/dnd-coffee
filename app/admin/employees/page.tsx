@@ -8,9 +8,14 @@ import {
   assignNFC,
   toggleEmployeeStatus,
   getAttendanceByEmployee,
+  getShiftsByEmployee,
+  getOvertimeRequests,
+  calculateRegulatedSession,
   logActivity,
   type Employee,
-  type AttendanceLog
+  type AttendanceLog,
+  type ShiftAssignment,
+  type OvertimeRequest
 } from "@/lib/api/supabase-service"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -55,6 +60,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { useAuth } from "@/lib/auth-context"
+import { format } from "date-fns"
 
 export default function EmployeesPage() {
   const { isSuperAdmin } = useAuth()
@@ -69,6 +75,8 @@ export default function EmployeesPage() {
   const [nfcInput, setNfcInput] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
+  const [empShifts, setEmpShifts] = useState<ShiftAssignment[]>([])
+  const [empOvertimeRequests, setEmpOvertimeRequests] = useState<OvertimeRequest[]>([])
   
   const [newEmployee, setNewEmployee] = useState({
     name: "",
@@ -242,8 +250,14 @@ export default function EmployeesPage() {
 
   const handleViewAttendance = async (employee: Employee) => {
     setSelectedEmployee(employee)
-    const logs = await getAttendanceByEmployee(employee.id)
+    const [logs, shifts, otRequests] = await Promise.all([
+      getAttendanceByEmployee(employee.id),
+      getShiftsByEmployee(employee.id),
+      getOvertimeRequests()
+    ])
     setAttendanceLogs(logs)
+    setEmpShifts(shifts)
+    setEmpOvertimeRequests(otRequests)
     setIsHistoryDialogOpen(true)
   }
 
@@ -688,7 +702,7 @@ export default function EmployeesPage() {
 
       {/* Attendance History Dialog */}
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
-        <DialogContent className="rounded-sm max-w-md">
+        <DialogContent className="rounded-sm max-w-lg">
           <DialogHeader>
             <DialogTitle>Attendance History</DialogTitle>
             <DialogDescription>
@@ -700,29 +714,174 @@ export default function EmployeesPage() {
               {attendanceLogs.length === 0 ? (
                 <p className="text-muted-foreground text-center py-4">No attendance records</p>
               ) : (
-                attendanceLogs.map((log) => (
-                  <div 
-                    key={log.id}
-                    className="flex items-center justify-between p-3 rounded-sm bg-muted/50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-2 h-2 rounded-full",
-                        log.type === "clock-in" ? "bg-[var(--status-healthy)]" : "bg-muted-foreground"
-                      )} />
-                      <span className="text-sm capitalize">{(log.type || log.action || "clock-in")?.replace("-", " ")}</span>
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      {new Date(log.timestamp || `${log.date || ""}T${log.time || "00:00"}`).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        hour12: false
-                      })}
-                    </span>
-                  </div>
-                ))
+                (() => {
+                  type ProcessedLog = AttendanceLog & {
+                    _isVirtual?: boolean
+                    _sessionMinutes?: number
+                    _isAutoClockOut?: boolean
+                    _isEarlyTapIn?: boolean
+                    _shiftStart?: string
+                    _shiftEnd?: string
+                  }
+
+                  const otMap = new Map<string, OvertimeRequest>()
+                  for (const ot of empOvertimeRequests) {
+                    if (ot.attendance_log_id) otMap.set(ot.attendance_log_id, ot)
+                  }
+
+                  const logsByDate = new Map<string, AttendanceLog[]>()
+                  for (const log of attendanceLogs) {
+                    const date = log.date || log.timestamp?.split('T')[0] || ''
+                    if (!logsByDate.has(date)) logsByDate.set(date, [])
+                    logsByDate.get(date)!.push(log)
+                  }
+
+                  const allProcessed: ProcessedLog[] = []
+
+                  for (const [dateStr, dayLogs] of logsByDate) {
+                    const sorted = [...dayLogs]
+                      .filter(l => l.status !== 'rejected')
+                      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                    
+                    const shift = empShifts.find(s => s.date === dateStr)
+                    let currentIn: AttendanceLog | null = null
+
+                    for (const log of sorted) {
+                      const action = log.action || log.type
+                      if (action === 'clock-in') {
+                        if (currentIn) {
+                          const otReq = otMap.get(currentIn.id)
+                          const session = calculateRegulatedSession(currentIn, null, shift, otReq?.status || 'none')
+                          allProcessed.push({ ...currentIn })
+                          if (session.isAutoClockOut && session.clockOut) {
+                            allProcessed.push({
+                              id: `virtual-${currentIn.id}`,
+                              employee_id: currentIn.employee_id,
+                              employee_name: currentIn.employee_name,
+                              date: currentIn.date,
+                              time: new Date(session.clockOut).toTimeString().substring(0, 8),
+                              timestamp: session.clockOut,
+                              action: 'clock-out', status: 'auto', type: 'clock-out',
+                              _isVirtual: true, _isAutoClockOut: true,
+                              _sessionMinutes: session.regularMinutes,
+                              _shiftStart: shift?.start_time?.substring(0, 5),
+                              _shiftEnd: shift?.end_time?.substring(0, 5),
+                            })
+                          }
+                        }
+                        currentIn = log
+                        const isEarly = shift && new Date(log.timestamp) < new Date(`${dateStr}T${shift.start_time}`)
+                        allProcessed.push({ 
+                          ...log, 
+                          _isEarlyTapIn: !!isEarly,
+                          _shiftStart: shift?.start_time?.substring(0, 5),
+                          _shiftEnd: shift?.end_time?.substring(0, 5),
+                        })
+                      } else if (action === 'clock-out' && currentIn) {
+                        const otReq = otMap.get(currentIn.id)
+                        const session = calculateRegulatedSession(currentIn, log, shift, otReq?.status || 'none')
+                        allProcessed.push({
+                          ...log,
+                          _sessionMinutes: session.regularMinutes,
+                          _isAutoClockOut: session.isAutoClockOut,
+                          _shiftStart: shift?.start_time?.substring(0, 5),
+                          _shiftEnd: shift?.end_time?.substring(0, 5),
+                        })
+                        currentIn = null
+                      } else {
+                        allProcessed.push({ ...log })
+                      }
+                    }
+
+                    if (currentIn) {
+                      const otReq = otMap.get(currentIn.id)
+                      const session = calculateRegulatedSession(currentIn, null, shift, otReq?.status || 'none')
+                      if (session.isAutoClockOut && session.clockOut) {
+                        allProcessed.push({
+                          id: `virtual-${currentIn.id}`,
+                          employee_id: currentIn.employee_id,
+                          employee_name: currentIn.employee_name,
+                          date: currentIn.date,
+                          time: new Date(session.clockOut).toTimeString().substring(0, 8),
+                          timestamp: session.clockOut,
+                          action: 'clock-out', status: 'auto', type: 'clock-out',
+                          _isVirtual: true, _isAutoClockOut: true,
+                          _sessionMinutes: session.regularMinutes,
+                          _shiftStart: shift?.start_time?.substring(0, 5),
+                          _shiftEnd: shift?.end_time?.substring(0, 5),
+                        })
+                      }
+                    }
+                  }
+
+                  const display = allProcessed
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .slice(0, 30)
+
+                  const fmtMins = (m: number) => {
+                    const h = Math.floor(m / 60)
+                    const mins = m % 60
+                    return `${h}h ${mins}m`
+                  }
+
+                  return display.map((log) => {
+                    const isClockIn = (log.type === 'clock-in' || log.action === 'clock-in')
+                    const isClockOut = (log.type === 'clock-out' || log.action === 'clock-out')
+                    return (
+                      <div 
+                        key={log.id}
+                        className={cn(
+                          "flex items-center justify-between p-3 rounded-sm",
+                          log._isVirtual 
+                            ? "bg-amber-50/50 dark:bg-amber-950/10 border border-amber-200/50" 
+                            : "bg-muted/50"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            isClockIn ? "bg-[var(--status-healthy)]" 
+                            : log._isVirtual ? "bg-amber-500"
+                            : "bg-muted-foreground"
+                          )} />
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium capitalize">
+                                {log._isVirtual ? "Clock Out (Auto)" : (log.type || log.action || "clock-in")?.replace("-", " ")}
+                              </span>
+                              {log._isVirtual && (
+                                <Badge variant="outline" className="text-[9px] h-3.5 rounded-none border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 px-1">
+                                  ⚡ Auto
+                                </Badge>
+                              )}
+                              {isClockIn && log._isEarlyTapIn && log._shiftStart && (
+                                <Badge variant="outline" className="text-[9px] h-3.5 rounded-none border-blue-300 text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 px-1">
+                                  Early • Shift {log._shiftStart}
+                                </Badge>
+                              )}
+                              {isClockOut && log._sessionMinutes != null && (
+                                <Badge variant="outline" className="text-[9px] h-3.5 rounded-none font-mono px-1">
+                                  {fmtMins(log._sessionMinutes)}
+                                </Badge>
+                              )}
+                            </div>
+                            {isClockOut && log._shiftStart && log._shiftEnd && (
+                              <p className="text-[10px] text-muted-foreground/70 mt-0.5">Shift {log._shiftStart}-{log._shiftEnd}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm font-mono">
+                            {format(new Date(log.timestamp || `${log.date || ""}T${log.time || "00:00"}`), "HH:mm")}
+                          </span>
+                          <p className="text-[10px] text-muted-foreground">
+                            {format(new Date(log.timestamp || `${log.date || ""}T${log.time || "00:00"}`), "MMM d")}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })
+                })()
               )}
             </div>
           </div>

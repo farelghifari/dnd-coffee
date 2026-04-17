@@ -1868,7 +1868,7 @@ export async function getDailyWorkDuration(employeeId: string, date: string): Pr
 }
 
 // Helper for regulated session calculation
-function calculateRegulatedSession(
+export function calculateRegulatedSession(
   clockInLog: AttendanceLog, 
   clockOutLog: AttendanceLog | null, 
   shift?: ShiftAssignment,
@@ -2380,16 +2380,19 @@ export async function getShiftAssignments(): Promise<ShiftAssignment[]> {
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('shifts')
-      .select('*')
+      .select('*, employees(name)')
       .order('date', { ascending: true })
     
-    console.log("DATA (getShiftAssignments):", data)
-    console.log("ERROR (getShiftAssignments):", error)
-    
     if (error) {
+      console.error("ERROR (getShiftAssignments):", error.message)
       return []
     }
-    return data || []
+
+    // Map the joined data to include employee_name
+    return (data || []).map(shift => ({
+      ...shift,
+      employee_name: (shift.employees as any)?.name || 'Unknown'
+    })) as ShiftAssignment[]
   }
   
   const stored = getStoredData(STORAGE_KEYS.shiftAssignments, mockShiftAssignments)
@@ -2408,16 +2411,18 @@ export async function getShiftsByDate(date: string): Promise<ShiftAssignment[]> 
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('shifts')
-      .select('*')
+      .select('*, employees(name)')
       .eq('date', date)
     
-    console.log("DATA (getShiftsByDate):", data)
-    console.log("ERROR (getShiftsByDate):", error)
-    
     if (error) {
+      console.error("ERROR (getShiftsByDate):", error.message)
       return []
     }
-    return data || []
+    
+    return (data || []).map(shift => ({
+      ...shift,
+      employee_name: (shift.employees as any)?.name || 'Unknown'
+    })) as ShiftAssignment[]
   }
   
   const shifts = await getShiftAssignments()
@@ -2428,17 +2433,19 @@ export async function getShiftsByEmployee(employeeId: string): Promise<ShiftAssi
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('shifts')
-      .select('*')
+      .select('*, employees(name)')
       .eq('employee_id', employeeId)
       .order('date', { ascending: true })
     
-    console.log("DATA (getShiftsByEmployee):", data)
-    console.log("ERROR (getShiftsByEmployee):", error)
-    
     if (error) {
+      console.error("ERROR (getShiftsByEmployee):", error.message)
       return []
     }
-    return data || []
+    
+    return (data || []).map(shift => ({
+      ...shift,
+      employee_name: (shift.employees as any)?.name || 'Unknown'
+    })) as ShiftAssignment[]
   }
   
   const shifts = await getShiftAssignments()
@@ -2485,7 +2492,6 @@ export async function addShiftAssignment(assignment: {
 
     const shiftData: any = {
       employee_id: assignment.employee_id,
-      employee_name: assignment.employee_name,
       date: assignment.date,
       start_time: assignment.start_time,
       end_time: assignment.end_time,
@@ -2498,27 +2504,33 @@ export async function addShiftAssignment(assignment: {
         .from('shifts')
         .update(shiftData)
         .eq('id', existing.id)
-        .select()
+        .select('*, employees(name)')
         .single()
       
       if (error) {
-        console.error("Shift update error:", error)
+        console.error("Shift update error:", error.message)
         return null
       }
-      return data
+      return {
+        ...data,
+        employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
+      } as ShiftAssignment
     } else {
       console.log("[v0] Inserting new shift")
       const { data, error } = await supabase
         .from('shifts')
         .insert([shiftData])
-        .select()
+        .select('*, employees(name)')
         .single()
       
       if (error) {
-        console.error("Shift insert error:", error)
+        console.error("Shift insert error:", error.message)
         return null
       }
-      return data
+      return {
+        ...data,
+        employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
+      } as ShiftAssignment
     }
   }
   
@@ -2583,7 +2595,6 @@ export async function updateShiftAssignment(id: string, updates: Partial<ShiftAs
     // Only include valid database columns
     const updateData: any = {}
     if (updates.employee_id) updateData.employee_id = updates.employee_id
-    if (updates.employee_name) updateData.employee_name = updates.employee_name
     if (updates.date) updateData.date = updates.date
     if (updates.start_time) updateData.start_time = updates.start_time
     if (updates.end_time) updateData.end_time = updates.end_time
@@ -2595,14 +2606,17 @@ export async function updateShiftAssignment(id: string, updates: Partial<ShiftAs
       .from('shifts')
       .update(updateData)
       .eq('id', id)
-      .select()
+      .select('*, employees(name)')
       .single()
     
     if (error) {
-      console.error("ERROR (updateShiftAssignment):", error)
+      console.error("ERROR (updateShiftAssignment):", error.message || error)
       return null
     }
-    return data
+    return {
+      ...data,
+      employee_name: (data.employees as any)?.name || updates.employee_name || 'Unknown'
+    } as ShiftAssignment
   }
   
   const shifts = await getShiftAssignments()

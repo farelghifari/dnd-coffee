@@ -14,12 +14,15 @@ import {
   getShiftConfigs,
   getAttendanceStats,
   getEmployeePayrolls,
+  getOvertimeRequests,
+  calculateRegulatedSession,
   type Employee,
   type AttendanceLog,
   type InventoryItem,
   type ShiftAssignment,
   type ShiftConfig,
-  type PayrollRecord
+  type PayrollRecord,
+  type OvertimeRequest
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -60,6 +63,7 @@ export default function EmployeeDashboard() {
   } | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [myPayrolls, setMyPayrolls] = useState<PayrollRecord[]>([])
+  const [overtimeRequests, setOvertimeRequests] = useState<OvertimeRequest[]>([])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -70,7 +74,7 @@ export default function EmployeeDashboard() {
 
       setIsLoading(true)
       
-      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData] = await Promise.all([
+      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData, otData] = await Promise.all([
         getEmployeeById(user.employeeId),
         getAttendanceByEmployee(user.employeeId),
         getShiftsByEmployee(user.employeeId),
@@ -78,7 +82,8 @@ export default function EmployeeDashboard() {
         getOnShiftEmployees(),
         getShiftConfigs(),
         getAttendanceStats(user.employeeId),
-        getEmployeePayrolls(user.employeeId)
+        getEmployeePayrolls(user.employeeId),
+        getOvertimeRequests()
       ])
 
 
@@ -90,6 +95,7 @@ export default function EmployeeDashboard() {
       setShiftConfigs(configsData)
       setPerformanceStats(statsData as any)
       setMyPayrolls(payrollData)
+      setOvertimeRequests(otData)
       setIsLoading(false)
 
     }
@@ -375,35 +381,193 @@ export default function EmployeeDashboard() {
             <ScrollArea className="h-[300px] pr-4">
               {myAttendance.length > 0 ? (
                 <div className="flex flex-col gap-3">
-                  {myAttendance.slice(0, 20).map((log) => (
-                    <div
-                      key={log.id}
-                      className="flex items-center justify-between py-2 border-b last:border-0"
-                    >
-                      <div className="flex items-center gap-3">
-                        {log.type === "clock-in" ? (
-                          <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                  {(() => {
+                    // Process attendance to inject auto-tap-out and calculate durations
+                    type ProcessedLog = AttendanceLog & {
+                      _isVirtual?: boolean
+                      _sessionMinutes?: number
+                      _isAutoClockOut?: boolean
+                      _isEarlyTapIn?: boolean
+                      _shiftStart?: string   // e.g. "14:00"
+                      _shiftEnd?: string     // e.g. "22:00"
+                    }
+
+                    // Build OT map
+                    const otMap = new Map<string, OvertimeRequest>()
+                    for (const ot of overtimeRequests) {
+                      if (ot.attendance_log_id) otMap.set(ot.attendance_log_id, ot)
+                    }
+
+                    // Group logs by date
+                    const logsByDate = new Map<string, AttendanceLog[]>()
+                    for (const log of myAttendance) {
+                      const date = log.date || log.timestamp?.split('T')[0] || ''
+                      if (!logsByDate.has(date)) logsByDate.set(date, [])
+                      logsByDate.get(date)!.push(log)
+                    }
+
+                    const allProcessed: ProcessedLog[] = []
+
+                    for (const [dateStr, dayLogs] of logsByDate) {
+                      const sorted = [...dayLogs]
+                        .filter(l => l.status !== 'rejected')
+                        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                      
+                      const shift = myShifts.find(s => s.date === dateStr)
+
+                      let currentIn: AttendanceLog | null = null
+
+                      for (const log of sorted) {
+                        const action = log.action || log.type
+                        if (action === 'clock-in') {
+                          if (currentIn) {
+                            // Dangling clock-in, close previous
+                            const otReq = otMap.get(currentIn.id)
+                            const session = calculateRegulatedSession(currentIn, null, shift, otReq?.status || 'none')
+                            allProcessed.push({ ...currentIn })
+                            if (session.isAutoClockOut && session.clockOut) {
+                              allProcessed.push({
+                                id: `virtual-${currentIn.id}`,
+                                employee_id: currentIn.employee_id,
+                                employee_name: currentIn.employee_name,
+                                date: currentIn.date,
+                                time: new Date(session.clockOut).toTimeString().substring(0, 8),
+                                timestamp: session.clockOut,
+                                action: 'clock-out',
+                                status: 'auto',
+                                type: 'clock-out',
+                                _isVirtual: true,
+                                _isAutoClockOut: true,
+                                _sessionMinutes: session.regularMinutes,
+                              })
+                            }
+                          }
+                          currentIn = log
+                          // Check early tap-in
+                          const isEarly = shift && new Date(log.timestamp) < new Date(`${dateStr}T${shift.start_time}`)
+                          allProcessed.push({ 
+                            ...log, 
+                            _isEarlyTapIn: !!isEarly,
+                            _shiftStart: shift?.start_time?.substring(0, 5),
+                            _shiftEnd: shift?.end_time?.substring(0, 5),
+                          })
+                        } else if (action === 'clock-out' && currentIn) {
+                          const otReq = otMap.get(currentIn.id)
+                          const session = calculateRegulatedSession(currentIn, log, shift, otReq?.status || 'none')
+                          allProcessed.push({
+                            ...log,
+                            _sessionMinutes: session.regularMinutes,
+                            _isAutoClockOut: session.isAutoClockOut,
+                            _shiftStart: shift?.start_time?.substring(0, 5),
+                            _shiftEnd: shift?.end_time?.substring(0, 5),
+                          })
+                          currentIn = null
+                        } else {
+                          allProcessed.push({ ...log })
+                        }
+                      }
+
+                      // Handle dangling clock-in at end of day
+                      if (currentIn) {
+                        const otReq = otMap.get(currentIn.id)
+                        const session = calculateRegulatedSession(currentIn, null, shift, otReq?.status || 'none')
+                        if (session.isAutoClockOut && session.clockOut) {
+                          allProcessed.push({
+                            id: `virtual-${currentIn.id}`,
+                            employee_id: currentIn.employee_id,
+                            employee_name: currentIn.employee_name,
+                            date: currentIn.date,
+                            time: new Date(session.clockOut).toTimeString().substring(0, 8),
+                            timestamp: session.clockOut,
+                            action: 'clock-out',
+                            status: 'auto',
+                            type: 'clock-out',
+                            _isVirtual: true,
+                            _isAutoClockOut: true,
+                            _sessionMinutes: session.regularMinutes,
+                          })
+                        }
+                      }
+                    }
+
+                    // Sort newest first, take 20
+                    const display = allProcessed
+                      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                      .slice(0, 20)
+
+                    const fmtMins = (m: number) => {
+                      const h = Math.floor(m / 60)
+                      const mins = m % 60
+                      return `${h}h ${mins}m`
+                    }
+
+                    return display.map((log) => {
+                      const isClockIn = (log.type === 'clock-in' || log.action === 'clock-in')
+                      const isClockOut = (log.type === 'clock-out' || log.action === 'clock-out')
+                      return (
+                        <div
+                          key={log.id}
+                          className={cn(
+                            "flex items-center justify-between py-2 border-b last:border-0",
+                            log._isVirtual && "bg-amber-50/50 dark:bg-amber-950/10 rounded-sm px-2 -mx-2"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            {isClockIn ? (
+                              <div className="h-8 w-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+                              </div>
+                            ) : (
+                              <div className={cn(
+                                "h-8 w-8 rounded-full flex items-center justify-center",
+                                log._isVirtual 
+                                  ? "bg-amber-100 dark:bg-amber-900/30" 
+                                  : "bg-orange-100 dark:bg-orange-900/30"
+                              )}>
+                                <Clock className={cn(
+                                  "h-4 w-4",
+                                  log._isVirtual 
+                                    ? "text-amber-600 dark:text-amber-400" 
+                                    : "text-orange-600 dark:text-orange-400"
+                                )} />
+                              </div>
+                            )}
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-medium text-sm capitalize">
+                                  {log._isVirtual ? "Clock Out (Auto)" : (log.type || log.action || "clock-in").replace("-", " ")}
+                                </p>
+                                {log._isVirtual && (
+                                  <Badge variant="outline" className="text-[9px] h-3.5 rounded-none border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 px-1">
+                                    ⚡ Auto
+                                  </Badge>
+                                )}
+                                {isClockIn && log._isEarlyTapIn && log._shiftStart && (
+                                  <Badge variant="outline" className="text-[9px] h-3.5 rounded-none border-blue-300 text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 px-1">
+                                    Early • Shift {log._shiftStart}
+                                  </Badge>
+                                )}
+                                {isClockOut && log._sessionMinutes != null && (
+                                  <Badge variant="outline" className="text-[9px] h-3.5 rounded-none font-mono px-1">
+                                    {fmtMins(log._sessionMinutes)}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {format(new Date(log.timestamp || `${log.date}T${log.time}`), "MMM d, yyyy")}
+                                {isClockOut && log._shiftStart && log._shiftEnd && (
+                                  <span className="ml-1 text-muted-foreground/70">• Shift {log._shiftStart}-{log._shiftEnd}</span>
+                                )}
+                              </p>
+                            </div>
                           </div>
-                        ) : (
-                          <div className="h-8 w-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                            <Clock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-sm capitalize">
-                            {(log.type || log.action || "clock-in").replace("-", " ")}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(log.timestamp || `${log.date}T${log.time}`), "MMM d, yyyy")}
-                          </p>
+                          <span className="text-sm font-mono">
+                            {format(new Date(log.timestamp || `${log.date}T${log.time}`), "HH:mm")}
+                          </span>
                         </div>
-                      </div>
-                      <span className="text-sm font-mono">
-                        {format(new Date(log.timestamp || `${log.date}T${log.time}`), "HH:mm")}
-                      </span>
-                    </div>
-                  ))}
+                      )
+                    })
+                  })()}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground">

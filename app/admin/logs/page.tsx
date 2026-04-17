@@ -6,15 +6,21 @@ import {
   getAttendanceLogs,
   getSystemLogs,
   getSalesLogs,
+  getShiftAssignments,
+  getOvertimeRequests,
   updateAttendanceLogStatus,
   subscribeToInventoryTransactions,
   subscribeToAttendanceLogs,
   subscribeToSystemLogs,
   subscribeToSalesLogs,
+  calculateRegulatedSession,
   type StockLog,
   type AttendanceLog,
   type SystemLog,
-  type SalesLog
+  type SalesLog,
+  type ShiftAssignment,
+  type OvertimeRequest,
+  type DisplayUnit
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -46,13 +52,15 @@ import {
   ShoppingCart
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { format, subDays, startOfDay, endOfDay, isSameDay, differenceInMinutes } from "date-fns"
+import { format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
 
 export default function LogsPage() {
   const [stockLogs, setStockLogs] = useState<StockLog[]>([])
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([])
   const [systemLogs, setSystemLogs] = useState<SystemLog[]>([])
   const [salesLogs, setSalesLogs] = useState<SalesLog[]>([])
+  const [shiftAssignments, setShiftAssignments] = useState<ShiftAssignment[]>([])
+  const [overtimeRequests, setOvertimeRequests] = useState<OvertimeRequest[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedType, setSelectedType] = useState<"all" | "in" | "out" | "waste" | "opname">("all")
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
@@ -62,16 +70,20 @@ export default function LogsPage() {
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
-      const [stockData, attendanceData, systemData, salesData] = await Promise.all([
+      const [stockData, attendanceData, systemData, salesData, shiftData, otData] = await Promise.all([
         getStockLogs(),
         getAttendanceLogs(),
         getSystemLogs(),
-        getSalesLogs()
+        getSalesLogs(),
+        getShiftAssignments(),
+        getOvertimeRequests()
       ])
       setStockLogs(stockData)
       setAttendanceLogs(attendanceData)
       setSystemLogs(systemData)
       setSalesLogs(salesData)
+      setShiftAssignments(shiftData)
+      setOvertimeRequests(otData)
       setIsLoading(false)
     }
     fetchData()
@@ -126,19 +138,179 @@ export default function LogsPage() {
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }, [stockLogs, selectedDate, searchQuery, selectedType])
 
-  // Filter attendance logs by date
-  const filteredAttendanceLogs = useMemo(() => {
-    return attendanceLogs.filter((log) => {
+  // Build processed attendance logs with auto-tap-out injection and regulated durations
+  // This matches the same logic used in the Attendance Report page
+  type ProcessedAttendanceLog = AttendanceLog & {
+    _isVirtual?: boolean       // true = system-generated auto tap out
+    _sessionMinutes?: number   // regulated session minutes
+    _regularMinutes?: number   // regulated regular minutes
+    _overtimeMinutes?: number  // regulated overtime minutes (only if approved)
+    _dailyRegular?: number     // total regular mins for the day
+    _dailyOvertime?: number    // total approved OT mins for the day
+    _isLate?: boolean
+    _lateMinutes?: number
+    _isPenalty?: boolean
+    _isAutoClockOut?: boolean
+  }
+
+  const processedAttendanceLogs = useMemo((): ProcessedAttendanceLog[] => {
+    const dateStart = startOfDay(selectedDate)
+    const dateEnd = endOfDay(selectedDate)
+    const dateStr = format(selectedDate, 'yyyy-MM-dd')
+
+    // Filter real logs for the selected date
+    const dayLogs = attendanceLogs.filter((log) => {
       const logDate = new Date(log.timestamp)
-      const dateStart = startOfDay(selectedDate)
-      const dateEnd = endOfDay(selectedDate)
-      
-      const matchesDate = logDate >= dateStart && logDate <= dateEnd
+      return logDate >= dateStart && logDate <= dateEnd
+    })
+
+    // Group by employee
+    const empGroups = new Map<string, AttendanceLog[]>()
+    for (const log of dayLogs) {
+      if (log.status === 'rejected') continue
+      const key = log.employee_id
+      if (!empGroups.has(key)) empGroups.set(key, [])
+      empGroups.get(key)!.push(log)
+    }
+
+    // Build OT map (attendance_log_id -> OvertimeRequest)
+    const otMap = new Map<string, OvertimeRequest>()
+    for (const ot of overtimeRequests) {
+      if (ot.attendance_log_id) otMap.set(ot.attendance_log_id, ot)
+    }
+
+    // Find shift for employee on this date
+    const getShiftForEmployee = (empId: string): ShiftAssignment | undefined => {
+      return shiftAssignments.find(s => s.employee_id === empId && s.date === dateStr)
+    }
+
+    const result: ProcessedAttendanceLog[] = []
+
+    for (const [empId, logs] of empGroups) {
+      const sorted = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      const shift = getShiftForEmployee(empId)
+
+      let totalRegular = 0
+      let totalOvertime = 0
+
+      // Pair clock-ins with clock-outs
+      let currentIn: AttendanceLog | null = null
+      const sessions: { inLog: AttendanceLog; outLog: AttendanceLog | null; session: ReturnType<typeof calculateRegulatedSession> }[] = []
+
+      for (const log of sorted) {
+        const action = log.action || log.type
+        if (action === 'clock-in') {
+          // If there was a previous unpaired clock-in, close it
+          if (currentIn) {
+            const otReq = otMap.get(currentIn.id)
+            const otStatus = otReq?.status || 'none'
+            const session = calculateRegulatedSession(currentIn, null, shift, otStatus)
+            sessions.push({ inLog: currentIn, outLog: null, session })
+          }
+          currentIn = log
+        } else if (action === 'clock-out' && currentIn) {
+          const otReq = otMap.get(currentIn.id)
+          const otStatus = otReq?.status || 'none'
+          const session = calculateRegulatedSession(currentIn, log, shift, otStatus)
+          sessions.push({ inLog: currentIn, outLog: log, session })
+          currentIn = null
+        }
+      }
+
+      // Handle dangling clock-in (no clock-out)
+      if (currentIn) {
+        const otReq = otMap.get(currentIn.id)
+        const otStatus = otReq?.status || 'none'
+        const session = calculateRegulatedSession(currentIn, null, shift, otStatus)
+        sessions.push({ inLog: currentIn, outLog: null, session })
+      }
+
+      // Calculate daily totals
+      for (const s of sessions) {
+        totalRegular += s.session.regularMinutes
+        totalOvertime += s.session.overtimeMinutes
+      }
+      // Rule 1: Max 8 hours regular per day
+      totalRegular = Math.min(totalRegular, 480)
+
+      // Now produce the final log entries for display
+      for (const s of sessions) {
+        // Add the clock-in log
+        result.push({
+          ...s.inLog,
+          _isLate: s.session.isLate,
+          _lateMinutes: s.session.lateMinutes,
+          _isPenalty: s.session.isPenalty,
+        })
+
+        if (s.outLog) {
+          // Real clock-out exists
+          result.push({
+            ...s.outLog,
+            _sessionMinutes: s.session.regularMinutes,
+            _regularMinutes: s.session.regularMinutes,
+            _overtimeMinutes: s.session.overtimeMinutes,
+            _dailyRegular: totalRegular,
+            _dailyOvertime: totalOvertime,
+            _isAutoClockOut: s.session.isAutoClockOut,
+          })
+        } else if (s.session.isAutoClockOut && s.session.clockOut) {
+          // No real clock-out but system auto-tapped out -> inject virtual log
+          const virtualLog: ProcessedAttendanceLog = {
+            id: `virtual-${s.inLog.id}`,
+            employee_id: s.inLog.employee_id,
+            employee_name: s.inLog.employee_name,
+            date: s.inLog.date,
+            time: new Date(s.session.clockOut).toTimeString().substring(0, 8),
+            timestamp: s.session.clockOut,
+            action: 'clock-out',
+            status: 'auto',
+            type: 'clock-out',
+            _isVirtual: true,
+            _isAutoClockOut: true,
+            _sessionMinutes: s.session.regularMinutes,
+            _regularMinutes: s.session.regularMinutes,
+            _overtimeMinutes: s.session.overtimeMinutes,
+            _dailyRegular: totalRegular,
+            _dailyOvertime: totalOvertime,
+          }
+          result.push(virtualLog)
+        }
+      }
+    }
+
+    // Also include rejected logs for display (with opacity)
+    const rejectedLogs = dayLogs.filter(l => l.status === 'rejected')
+    for (const log of rejectedLogs) {
+      result.push(log)
+    }
+
+    // Filter by search
+    const filtered = result.filter(log => {
       const matchesSearch = (log.employee_name || "").toLowerCase().includes(searchQuery.toLowerCase())
-      
-      return matchesDate && matchesSearch
-    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-  }, [attendanceLogs, selectedDate, searchQuery])
+      return matchesSearch
+    })
+
+    return filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  }, [attendanceLogs, shiftAssignments, overtimeRequests, selectedDate, searchQuery])
+
+  // Helper to format minutes into "Xh Ym"
+  const formatMinutes = (mins: number): string => {
+    const h = Math.floor(mins / 60)
+    const m = mins % 60
+    return `${h}h ${m}m`
+  }
+
+  const handleUpdateStatus = async (id: string, status: string) => {
+    if (!confirm(`Mark this entry as ${status}?`)) return
+    const success = await updateAttendanceLogStatus(id, status)
+    if (success) {
+      // Refresh local state or rely on realtime subscription
+      setAttendanceLogs(prev => prev.map(l => l.id === id ? { ...l, status } : l))
+    } else {
+      alert("Failed to update status")
+    }
+  }
 
   // Filter sales/menu logs by date
   const filteredSalesLogs = useMemo(() => {
@@ -160,64 +332,6 @@ export default function LogsPage() {
     const totalRevenue = filteredSalesLogs.reduce((sum, log) => sum + log.total_price, 0)
     return { totalQty, totalRevenue }
   }, [filteredSalesLogs])
-
-  // Helper to calculate shift duration from clock-in to clock-out
-  const getShiftDuration = (log: AttendanceLog): { session: string | null; daily: string | null; isOvertime: boolean } => {
-    const isClockOut = log.type === "clock-out" || log.action === "clock-out"
-    if (!isClockOut) return { session: null, daily: null, isOvertime: false }
-    
-    // Find the closest clock-in BEFORE this clock-out for the same employee
-    const empLogs = attendanceLogs
-      .filter(l => l.employee_id === log.employee_id && l.status !== 'rejected')
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    
-    const currentIndex = empLogs.findIndex(l => l.id === log.id)
-    if (currentIndex <= 0) return { session: null, daily: null, isOvertime: false }
-    
-    // Calculate THIS session duration (from preceding clock-in)
-    let sessionStr: string | null = null
-    const prevLog = empLogs[currentIndex - 1]
-    if (prevLog.type === "clock-in" || prevLog.action === "clock-in") {
-      const minutes = differenceInMinutes(new Date(log.timestamp), new Date(prevLog.timestamp))
-      const hours = Math.floor(minutes / 60)
-      const mins = minutes % 60
-      sessionStr = `${hours}h ${mins}m`
-    }
-    
-    // Calculate DAILY total by summing all completed sessions for this employee on this date
-    const logDate = log.timestamp.split('T')[0]
-    const dayLogs = empLogs.filter(l => l.timestamp.startsWith(logDate))
-    let totalDailyMinutes = 0
-    let clockInTime: Date | null = null
-    
-    for (const dl of dayLogs) {
-      const action = dl.action || dl.type
-      if (action === 'clock-in') {
-        clockInTime = new Date(dl.timestamp)
-      } else if (action === 'clock-out' && clockInTime) {
-        totalDailyMinutes += differenceInMinutes(new Date(dl.timestamp), clockInTime)
-        clockInTime = null
-      }
-    }
-    
-    const dailyHours = Math.floor(totalDailyMinutes / 60)
-    const dailyMins = totalDailyMinutes % 60
-    const dailyStr = `${dailyHours}h ${dailyMins}m`
-    const isOvertime = totalDailyMinutes > 480 // > 8 hours
-    
-    return { session: sessionStr, daily: dailyStr, isOvertime }
-  }
-
-  const handleUpdateStatus = async (id: string, status: string) => {
-    if (!confirm(`Mark this entry as ${status}?`)) return
-    const success = await updateAttendanceLogStatus(id, status)
-    if (success) {
-      // Refresh local state or rely on realtime subscription
-      setAttendanceLogs(prev => prev.map(l => l.id === id ? { ...l, status } : l))
-    } else {
-      alert("Failed to update status")
-    }
-  }
 
   // Filter system logs by date and search
   const filteredSystemLogs = useMemo(() => {
@@ -502,65 +616,89 @@ export default function LogsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="w-5 h-5" />
-                Attendance Logs ({filteredAttendanceLogs.length})
+                Attendance Logs ({processedAttendanceLogs.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {filteredAttendanceLogs.length === 0 ? (
+              {processedAttendanceLogs.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No attendance logs found for this date</p>
               ) : (
                 <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                  {filteredAttendanceLogs.map((log) => {
-                    const duration = getShiftDuration(log)
+                  {processedAttendanceLogs.map((log) => {
+                    const isClockIn = (log.type === "clock-in" || log.action === "clock-in")
+                    const isClockOut = (log.type === "clock-out" || log.action === "clock-out")
+                    const pLog = log as any // ProcessedAttendanceLog fields
                     return (
                       <div 
                         key={log.id}
                         className={cn(
                           "flex items-center justify-between p-4 rounded-sm border transition-colors",
-                          log.status === "rejected" ? "border-destructive/30 bg-destructive/5 opacity-70" : "border-border hover:bg-muted/50"
+                          log.status === "rejected" ? "border-destructive/30 bg-destructive/5 opacity-70" : 
+                          pLog._isVirtual ? "border-amber-300/50 bg-amber-50/30 dark:bg-amber-950/10" :
+                          "border-border hover:bg-muted/50"
                         )}
                       >
                         <div className="flex items-center gap-4">
                           <div className={cn(
                             "w-10 h-10 rounded-sm flex items-center justify-center",
-                            (log.type === "clock-in" || log.action === "clock-in")
+                            isClockIn
                               ? "bg-[var(--status-healthy)]/10" 
+                              : pLog._isVirtual ? "bg-amber-100 dark:bg-amber-900/30"
                               : "bg-muted"
                           )}>
-                            {(log.type === "clock-in" || log.action === "clock-in")
+                            {isClockIn
                               ? <LogIn className={cn("w-5 h-5", log.status === "rejected" ? "text-muted-foreground" : "text-[var(--status-healthy)]")} />
-                              : <LogOut className="w-5 h-5 text-muted-foreground" />
+                              : <LogOut className={cn("w-5 h-5", pLog._isVirtual ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")} />
                             }
                           </div>
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-medium text-lg leading-none">{log.employee_name || "Unknown"}</p>
                               {log.status === "rejected" ? (
                                 <Badge variant="destructive" className="text-[10px] h-4 rounded-none uppercase">REJECTED</Badge>
                               ) : log.status === "approved" ? (
                                 <Badge className="bg-[var(--status-healthy)] text-white text-[10px] h-4 rounded-none uppercase">APPROVED</Badge>
                               ) : null}
-                            </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <p className="text-sm text-muted-foreground capitalize">
-                                {((log.type || log.action) || "").replace("-", " ")}
-                              </p>
-                              {duration.session && (
-                                <Badge variant="outline" className="text-[10px] h-4 rounded-none flex gap-1 items-center font-mono">
-                                  <Clock className="w-2.5 h-2.5" />
-                                  {duration.session}
+                              {pLog._isVirtual && (
+                                <Badge variant="outline" className="text-[10px] h-4 rounded-none uppercase border-amber-400 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20">
+                                  ⚡ System Auto-Tap
                                 </Badge>
                               )}
-                              {duration.daily && (
+                              {pLog._isLate && isClockIn && (
+                                <Badge variant="outline" className={cn(
+                                  "text-[10px] h-4 rounded-none uppercase",
+                                  pLog._isPenalty 
+                                    ? "border-red-400 text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20" 
+                                    : "border-yellow-400 text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/20"
+                                )}>
+                                  {pLog._isPenalty ? "⚠ LATE" : "LATE"} {pLog._lateMinutes}m
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <p className="text-sm text-muted-foreground capitalize">
+                                {pLog._isVirtual ? "Clock Out (Auto)" : ((log.type || log.action) || "").replace("-", " ")}
+                              </p>
+                              {isClockOut && pLog._sessionMinutes != null && (
+                                <Badge variant="outline" className="text-[10px] h-4 rounded-none flex gap-1 items-center font-mono">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {formatMinutes(pLog._sessionMinutes)}
+                                </Badge>
+                              )}
+                              {isClockOut && pLog._dailyRegular != null && (
                                 <Badge 
                                   variant="outline" 
-                                  className={cn(
-                                    "text-[10px] h-4 rounded-none flex gap-1 items-center font-mono",
-                                    duration.isOvertime && "border-[var(--status-warning)] text-[var(--status-warning)]"
-                                  )}
+                                  className="text-[10px] h-4 rounded-none flex gap-1 items-center font-mono"
                                 >
-                                  Total: {duration.daily}
-                                  {duration.isOvertime && " ⚠️ OT"}
+                                  Total: {formatMinutes(pLog._dailyRegular)}
+                                </Badge>
+                              )}
+                              {isClockOut && pLog._dailyOvertime != null && pLog._dailyOvertime > 0 && (
+                                <Badge 
+                                  variant="outline" 
+                                  className="text-[10px] h-4 rounded-none flex gap-1 items-center font-mono border-[var(--status-warning)] text-[var(--status-warning)]"
+                                >
+                                  OT: {formatMinutes(pLog._dailyOvertime)} ✓
                                 </Badge>
                               )}
                             </div>
@@ -583,7 +721,7 @@ export default function LogsPage() {
                             </p>
                           </div>
                           
-                          {log.status !== "rejected" && (
+                          {log.status !== "rejected" && !pLog._isVirtual && (
                             <Button 
                               variant="ghost" 
                               size="icon" 
