@@ -18,21 +18,25 @@ import {
   getMonthlyOpex,
   addMonthlyOpex,
   deleteMonthlyOpex,
+  addStock,
   getInventoryOpnames,
   addInventoryOpname,
   uploadOpexAttachment,
+  getSalesReport,
   subscribeToInventoryTransactions,
   subscribeToInventoryItems,
   toBaseUnit,
   fromBaseUnit,
   getAllowedUnitsForItem,
   getDefaultDisplayUnit,
+  UNIT_CONVERSIONS,
   type InventoryItem,
   type MenuItem,
   type MenuRecipeIngredient,
   type MonthlyOpex,
   type InventoryOpname,
-  type DisplayUnit
+  type DisplayUnit,
+  type SalesReport
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -103,6 +107,7 @@ export default function InventoryPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [filteredMenu, setFilteredMenu] = useState<MenuItem[]>([])
   const [monthlyOpex, setMonthlyOpex] = useState<MonthlyOpex[]>([])
+  const [salesReport, setSalesReport] = useState<SalesReport[]>([])
   const [opnameHistory, setOpnameHistory] = useState<InventoryOpname[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -158,6 +163,7 @@ export default function InventoryPage() {
     name: "",
     category: "coffee" as "coffee" | "non-coffee" | "food",
     price: "",
+    packaging_cost: "0",
     ingredients: [] as MenuRecipeIngredient[]
   })
 
@@ -173,6 +179,7 @@ export default function InventoryPage() {
     itemId: "",
     actualStock: "",
     displayUnit: "pcs" as DisplayUnit,
+    theoreticalStock: 0 as number,
     reason: ""
   })
 
@@ -226,11 +233,12 @@ export default function InventoryPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const [invData, menuData, opexData, opnameData] = await Promise.all([
+      const [invData, menuData, opexData, opnameData, salesData] = await Promise.all([
         getInventory(),
         getMenuItems(),
         getMonthlyOpex(),
-        getInventoryOpnames()
+        getInventoryOpnames(),
+        getSalesReport()
       ])
       
       const menusWithRecipes = await Promise.all(
@@ -247,6 +255,7 @@ export default function InventoryPage() {
       setInventory(invData)
       setMenuItems(menusWithRecipes)
       setMonthlyOpex(opexData)
+      setSalesReport(salesData)
       setOpnameHistory(opnameData)
     } catch (err) {
       console.error("Error fetching data:", err)
@@ -278,6 +287,7 @@ export default function InventoryPage() {
       name: "",
       category: "coffee",
       price: "",
+      packaging_cost: "0",
       ingredients: []
     })
     setError(null)
@@ -287,22 +297,24 @@ export default function InventoryPage() {
     if (!formData.name || !formData.currentStock) return
     
     try {
-      const baseStock = toBaseUnit(parseFloat(formData.currentStock), formData.displayUnit)
-      const baseDaily = toBaseUnit(parseFloat(formData.dailyUsage || "0"), formData.displayUnit)
-      const baseMin = toBaseUnit(parseFloat(formData.minStock || "0"), formData.displayUnit)
-      const baseMax = toBaseUnit(parseFloat(formData.maxStock || "0"), formData.displayUnit)
+      const stockVal = toBaseUnit(parseFloat(formData.currentStock) || 0, formData.displayUnit)
+      const minVal = toBaseUnit(parseFloat(formData.minStock) || 0, formData.displayUnit)
+      const maxVal = toBaseUnit(parseFloat(formData.maxStock) || 0, formData.displayUnit)
+      const dailyVal = toBaseUnit(parseFloat(formData.dailyUsage) || 0, formData.displayUnit)
+      
+      const multiplier = UNIT_CONVERSIONS[formData.displayUnit]?.multiplier || 1
+      const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
       
       await upsertInventory({
         name: formData.name,
-        category: formData.category,
+        category: formData.category as any,
         unit: formData.unit,
-        stock: baseStock,
-        daily_usage: baseDaily,
-        min_stock: baseMin,
-        max_stock: baseMax,
-        unit_cost: parseFloat(formData.unitCost || "0"),
-        last_updated: new Date().toISOString()
-      } as any)
+        stock: stockVal,
+        min_stock: minVal,
+        max_stock: maxVal,
+        daily_usage: dailyVal,
+        unit_cost: normalizedCost
+      }, actorName)
       
       setIsAddItemModalOpen(false)
       resetItemForm()
@@ -316,23 +328,25 @@ export default function InventoryPage() {
     if (!formData.id || !formData.name || !formData.currentStock) return
     
     try {
-      const baseStock = toBaseUnit(parseFloat(formData.currentStock), formData.displayUnit)
-      const baseDaily = toBaseUnit(parseFloat(formData.dailyUsage || "0"), formData.displayUnit)
-      const baseMin = toBaseUnit(parseFloat(formData.minStock || "0"), formData.displayUnit)
-      const baseMax = toBaseUnit(parseFloat(formData.maxStock || "0"), formData.displayUnit)
+      const stockVal = toBaseUnit(parseFloat(formData.currentStock) || 0, formData.displayUnit)
+      const minVal = toBaseUnit(parseFloat(formData.minStock) || 0, formData.displayUnit)
+      const maxVal = toBaseUnit(parseFloat(formData.maxStock) || 0, formData.displayUnit)
+      const dailyVal = toBaseUnit(parseFloat(formData.dailyUsage) || 0, formData.displayUnit)
+      
+      const multiplier = UNIT_CONVERSIONS[formData.displayUnit]?.multiplier || 1
+      const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
 
       await upsertInventory({
         id: formData.id,
         name: formData.name,
-        category: formData.category,
+        category: formData.category as any,
         unit: formData.unit,
-        stock: baseStock,
-        daily_usage: baseDaily,
-        min_stock: baseMin,
-        max_stock: baseMax,
-        unit_cost: parseFloat(formData.unitCost || "0"),
-        last_updated: new Date().toISOString()
-      } as any)
+        stock: stockVal,
+        min_stock: minVal,
+        max_stock: maxVal,
+        daily_usage: dailyVal,
+        unit_cost: normalizedCost
+      }, actorName)
       
       setIsEditItemModalOpen(false)
       resetItemForm()
@@ -344,17 +358,19 @@ export default function InventoryPage() {
 
   const openEditItemModal = (item: InventoryItem) => {
     const dUnit = getDefaultDisplayUnit(item.unit)
+    const multiplier = UNIT_CONVERSIONS[dUnit]?.multiplier || 1
+    
     setFormData({
       id: item.id,
       name: item.name,
       category: item.category as any,
       unit: item.unit,
       displayUnit: dUnit,
-      currentStock: fromBaseUnit(item.stock || 0, dUnit).toString(),
-      dailyUsage: fromBaseUnit(item.daily_usage || 0, dUnit).toString(),
-      minStock: fromBaseUnit(item.min_stock || 0, dUnit).toString(),
-      maxStock: fromBaseUnit(item.max_stock || 0, dUnit).toString(),
-      unitCost: (item.unit_cost || 0).toString()
+      currentStock: parseFloat(fromBaseUnit(item.stock || 0, dUnit).toFixed(4)).toString(),
+      dailyUsage: parseFloat(fromBaseUnit(item.daily_usage || 0, dUnit).toFixed(4)).toString(),
+      minStock: parseFloat(fromBaseUnit(item.min_stock || 0, dUnit).toFixed(4)).toString(),
+      maxStock: parseFloat(fromBaseUnit(item.max_stock || 0, dUnit).toFixed(4)).toString(),
+      unitCost: parseFloat(((item.unit_cost || 0) * multiplier).toFixed(4)).toString()
     })
     setIsEditItemModalOpen(true)
   }
@@ -374,13 +390,17 @@ export default function InventoryPage() {
     if (!stockInForm.itemId || !stockInForm.quantity || !stockInForm.unitCost) return
     
     try {
-      const baseQty = toBaseUnit(parseFloat(stockInForm.quantity), stockInForm.displayUnit)
+      const item = inventory.find(i => i.id === stockInForm.itemId)
+      const receivedQty = toBaseUnit(parseFloat(stockInForm.quantity), stockInForm.displayUnit)
+      
+      const multiplier = UNIT_CONVERSIONS[stockInForm.displayUnit]?.multiplier || 1
+      const normalizedCost = (parseFloat(stockInForm.unitCost) || 0) / multiplier
       
       await addBatch({
         item_id: stockInForm.itemId,
-        quantity: baseQty,
+        quantity: parseFloat(stockInForm.quantity),
         unit: stockInForm.displayUnit,
-        unit_cost: parseFloat(stockInForm.unitCost),
+        unit_cost: normalizedCost,
         supplier_name: stockInForm.supplierName,
         received_date: stockInForm.receivedDate,
         expired_date: stockInForm.expiredDate,
@@ -458,46 +478,51 @@ export default function InventoryPage() {
     })
   }
 
-  const toggleIngredientUnit = (index: number) => {
+  const handleIngredientUnitChange = (index: number, newUnit: DisplayUnit) => {
     setMenuForm(prev => {
       const newIngredients = [...prev.ingredients];
-      const currentUnit = newIngredients[index].unit;
-      const currentQty = newIngredients[index].quantity || 0;
+      const oldUnit = newIngredients[index].unit;
+      const qty = parseFloat(newIngredients[index].quantity.toString()) || 0;
       
-      if (currentUnit === 'gram') {
-        newIngredients[index].unit = 'kg' as DisplayUnit;
-        newIngredients[index].quantity = currentQty / 1000;
-      } else if (currentUnit === 'kg') {
-        newIngredients[index].unit = 'gram' as DisplayUnit;
-        newIngredients[index].quantity = currentQty * 1000;
-      } else if (currentUnit === 'ml') {
-        newIngredients[index].unit = 'liter' as DisplayUnit;
-        newIngredients[index].quantity = currentQty / 1000;
-      } else if (currentUnit === 'liter') {
-        newIngredients[index].unit = 'ml' as DisplayUnit;
-        newIngredients[index].quantity = currentQty * 1000;
-      }
+      // Convert to base unit then to new display unit
+      const baseQty = toBaseUnit(qty, oldUnit || 'pcs');
+      const newQty = fromBaseUnit(baseQty, newUnit);
+      
+      newIngredients[index] = {
+        ...newIngredients[index],
+        unit: newUnit,
+        quantity: parseFloat(newQty.toFixed(4))
+      };
       return { ...prev, ingredients: newIngredients };
     });
   };
 
+  const menuCOGS = menuForm.ingredients.reduce((acc, ing) => {
+    const invItem = inventory.find(i => i.id === ing.inventory_item_id);
+    if (!invItem) return acc;
+    const baseQty = toBaseUnit(ing.quantity || 0, ing.unit || 'pcs');
+    return acc + (invItem.unit_cost || 0) * baseQty;
+  }, 0);
+
   const handleAddMenu = async () => {
     if (!menuForm.name || !menuForm.price) return
     try {
-      const menuId = await addMenuItem({
+      const newMenu = await addMenuItem({
         name: menuForm.name,
         type: menuForm.category,
         price: parseFloat(menuForm.price),
+        packaging_cost: parseFloat(menuForm.packaging_cost) || 0,
         status: 'active'
       })
       
-      if (menuId && menuForm.ingredients.length > 0) {
+      if (newMenu && menuForm.ingredients.length > 0) {
         // Convert quantities to base unit (g/ml) for DB
         const baseIngredients = menuForm.ingredients.map(ing => ({
           inventory_item_id: ing.inventory_item_id,
-          quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit)
+          quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit),
+          unit: ing.unit || 'pcs'
         }))
-        await saveMenuRecipes(menuId, baseIngredients)
+        await saveMenuRecipes(newMenu.id, baseIngredients)
       }
       
       setIsAddMenuModalOpen(false)
@@ -514,12 +539,14 @@ export default function InventoryPage() {
       await updateMenuItem(menuForm.id, {
         name: menuForm.name,
         type: menuForm.category,
-        price: parseFloat(menuForm.price)
+        price: parseFloat(menuForm.price),
+        packaging_cost: parseFloat(menuForm.packaging_cost) || 0
       })
       
       const baseIngredients = menuForm.ingredients.map(ing => ({
         inventory_item_id: ing.inventory_item_id,
-        quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit)
+        quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit),
+        unit: ing.unit || 'pcs'
       }))
       await saveMenuRecipes(menuForm.id, baseIngredients)
       
@@ -537,13 +564,14 @@ export default function InventoryPage() {
       name: item.name,
       category: (item.type || item.category) as any,
       price: item.price.toString(),
+      packaging_cost: (item.packaging_cost || 0).toString(),
       ingredients: (item.recipe?.ingredients || []).map(ing => {
-        const invItem = inventory.find(i => i.id === ing.inventory_item_id)
-        const dUnit = getDefaultDisplayUnit(invItem?.unit || 'pcs')
+        const invItem = inventory.find(iv => iv.id === ing.inventory_item_id)
+        const dUnit = (ing.unit as DisplayUnit) || (invItem?.unit as DisplayUnit) || 'pcs'
         return {
           inventory_item_id: ing.inventory_item_id,
-          quantity: fromBaseUnit(ing.quantity, dUnit),
-          unit: dUnit as DisplayUnit
+          unit: dUnit,
+          quantity: parseFloat(fromBaseUnit(ing.quantity, dUnit).toFixed(4))
         }
       })
     })
@@ -607,7 +635,7 @@ export default function InventoryPage() {
       })
       
       setIsRecordOpnameModalOpen(false)
-      setOpnameForm({ itemId: "", actualStock: "", displayUnit: "pcs", reason: "" })
+      setOpnameForm({ itemId: "", actualStock: "", displayUnit: "pcs", theoreticalStock: 0, reason: "" })
       fetchData()
     } catch (err) {
       setError("Failed to record stock opname")
@@ -774,6 +802,43 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="menu-items">
+          {/* Rule 3: Full Costing Insight Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <Card className="rounded-sm bg-primary/5 border-primary/20">
+              <CardHeader className="py-3">
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Total Monthly Overhead (BOP)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{formatPrice(monthlyOpex.reduce((sum, o) => sum + o.amount, 0))}</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Sum of all operational expenses</p>
+              </CardContent>
+            </Card>
+            <Card className="rounded-sm bg-primary/5 border-primary/20">
+              <CardHeader className="py-3">
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Total Items Sold</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{salesReport.reduce((sum, s) => sum + s.total_sold, 0)} Porsi</p>
+                <p className="text-[10px] text-muted-foreground mt-1">Across all menu items</p>
+              </CardContent>
+            </Card>
+            <Card className="rounded-sm bg-emerald-500/5 border-emerald-500/20">
+              <CardHeader className="py-3">
+                <CardTitle className="text-xs font-semibold text-emerald-600 uppercase font-bold">Overhead Share per Portion</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-emerald-700">
+                  {formatPrice(
+                    salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
+                      ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
+                      : 0
+                  )}
+                </p>
+                <p className="text-[10px] text-emerald-600/70 mt-1">Rule 3: (Total BOP / Total Sold)</p>
+              </CardContent>
+            </Card>
+          </div>
+
           {canEdit && (
             <div className="flex gap-2 mb-6">
               <Button className="rounded-sm" onClick={() => { resetMenuForm(); setIsAddMenuModalOpen(true); }}>
@@ -826,7 +891,7 @@ export default function InventoryPage() {
                           (item.recipe?.ingredients?.reduce((acc: number, ing: MenuRecipeIngredient) => {
                             const invItem = inventory.find(i => i.id === ing.inventory_item_id);
                             return acc + (invItem?.unit_cost || 0) * ing.quantity;
-                          }, 0) || 0)
+                          }, 0) || 0) + (item.packaging_cost || 0)
                         )}
                       </span>
                     </div>
@@ -842,7 +907,36 @@ export default function InventoryPage() {
                           );
                         })
                       ) : <div className="text-[11px] text-muted-foreground italic">No ingredients defined</div>}
+                      <div className="flex justify-between text-[11px] pt-1 border-t border-border/40 mt-1">
+                        <span className="text-muted-foreground">Packaging Cost</span>
+                        <span className="font-mono">{formatPrice(item.packaging_cost || 0)}</span>
+                      </div>
+                      <div className="flex justify-between text-[11px] pt-1 border-t border-dashed border-border/60 mt-1 bg-emerald-500/5 p-1 rounded-sm">
+                        <span className="text-emerald-700 font-medium">Overhead Share (Rule 3)</span>
+                        <span className="font-mono font-bold text-emerald-700">
+                          +{formatPrice(
+                            salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
+                              ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
+                              : 0
+                          )}
+                        </span>
+                      </div>
                     </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-border flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-tighter text-muted-foreground">Total Full Cost</span>
+                    <span className="text-sm font-bold font-mono">
+                      {formatPrice(
+                        (item.recipe?.ingredients?.reduce((acc: number, ing: MenuRecipeIngredient) => {
+                          const invItem = inventory.find(i => i.id === ing.inventory_item_id);
+                          return acc + (invItem?.unit_cost || 0) * ing.quantity;
+                        }, 0) || 0) + 
+                        (item.packaging_cost || 0) +
+                        (salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
+                          ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
+                          : 0)
+                      )}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -946,22 +1040,60 @@ export default function InventoryPage() {
       {/* Add/Edit Item Modal */}
       <Dialog open={isAddItemModalOpen || isEditItemModalOpen} onOpenChange={(open) => { if (!open) { setIsAddItemModalOpen(false); setIsEditItemModalOpen(false); resetItemForm(); }}}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader><DialogTitle>{isEditItemModalOpen ? "Edit" : "Add"} Inventory Item</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <Input placeholder="Item Name" value={formData.name} onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))} />
-            <div className="grid grid-cols-2 gap-4">
-              <Select value={formData.category} onValueChange={(v) => setFormData(p => ({ ...p, category: v as any }))}>
-                <SelectTrigger><SelectValue placeholder="Category"/></SelectTrigger>
-                <SelectContent>{categoryOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-              <Select value={formData.displayUnit} onValueChange={(v) => setFormData(p => ({ ...p, unit: v, displayUnit: v as DisplayUnit }))}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-              </Select>
+          <DialogHeader>
+            <DialogTitle>{isEditItemModalOpen ? "Edit" : "Add"} Inventory Item</DialogTitle>
+            <DialogDescription>
+              {isEditItemModalOpen ? "Modify the details of your inventory item." : "Create a new raw material item for your inventory."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-2">
+              <Label htmlFor="item-name">Item Name</Label>
+              <Input id="item-name" placeholder="Item Name" value={formData.name} onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))} />
             </div>
+            
             <div className="grid grid-cols-2 gap-4">
-              <Input type="number" placeholder="Stock" value={formData.currentStock} onChange={(e) => setFormData(p => ({...p, currentStock: e.target.value}))} />
-              <Input type="number" placeholder="Unit Cost" value={formData.unitCost} onChange={(e) => setFormData(p => ({...p, unitCost: e.target.value}))} />
+              <div className="space-y-2">
+                <Label htmlFor="category">Category</Label>
+                <Select value={formData.category} onValueChange={(v) => setFormData(p => ({ ...p, category: v as any }))}>
+                  <SelectTrigger id="category"><SelectValue placeholder="Category"/></SelectTrigger>
+                  <SelectContent>{categoryOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="unit">Base Unit</Label>
+                <Select value={formData.displayUnit} onValueChange={(v) => setFormData(p => ({ ...p, unit: v, displayUnit: v as DisplayUnit }))}>
+                  <SelectTrigger id="unit"><SelectValue/></SelectTrigger>
+                  <SelectContent>{unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="current-stock">Current Stock</Label>
+                <Input id="current-stock" type="number" placeholder="0" value={formData.currentStock} onChange={(e) => setFormData(p => ({...p, currentStock: e.target.value}))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="daily-usage">Daily Usage</Label>
+                <Input id="daily-usage" type="number" placeholder="0" value={formData.dailyUsage} onChange={(e) => setFormData(p => ({...p, dailyUsage: e.target.value}))} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="min-stock">Min Stock (Alert)</Label>
+                <Input id="min-stock" type="number" placeholder="0" value={formData.minStock} onChange={(e) => setFormData(p => ({...p, minStock: e.target.value}))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="max-stock">Max Stock (Capacity)</Label>
+                <Input id="max-stock" type="number" placeholder="0" value={formData.maxStock} onChange={(e) => setFormData(p => ({...p, maxStock: e.target.value}))} />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="unit-cost">Unit Cost (IDR)</Label>
+              <Input id="unit-cost" type="number" placeholder="0" value={formData.unitCost} onChange={(e) => setFormData(p => ({...p, unitCost: e.target.value}))} />
             </div>
           </div>
           <DialogFooter>
@@ -973,44 +1105,180 @@ export default function InventoryPage() {
       {/* Stock In Modal */}
       <Dialog open={isAddStockModalOpen} onOpenChange={setIsAddStockModalOpen}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader><DialogTitle>Stock In</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4">
-            <Select value={stockInForm.itemId} onValueChange={(v) => {
-              const item = inventory.find(i => i.id === v);
-              setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
-            }}>
-              <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
-              <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-            </Select>
-            <Input type="number" placeholder="Quantity" value={stockInForm.quantity} onChange={(e) => setStockInForm(p => ({ ...p, quantity: e.target.value }))} />
-            <Input placeholder="Supplier" value={stockInForm.supplierName} onChange={(e) => setStockInForm(p => ({ ...p, supplierName: e.target.value }))} />
-            <Input type="date" value={stockInForm.expiredDate} onChange={(e) => setStockInForm(p => ({ ...p, expiredDate: e.target.value }))} />
+          <DialogHeader>
+            <DialogTitle>Stock In</DialogTitle>
+            <DialogDescription>Record incoming stock for a specific item.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-2">
+              <Label>Select Item</Label>
+              <Select value={stockInForm.itemId} onValueChange={(v) => {
+                const item = inventory.find(i => i.id === v);
+                setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+              }}>
+                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
+                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Quantity</Label>
+                <Input type="number" placeholder="0" value={stockInForm.quantity} onChange={(e) => setStockInForm(p => ({ ...p, quantity: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit Cost (IDR)</Label>
+                <Input type="number" placeholder="0" value={stockInForm.unitCost} onChange={(e) => setStockInForm(p => ({ ...p, unitCost: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Received Date</Label>
+                <Input type="date" value={stockInForm.receivedDate} onChange={(e) => setStockInForm(p => ({ ...p, receivedDate: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Expiry Date (Optional)</Label>
+                <Input type="date" value={stockInForm.expiredDate} onChange={(e) => setStockInForm(p => ({ ...p, expiredDate: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Supplier Name</Label>
+              <Input placeholder="Vendor name" value={stockInForm.supplierName} onChange={(e) => setStockInForm(p => ({ ...p, supplierName: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea placeholder="Additional details..." value={stockInForm.notes} onChange={(e) => setStockInForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
           </div>
           <DialogFooter><Button onClick={handleStockIn}>Stock In</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stock Out Modal */}
+      <Dialog open={isStockOutModalOpen} onOpenChange={setIsStockOutModalOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-sm">
+          <DialogHeader>
+            <DialogTitle>Stock Out (Manual)</DialogTitle>
+            <DialogDescription>Manually subtract stock for waste, damage, or other reasons.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Select Item</Label>
+              <Select value={stockOutForm.itemId} onValueChange={(v) => {
+                const item = inventory.find(i => i.id === v);
+                setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+              }}>
+                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
+                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Quantity to Remove</Label>
+              <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Textarea placeholder="Damage, waste, expired, etc." value={stockOutForm.reason} onChange={(e) => setStockOutForm(p => ({ ...p, reason: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter><Button variant="destructive" onClick={handleStockOutManual}>Confirm removal</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Add Menu Modal */}
       <Dialog open={isAddMenuModalOpen || isEditMenuModalOpen} onOpenChange={(o) => { if(!o) { setIsAddMenuModalOpen(false); setIsEditMenuModalOpen(false); resetMenuForm(); }}}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
-          <DialogHeader><DialogTitle>{isEditMenuModalOpen ? "Edit" : "Add"} Menu</DialogTitle></DialogHeader>
-          <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
-            <Input placeholder="Menu Name" value={menuForm.name} onChange={(e) => setMenuForm(p => ({ ...p, name: e.target.value }))} />
-            <Input type="number" placeholder="Price" value={menuForm.price} onChange={(e) => setMenuForm(p => ({ ...p, price: e.target.value }))} />
+          <DialogHeader>
+            <DialogTitle>{isEditMenuModalOpen ? "Edit" : "Add"} Menu</DialogTitle>
+            <DialogDescription>Define your menu item and its recipe ingredients.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-2">
+              <Label>Menu Name</Label>
+              <Input placeholder="Menu Item Name" value={menuForm.name} onChange={(e) => setMenuForm(p => ({ ...p, name: e.target.value }))} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Category</Label>
+                    <Select value={menuForm.category} onValueChange={(v) => setMenuForm(p => ({ ...p, category: v as any }))}>
+                      <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="coffee">Coffee</SelectItem>
+                        <SelectItem value="non-coffee">Non-Coffee</SelectItem>
+                        <SelectItem value="food">Food</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Price (IDR)</Label>
+                    <Input type="number" placeholder="0" value={menuForm.price} onChange={(e) => setMenuForm(p => ({ ...p, price: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Packaging Cost (IDR)</Label>
+                  <Input type="number" placeholder="0" value={menuForm.packaging_cost} onChange={(e) => setMenuForm(p => ({ ...p, packaging_cost: e.target.value }))} />
+                </div>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label>Ingredients</Label>
-              {menuForm.ingredients.map((ing, idx) => (
-                <div key={idx} className="flex gap-1">
-                  <Select value={ing.inventory_item_id} onValueChange={(v) => updateIngredient(idx, 'inventory_item_id', v)}>
-                    <SelectTrigger className="flex-1"><SelectValue placeholder="Item"/></SelectTrigger>
-                    <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Input className="w-20" type="number" value={ing.quantity} onChange={(e) => updateIngredient(idx, 'quantity', e.target.value)} />
-                  <Button variant="ghost" size="icon" onClick={() => removeIngredientRow(idx)}><X className="w-4 h-4"/></Button>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={addIngredientRow}><Plus className="w-4 h-4 mr-2"/>Add</Button>
+              {menuForm.ingredients.map((ing, idx) => {
+                const invItem = inventory.find(i => i.id === ing.inventory_item_id);
+                const currentUnit = ing.unit || (invItem?.unit as DisplayUnit) || 'pcs';
+                
+                return (
+                  <div key={idx} className="p-3 border rounded-sm bg-muted/30 space-y-3 relative">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ingredient #{idx + 1}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeIngredientRow(idx)}>
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] uppercase text-muted-foreground font-semibold">Inventory Item</Label>
+                        <Select value={ing.inventory_item_id} onValueChange={(v) => updateIngredient(idx, 'inventory_item_id', v)}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Select item"/></SelectTrigger>
+                          <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[10px] uppercase text-muted-foreground font-semibold">Quantity & Unit</Label>
+                        <div className="flex gap-1">
+                          <Input className="h-9 flex-1" type="number" placeholder="0" value={ing.quantity} onChange={(e) => updateIngredient(idx, 'quantity', e.target.value)} />
+                          <Select value={currentUnit} onValueChange={(v) => handleIngredientUnitChange(idx, v as DisplayUnit)}>
+                            <SelectTrigger className="h-9 w-[80px] text-[10px] font-bold uppercase"><SelectValue/></SelectTrigger>
+                            <SelectContent>
+                              {getAllowedUnitsForItem(invItem?.unit || 'pcs').map(u => (
+                                <SelectItem key={u} value={u}>{u}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <Button variant="outline" size="sm" onClick={addIngredientRow}><Plus className="w-4 h-4 mr-2"/>Add Ingredient</Button>
             </div>
+
+              <div className="flex justify-between items-center p-3 rounded-sm bg-primary/10 border border-primary/20">
+                <div className="flex flex-col">
+                  <span className="text-xs text-muted-foreground uppercase font-bold">Estimated COGS</span>
+                  <p className="text-[10px] text-muted-foreground">Recipe + Packaging</p>
+                </div>
+                <span className="text-lg font-bold text-primary">{formatPrice(menuCOGS + (parseFloat(menuForm.packaging_cost) || 0))}</span>
+              </div>
           </div>
           <DialogFooter><Button onClick={isEditMenuModalOpen ? handleEditMenu : handleAddMenu}>Save</Button></DialogFooter>
         </DialogContent>
@@ -1019,17 +1287,50 @@ export default function InventoryPage() {
       {/* Record Opname Modal */}
       <Dialog open={isRecordOpnameModalOpen} onOpenChange={setIsRecordOpnameModalOpen}>
         <DialogContent className="sm:max-w-[425px] rounded-sm">
-          <DialogHeader><DialogTitle>Stock Take (Opname)</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Stock Take (Opname)</DialogTitle>
+            <DialogDescription>Perform a physical stock count audit.</DialogDescription>
+          </DialogHeader>
           <div className="grid gap-4 py-4">
-            <Select value={opnameForm.itemId} onValueChange={(v) => {
-              const item = inventory.find(i => i.id === v);
-              setOpnameForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
-            }}>
-              <SelectTrigger><SelectValue placeholder="Item"/></SelectTrigger>
-              <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-            </Select>
-            <Input type="number" placeholder="Actual Stock Count" value={opnameForm.actualStock} onChange={(e) => setOpnameForm(p => ({ ...p, actualStock: e.target.value }))} />
-            <Textarea placeholder="Reason" value={opnameForm.reason} onChange={(e) => setOpnameForm(p => ({ ...p, reason: e.target.value }))} />
+            <div className="space-y-2">
+              <Label>Select Item</Label>
+              <Select value={opnameForm.itemId} onValueChange={(v) => {
+                const item = inventory.find(i => i.id === v);
+                setOpnameForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs', theoreticalStock: item ? fromBaseUnit(item.stock, item ? getDefaultDisplayUnit(item.unit) : 'pcs') : 0 }));
+              }}>
+                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
+                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            
+            {opnameForm.itemId && (
+              <div className="p-3 bg-muted/30 rounded-sm border border-border grid grid-cols-2 gap-4">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">Expected (System)</span>
+                  <span className="text-sm font-mono font-bold">{opnameForm.theoreticalStock} {opnameForm.displayUnit}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground">Actual Result</span>
+                  <span className="text-sm font-mono font-bold">{parseFloat(opnameForm.actualStock) || 0} {opnameForm.displayUnit}</span>
+                </div>
+                <div className="col-span-2 pt-2 border-t border-border flex justify-between items-center">
+                  <span className="text-xs font-medium">Difference (Waste)</span>
+                  <span className={cn("text-sm font-mono font-bold", (parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock < 0 ? "text-destructive" : "text-emerald-500")}>
+                    {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock} {opnameForm.displayUnit}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Actual Physical Count ({opnameForm.displayUnit})</Label>
+              <Input type="number" placeholder="0" value={opnameForm.actualStock} onChange={(e) => setOpnameForm(p => ({ ...p, actualStock: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Notes / Reason</Label>
+              <Textarea placeholder="Explain any discrepancies..." value={opnameForm.reason} onChange={(e) => setOpnameForm(p => ({ ...p, reason: e.target.value }))} />
+            </div>
           </div>
           <DialogFooter><Button onClick={handleAddOpname}>Record Audit</Button></DialogFooter>
         </DialogContent>
@@ -1038,15 +1339,30 @@ export default function InventoryPage() {
       {/* Add Overhead Modal */}
       <Dialog open={isAddOpexModalOpen} onOpenChange={setIsAddOpexModalOpen}>
         <DialogContent className="sm:max-w-[425px] rounded-sm">
-          <DialogHeader><DialogTitle>Add Overhead</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Add Overhead</DialogTitle>
+            <DialogDescription>Record monthly operational expenditures.</DialogDescription>
+          </DialogHeader>
           <div className="grid gap-4 py-4">
-            <Input type="month" value={opexForm.month} onChange={(e) => setOpexForm(p => ({...p, month: e.target.value}))} />
-            <Select value={opexForm.category} onValueChange={(v) => setOpexForm(p => ({ ...p, category: v }))}>
-              <SelectTrigger><SelectValue/></SelectTrigger>
-              <SelectContent>{opexCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-            </Select>
-            <Input type="number" placeholder="Amount" value={opexForm.amount} onChange={(e) => setOpexForm(p => ({...p, amount: e.target.value}))} />
-            <Input type="file" onChange={(e) => setOpexFile(e.target.files?.[0] || null)} />
+            <div className="space-y-2">
+              <Label>Month</Label>
+              <Input type="month" value={opexForm.month} onChange={(e) => setOpexForm(p => ({...p, month: e.target.value}))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={opexForm.category} onValueChange={(v) => setOpexForm(p => ({ ...p, category: v }))}>
+                <SelectTrigger><SelectValue/></SelectTrigger>
+                <SelectContent>{opexCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Amount (IDR)</Label>
+              <Input type="number" placeholder="0" value={opexForm.amount} onChange={(e) => setOpexForm(p => ({...p, amount: e.target.value}))} />
+            </div>
+            <div className="space-y-2">
+              <Label>Receipt Attachment</Label>
+              <Input type="file" onChange={(e) => setOpexFile(e.target.files?.[0] || null)} />
+            </div>
           </div>
           <DialogFooter><Button onClick={handleAddOpex}>Save</Button></DialogFooter>
         </DialogContent>

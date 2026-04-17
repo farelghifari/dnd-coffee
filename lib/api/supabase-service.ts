@@ -94,14 +94,10 @@ export function getBaseUnit(unit: DisplayUnit): BaseUnit {
 export function getAllowedUnitsForItem(inventoryUnit: string): DisplayUnit[] {
   const normalizedUnit = inventoryUnit.toLowerCase()
   
-  // Weight units (gram-based)
-  if (normalizedUnit === 'kg' || normalizedUnit === 'gram' || normalizedUnit === 'g') {
-    return ['gram', 'kg']
-  }
-  
-  // Volume units (ml-based)
-  if (normalizedUnit === 'liter' || normalizedUnit === 'ml' || normalizedUnit === 'l') {
-    return ['ml', 'liter']
+  // Weight or Volume units - allow both for flexibility (e.g., syrup in kg or ml)
+  if (normalizedUnit === 'kg' || normalizedUnit === 'gram' || normalizedUnit === 'g' || 
+      normalizedUnit === 'liter' || normalizedUnit === 'ml' || normalizedUnit === 'l') {
+    return ['gram', 'kg', 'ml', 'liter']
   }
   
   // Piece units - only pcs allowed
@@ -219,6 +215,7 @@ export interface MenuItem {
   name: string
   type: "coffee" | "non-coffee" | "food"
   price: number
+  packaging_cost?: number
   status: "active" | "inactive"
   // For local/fallback compatibility
   category?: "coffee" | "non-coffee" | "food"
@@ -2248,7 +2245,7 @@ export async function getMenuItems(): Promise<MenuItem[]> {
 // MENU FIX - Add menu must use only: name, type, price, status
 // FIX DUPLICATE MENU: Check if menu exists before adding
 // IF EXISTS: Update existing record instead of inserting duplicate
-export async function addMenuItem(item: { name: string; type: string; price: number; status?: string; category?: string }): Promise<MenuItem | null> {
+export async function addMenuItem(item: { name: string; type: string; price: number; packaging_cost?: number; status?: string; category?: string }): Promise<MenuItem | null> {
   if (isSupabaseConfigured()) {
   // STEP 1: Check if menu_items WHERE name = input_name EXISTS
   const { data: existingItem, error: checkError } = await supabase
@@ -2260,16 +2257,17 @@ export async function addMenuItem(item: { name: string; type: string; price: num
   console.log("CHECK EXISTING (addMenuItem):", existingItem)
   
   // IF EXISTS: Update existing record instead of inserting duplicate
-  if (existingItem && !checkError) {
-    console.log("MENU EXISTS - UPDATING instead of inserting duplicate")
-    const { data: updatedData, error: updateError } = await supabase
-      .from('menu_items')
-      .update({
-        type: item.type,
-        price: item.price,
-        status: item.status || 'active'
-      })
-      .eq('id', existingItem.id)
+    if (existingItem && !checkError) {
+      console.log("MENU EXISTS - UPDATING instead of inserting duplicate")
+      const { data: updatedData, error: updateError } = await supabase
+        .from('menu_items')
+        .update({
+          type: item.type,
+          price: item.price,
+          packaging_cost: (item as any).packaging_cost || 0,
+          status: item.status || 'active'
+        })
+        .eq('id', existingItem.id)
       .select()
       .single()
     
@@ -2286,10 +2284,11 @@ export async function addMenuItem(item: { name: string; type: string; price: num
   const { data, error } = await supabase
   .from('menu_items')
   .insert([{
-  name: item.name,
-  type: item.type,
-  price: item.price,
-  status: item.status || 'active'
+    name: item.name,
+    type: item.type,
+    price: item.price,
+    packaging_cost: (item as any).packaging_cost || 0,
+    status: item.status || 'active'
   }])
   .select()
   .single()
@@ -2310,6 +2309,7 @@ export async function addMenuItem(item: { name: string; type: string; price: num
     type: item.type as "coffee" | "non-coffee" | "food",
     price: item.price,
     status: (item.status || 'active') as "active" | "inactive",
+    packaging_cost: item.packaging_cost || 0,
     category: item.type as "coffee" | "non-coffee" | "food"
   }
   items.push(newItem)
@@ -2325,6 +2325,7 @@ export async function updateMenuItem(id: string, updates: Partial<MenuItem>): Pr
     if (updates.type !== undefined) dbUpdates.type = updates.type
     if (updates.category !== undefined) dbUpdates.type = updates.category // Map category to type
     if (updates.price !== undefined) dbUpdates.price = updates.price
+    if (updates.packaging_cost !== undefined) dbUpdates.packaging_cost = updates.packaging_cost
     if (updates.status !== undefined) dbUpdates.status = updates.status
     
     const { data, error } = await supabase
