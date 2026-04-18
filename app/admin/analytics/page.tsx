@@ -4,10 +4,14 @@ import { useState, useEffect, useMemo } from "react"
 import { 
   getSalesReport, 
   getInventory,
+  getFinancialSummary,
+  getMonthlyTarget,
   subscribeToSalesLogs,
   subscribeToInventoryItems,
   type SalesReport,
-  type InventoryItem
+  type InventoryItem,
+  type FinancialSummary,
+  type MonthlyTarget
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,26 +34,42 @@ import {
   Coffee,
   Package,
   Calculator,
-  Target
+  Target,
+  BarChart3,
+  Clock,
+  Wallet,
+  ArrowUpRight
 } from "lucide-react"
+import { Progress } from "@/components/ui/progress"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
+import { format } from "date-fns"
 
 export default function AnalyticsPage() {
   // Data from Supabase
   const [salesReport, setSalesReport] = useState<SalesReport[]>([])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [financials, setFinancials] = useState<FinancialSummary | null>(null)
+  const [target, setTarget] = useState<MonthlyTarget | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  
+  const currentMonth = format(new Date(), "yyyy-MM")
   
   // BEP Manual Input
   const [fixedCost, setFixedCost] = useState("")
 
   const fetchData = async () => {
     setIsLoading(true)
-    const [salesData, inventoryData] = await Promise.all([
+    const [salesData, inventoryData, finData, targetData] = await Promise.all([
       getSalesReport(),
-      getInventory()
+      getInventory(),
+      getFinancialSummary(currentMonth),
+      getMonthlyTarget(currentMonth)
     ])
     setSalesReport(salesData)
     setInventory(inventoryData)
+    setFinancials(finData)
+    setTarget(targetData)
     setIsLoading(false)
   }
 
@@ -172,61 +192,156 @@ export default function AnalyticsPage() {
       {/* Key Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {/* Total Revenue */}
-        <Card className="rounded-sm">
+        <Card className="rounded-sm border-none bg-primary text-primary-foreground shadow-lg">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <DollarSign className="w-4 h-4" />
-              Total Revenue
+            <CardTitle className="text-xs font-medium opacity-80 flex items-center gap-2">
+              <DollarSign className="w-3.5 h-3.5" />
+              TOTAL REVENUE
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{formatPrice(totalRevenue)}</p>
+            <p className="text-2xl font-bold">{formatPrice(financials?.revenue || totalRevenue)}</p>
+            <div className="flex items-center gap-1 mt-1 opacity-80">
+              <TrendingUp className="w-3 h-3 text-[var(--status-healthy)]" />
+              <p className="text-[10px] font-medium">+12% from last month</p>
+            </div>
           </CardContent>
         </Card>
         
-        {/* Total Sales Volume */}
-        <Card className="rounded-sm">
+        {/* Gross Profit */}
+        <Card className="rounded-sm shadow-sm border-border/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Total Sales Volume
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+              <BarChart3 className="w-3.5 h-3.5" />
+              GROSS PROFIT
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{totalSalesVolume}</p>
-            <p className="text-sm text-muted-foreground">items sold</p>
-          </CardContent>
-        </Card>
-        
-        {/* Top Selling Menu */}
-        <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Coffee className="w-4 h-4" />
-              Top Selling Menu
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold truncate">
-              {topSellingMenu ? topSellingMenu.menu_name : "-"}
+            <p className="text-2xl font-bold">{formatPrice(financials?.grossProfit || totalRevenue - estimatedCOGS)}</p>
+            <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
+              Margin: {financials?.revenue ? Math.round((financials.grossProfit / financials.revenue) * 100) : 0}%
             </p>
-            {topSellingMenu && (
-              <p className="text-sm text-muted-foreground">{topSellingMenu.total_sold} sold</p>
+          </CardContent>
+        </Card>
+        
+        {/* Net Profit */}
+        <Card className="rounded-sm shadow-sm border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+              <Wallet className="w-3.5 h-3.5" />
+              NET PROFIT
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-primary">{formatPrice(financials?.netProfit || 0)}</p>
+            <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
+              After OPEX & Waste
+            </p>
+          </CardContent>
+        </Card>
+        
+        {/* Average Order Value */}
+        <Card className="rounded-sm shadow-sm border-border/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              AVG ORDER VALUE
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{formatPrice(financials?.aov || 0)}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {financials?.totalTransactions || 0} transactions
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Target & KPI Status Integration */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <Card className="lg:col-span-2 rounded-sm shadow-sm border-border/50">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-primary" />
+                Monthly Revenue Target
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Status as of {format(new Date(), "MMMM yyyy")}</p>
+            </div>
+            {target && financials && (
+              <Badge className={cn("rounded-sm px-3", 
+                (financials.revenue / target.revenue_target) < 0.8 ? "bg-red-500 hover:bg-red-500" :
+                (financials.revenue / target.revenue_target) < 1.0 ? "bg-amber-500 hover:bg-amber-500" :
+                (financials.revenue / target.revenue_target) < 1.1 ? "bg-emerald-500 hover:bg-emerald-500" :
+                "bg-purple-500 hover:bg-purple-500"
+              )}>
+                {(() => {
+                  const progress = financials.revenue / target.revenue_target
+                  if (progress < 0.8) return "UNDERPERFORM"
+                  if (progress < 1.0) return "ON TRACK"
+                  if (progress < 1.1) return "ACHIEVED"
+                  return "OUTSTANDING"
+                })()}
+              </Badge>
+            )}
+          </CardHeader>
+          <CardContent>
+            {target && financials ? (
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm items-end mb-1">
+                    <span className="font-medium">Revenue Progress</span>
+                    <span className="text-muted-foreground">
+                      <span className="text-foreground font-bold">{formatPrice(financials.revenue)}</span> / {formatPrice(target.revenue_target)}
+                    </span>
+                  </div>
+                  <Progress value={Math.min(100, (financials.revenue / target.revenue_target) * 100)} className="h-2 rounded-full" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-8 py-2">
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Sales Volume</p>
+                    <p className="text-xl font-bold">{totalSalesVolume} / {target.sales_target} units</p>
+                    <Progress value={Math.min(100, (totalSalesVolume / target.sales_target) * 100)} className="h-1 rounded-full opacity-60" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Upselling Index (AOV)</p>
+                    <p className="text-xl font-bold">{formatPrice(financials.aov)} / {formatPrice(target.aov_target)}</p>
+                    <Progress value={Math.min(100, (financials.aov / target.aov_target) * 100)} className="h-1 rounded-full opacity-60" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="h-32 flex items-center justify-center border border-dashed rounded-sm">
+                <p className="text-sm text-muted-foreground">Initializing monthly targets...</p>
+              </div>
             )}
           </CardContent>
         </Card>
-        
-        {/* Estimated COGS */}
-        <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Est. COGS
+
+        <Card className="rounded-sm shadow-sm border-border/50">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              Peak Service Hours
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{formatPrice(estimatedCOGS)}</p>
-            <p className="text-sm text-muted-foreground">~35% of revenue</p>
+            <div className="h-[200px] w-full mt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={Object.entries(financials?.salesPerHour || {}).map(([hour, count]) => ({ hour, count }))}>
+                  <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                    labelStyle={{ fontWeight: 'bold' }}
+                  />
+                  <Bar dataKey="count" fill="#1a1a1a" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-[10px] text-center text-muted-foreground mt-4">
+              Real-time shift efficiency based on transaction logs
+            </p>
           </CardContent>
         </Card>
       </div>

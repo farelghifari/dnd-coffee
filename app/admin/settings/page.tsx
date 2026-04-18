@@ -9,6 +9,7 @@ import {
   getShiftConfigs,
   updateShiftConfig,
   addShiftConfig,
+  deleteShiftConfig,
   type Employee,
   type ShiftConfig 
 } from "@/lib/api/supabase-service"
@@ -110,6 +111,10 @@ export default function SettingsPage() {
     { id: "pt-2", label: "Part-time Shift 2", start_time: "10:00", end_time: "14:00", type: "part-time" },
     { id: "pt-3", label: "Part-time Shift 3", start_time: "14:00", end_time: "18:00", type: "part-time" }
   ])
+
+  // Dynamic counts state
+  const [ftCount, setFtCount] = useState(2)
+  const [ptCount, setPtCount] = useState(3)
   
   // Store the database shift configs to track IDs
   const [dbShiftConfigs, setDbShiftConfigs] = useState<ShiftConfig[]>([])
@@ -221,29 +226,39 @@ export default function SettingsPage() {
     console.log("[v0] Shift configs from DB:", data)
     setDbShiftConfigs(data)
     
-    // Map existing configs to fixed slots by matching exact names
-    // Full-time Shift 1, Full-time Shift 2, Part-time Shift 1, etc.
-    const newFullTimeShifts = fullTimeShifts.map((slot, i) => {
+    // Determine dynamic counts based on DB data
+    const ftFromDb = data.filter(c => c.name.startsWith("Full-time Shift")).length
+    const ptFromDb = data.filter(c => c.name.startsWith("Part-time Shift")).length
+    
+    if (ftFromDb > 0) setFtCount(ftFromDb)
+    if (ptFromDb > 0) setPtCount(ptFromDb)
+
+    // Build the shift slot arrays based on current counts
+    const finalFtShifts = Array.from({ length: Math.max(ftFromDb, ftCount) }).map((_, i) => {
       const configName = `Full-time Shift ${i + 1}`
       const existing = data.find(c => c.name === configName)
-      if (existing) {
-        console.log("[v0] Found existing full-time config:", configName, existing)
-        return { ...slot, id: existing.id, start_time: existing.start_time, end_time: existing.end_time }
+      return {
+        id: existing?.id || `ft-${i + 1}`,
+        label: configName,
+        start_time: existing?.start_time || "06:00",
+        end_time: existing?.end_time || "14:00",
+        type: "full-time" as const
       }
-      return slot
     })
-    setFullTimeShifts(newFullTimeShifts)
-    
-    const newPartTimeShifts = partTimeShifts.map((slot, i) => {
+    setFullTimeShifts(finalFtShifts)
+
+    const finalPtShifts = Array.from({ length: Math.max(ptFromDb, ptCount) }).map((_, i) => {
       const configName = `Part-time Shift ${i + 1}`
       const existing = data.find(c => c.name === configName)
-      if (existing) {
-        console.log("[v0] Found existing part-time config:", configName, existing)
-        return { ...slot, id: existing.id, start_time: existing.start_time, end_time: existing.end_time }
+      return {
+        id: existing?.id || `pt-${i + 1}`,
+        label: configName,
+        start_time: existing?.start_time || "06:00",
+        end_time: existing?.end_time || "10:00",
+        type: "part-time" as const
       }
-      return slot
     })
-    setPartTimeShifts(newPartTimeShifts)
+    setPartTimeShifts(finalPtShifts)
   }
 
   useEffect(() => {
@@ -462,27 +477,21 @@ export default function SettingsPage() {
     try {
       console.log("[v0] Saving shift configurations...")
       
-      // Process full-time shifts
-      for (let i = 0; i < fullTimeShifts.length; i++) {
-        const shift = fullTimeShifts[i]
+      // Process full-time shifts (Sync current state with DB)
+      const currentFtShifts = fullTimeShifts.slice(0, ftCount)
+      for (let i = 0; i < currentFtShifts.length; i++) {
+        const shift = currentFtShifts[i]
         const configName = `Full-time Shift ${i + 1}`
         
-        // Check if this config already exists in DB
-        const existingConfig = dbShiftConfigs.find(c => 
-          c.name === configName || c.id === shift.id
-        )
+        const existingConfig = dbShiftConfigs.find(c => c.name === configName)
         
         if (existingConfig) {
-          // Update existing config
-          console.log("[v0] Updating shift config:", existingConfig.id, shift.start_time, shift.end_time)
           await updateShiftConfig(existingConfig.id, {
             name: configName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
         } else {
-          // Create new config
-          console.log("[v0] Creating new shift config:", configName, shift.start_time, shift.end_time)
           await addShiftConfig({
             name: configName,
             start_time: shift.start_time,
@@ -490,34 +499,46 @@ export default function SettingsPage() {
           })
         }
       }
+
+      // Delete removed full-time shifts from DB
+      const ftConfigsToDelete = dbShiftConfigs.filter(c => 
+        c.name.startsWith("Full-time Shift") && 
+        parseInt(c.name.split(" ").pop() || "0") > ftCount
+      )
+      for (const config of ftConfigsToDelete) {
+        await deleteShiftConfig(config.id)
+      }
       
       // Process part-time shifts
-      for (let i = 0; i < partTimeShifts.length; i++) {
-        const shift = partTimeShifts[i]
+      const currentPtShifts = partTimeShifts.slice(0, ptCount)
+      for (let i = 0; i < currentPtShifts.length; i++) {
+        const shift = currentPtShifts[i]
         const configName = `Part-time Shift ${i + 1}`
         
-        // Check if this config already exists in DB
-        const existingConfig = dbShiftConfigs.find(c => 
-          c.name === configName || c.id === shift.id
-        )
+        const existingConfig = dbShiftConfigs.find(c => c.name === configName)
         
         if (existingConfig) {
-          // Update existing config
-          console.log("[v0] Updating shift config:", existingConfig.id, shift.start_time, shift.end_time)
           await updateShiftConfig(existingConfig.id, {
             name: configName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
         } else {
-          // Create new config
-          console.log("[v0] Creating new shift config:", configName, shift.start_time, shift.end_time)
           await addShiftConfig({
             name: configName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
         }
+      }
+
+      // Delete removed part-time shifts from DB
+      const ptConfigsToDelete = dbShiftConfigs.filter(c => 
+        c.name.startsWith("Part-time Shift") && 
+        parseInt(c.name.split(" ").pop() || "0") > ptCount
+      )
+      for (const config of ptConfigsToDelete) {
+        await deleteShiftConfig(config.id)
       }
       
       // Refresh configs from database
@@ -540,13 +561,37 @@ export default function SettingsPage() {
     value: string
   ) => {
     if (type === "full-time") {
-      setFullTimeShifts(prev => prev.map((shift, i) => 
-        i === index ? { ...shift, [field]: value } : shift
-      ))
+      setFullTimeShifts(prev => {
+        const newShifts = [...prev]
+        // Ensure index exists
+        if (!newShifts[index]) {
+          newShifts[index] = { 
+            id: `ft-${Date.now()}-${index}`, 
+            label: `Full-time Shift ${index + 1}`, 
+            start_time: "08:00", 
+            end_time: "16:00", 
+            type: "full-time" 
+          }
+        }
+        newShifts[index] = { ...newShifts[index], [field]: value }
+        return newShifts
+      })
     } else {
-      setPartTimeShifts(prev => prev.map((shift, i) => 
-        i === index ? { ...shift, [field]: value } : shift
-      ))
+      setPartTimeShifts(prev => {
+        const newShifts = [...prev]
+        // Ensure index exists
+        if (!newShifts[index]) {
+          newShifts[index] = { 
+            id: `pt-${Date.now()}-${index}`, 
+            label: `Part-time Shift ${index + 1}`, 
+            start_time: "08:00", 
+            end_time: "12:00", 
+            type: "part-time" 
+          }
+        }
+        newShifts[index] = { ...newShifts[index], [field]: value }
+        return newShifts
+      })
     }
   }
   
@@ -705,96 +750,146 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Fixed Shift Configuration */}
-        <Card className="rounded-sm lg:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <CalendarClock className="w-5 h-5" />
-              <CardTitle>Shift Configuration</CardTitle>
+        {/* Shift Configuration */}
+        <Card className="rounded-sm lg:col-span-2 overflow-hidden border-none shadow-lg bg-gradient-to-br from-card to-muted/20">
+          <CardHeader className="border-b bg-muted/10 pb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-sm">
+                  <CalendarClock className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl">Shift Configuration</CardTitle>
+                  <CardDescription>
+                    Define fixed shift time slots for scheduling.
+                  </CardDescription>
+                </div>
+              </div>
             </div>
-            <CardDescription>
-              Define fixed shift time slots. These times persist globally until changed. 
-              Scheduling will use these predefined shifts.
-            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Full-time Shifts */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium flex items-center gap-2">
-                <Badge className="bg-blue-100 text-blue-800 border-blue-200">Full-time</Badge>
-                Shifts (2 slots)
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {fullTimeShifts.map((shift, index) => (
-                  <div key={shift.id} className="p-4 rounded-sm border bg-card">
-                    <p className="text-sm font-medium mb-3">{shift.label}</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Start Time</Label>
-                        <Input 
-                          type="time"
-                          value={shift.start_time}
-                          onChange={(e) => updateShiftTime("full-time", index, "start_time", e.target.value)}
-                          className="rounded-sm h-9"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">End Time</Label>
-                        <Input 
-                          type="time"
-                          value={shift.end_time}
-                          onChange={(e) => updateShiftTime("full-time", index, "end_time", e.target.value)}
-                          className="rounded-sm h-9"
-                        />
-                      </div>
-                    </div>
+          <CardContent className="p-0">
+            <div className="grid grid-cols-1 lg:grid-cols-2">
+              {/* Full-time Shifts Column */}
+              <div className="p-6 border-b lg:border-b-0 lg:border-r space-y-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-blue-600 text-white border-transparent px-3">Full-time</Badge>
+                    <span className="text-sm font-medium text-muted-foreground">Standard Shifts</span>
                   </div>
-                ))}
+                  <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-sm border">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Total Slots:</Label>
+                    <Input 
+                      type="number" 
+                      min={1} 
+                      max={6} 
+                      value={ftCount} 
+                      onChange={(e) => setFtCount(parseInt(e.target.value) || 1)}
+                      className="w-12 h-7 text-xs text-center border-none bg-transparent focus-visible:ring-0"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {Array.from({ length: ftCount }).map((_, index) => {
+                    const shift = fullTimeShifts[index] || { id: `new-ft-${index}`, start_time: "06:00", end_time: "14:00", label: `Full-time Shift ${index+1}` }
+                    return (
+                      <div key={shift.id || index} className="group p-4 rounded-sm border bg-card hover:border-primary/30 transition-all shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="text-xs font-bold uppercase tracking-widest text-primary/70">{shift.label || `FT Shift ${index+1}`}</p>
+                          <Clock className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground font-semibold uppercase">Start</Label>
+                            <Input 
+                              type="time"
+                              value={shift.start_time}
+                              onChange={(e) => updateShiftTime("full-time", index, "start_time", e.target.value)}
+                              className="rounded-sm h-10 font-mono text-sm border-muted-foreground/20 focus:border-primary w-full"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground font-semibold uppercase">End</Label>
+                            <Input 
+                              type="time"
+                              value={shift.end_time}
+                              onChange={(e) => updateShiftTime("full-time", index, "end_time", e.target.value)}
+                              className="rounded-sm h-10 font-mono text-sm border-muted-foreground/20 focus:border-primary w-full"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Part-time Shifts Column */}
+              <div className="p-6 bg-muted/5 space-y-6">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-teal-600 text-white border-transparent px-3">Part-time</Badge>
+                    <span className="text-sm font-medium text-muted-foreground">Flexible Shifts</span>
+                  </div>
+                  <div className="flex items-center gap-3 bg-muted/30 p-1.5 rounded-sm border">
+                    <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground ml-1">Total Slots:</Label>
+                    <Input 
+                      type="number" 
+                      min={1} 
+                      max={12} 
+                      value={ptCount} 
+                      onChange={(e) => setPtCount(parseInt(e.target.value) || 1)}
+                      className="w-12 h-7 text-xs text-center border-none bg-transparent focus-visible:ring-0"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Array.from({ length: ptCount }).map((_, index) => {
+                    const shift = partTimeShifts[index] || { id: `new-pt-${index}`, start_time: "08:00", end_time: "12:00", label: `Part-time Shift ${index+1}` }
+                    return (
+                      <div key={shift.id || index} className="group p-4 rounded-sm border bg-card hover:border-teal-500/30 transition-all shadow-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="text-xs font-bold uppercase tracking-widest text-teal-600/70">{shift.label || `PT Shift ${index+1}`}</p>
+                          <Timer className="w-3 h-3 text-muted-foreground group-hover:text-teal-600 transition-colors" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground font-semibold uppercase">Start</Label>
+                            <Input 
+                              type="time"
+                              value={shift.start_time}
+                              onChange={(e) => updateShiftTime("part-time", index, "start_time", e.target.value)}
+                              className="rounded-sm h-10 font-mono text-sm border-muted-foreground/20 focus:border-teal-500/50 w-full"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] text-muted-foreground font-semibold uppercase">End</Label>
+                            <Input 
+                              type="time"
+                              value={shift.end_time}
+                              onChange={(e) => updateShiftTime("part-time", index, "end_time", e.target.value)}
+                              className="rounded-sm h-10 font-mono text-sm border-muted-foreground/20 focus:border-teal-500/50 w-full"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
-
-            {/* Part-time Shifts */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium flex items-center gap-2">
-                <Badge className="bg-teal-100 text-teal-800 border-teal-200">Part-time</Badge>
-                Shifts (3 slots)
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {partTimeShifts.map((shift, index) => (
-                  <div key={shift.id} className="p-4 rounded-sm border bg-card">
-                    <p className="text-sm font-medium mb-3">{shift.label}</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Start Time</Label>
-                        <Input 
-                          type="time"
-                          value={shift.start_time}
-                          onChange={(e) => updateShiftTime("part-time", index, "start_time", e.target.value)}
-                          className="rounded-sm h-9"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">End Time</Label>
-                        <Input 
-                          type="time"
-                          value={shift.end_time}
-                          onChange={(e) => updateShiftTime("part-time", index, "end_time", e.target.value)}
-                          className="rounded-sm h-9"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            
+            {/* Added Save button at the bottom */}
+            <div className="p-6 border-t bg-muted/5 flex justify-end">
+              <Button 
+                onClick={handleSaveShifts} 
+                className="rounded-sm shadow-sm hover:shadow-md transition-all px-8 py-6"
+              >
+                {saveSuccess === "Shifts" ? <Check className="h-5 w-5 mr-2" /> : <Timer className="h-5 w-5 mr-2" />}
+                <span className="text-base">Save Shift Configuration</span>
+              </Button>
             </div>
-
-            <Button 
-              onClick={handleSaveShifts} 
-              className="rounded-sm"
-            >
-              {saveSuccess === "Shifts" ? <Check className="w-4 h-4 mr-2" /> : null}
-              Save Shift Configuration
-            </Button>
           </CardContent>
         </Card>
 

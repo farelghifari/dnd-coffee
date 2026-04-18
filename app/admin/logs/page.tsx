@@ -29,6 +29,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { 
   Package, 
   Users, 
@@ -63,6 +73,15 @@ export default function LogsPage() {
   const [overtimeRequests, setOvertimeRequests] = useState<OvertimeRequest[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedType, setSelectedType] = useState<"all" | "in" | "out" | "waste" | "opname">("all")
+  
+  // Custom Alert/Confirm State
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean,
+    title: string,
+    description: string,
+    onConfirm?: () => void,
+    isAlertOnly?: boolean
+  }>({ open: false, title: '', description: '' })
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -129,12 +148,12 @@ export default function LogsPage() {
       const dateStart = startOfDay(selectedDate)
       const dateEnd = endOfDay(selectedDate)
       
-      const matchesDate = logDate >= dateStart && logDate <= dateEnd
       const matchesSearch = (log.item_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.employee_name || "").toLowerCase().includes(searchQuery.toLowerCase())
       const matchesType = selectedType === "all" || log.type === selectedType
+      const matchesDate = logDate >= dateStart && logDate <= dateEnd
       
-      return matchesDate && matchesSearch && matchesType
+      return matchesSearch && matchesType && matchesDate
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }, [stockLogs, selectedDate, searchQuery, selectedType])
 
@@ -302,14 +321,26 @@ export default function LogsPage() {
   }
 
   const handleUpdateStatus = async (id: string, status: string) => {
-    if (!confirm(`Mark this entry as ${status}?`)) return
-    const success = await updateAttendanceLogStatus(id, status)
-    if (success) {
-      // Refresh local state or rely on realtime subscription
-      setAttendanceLogs(prev => prev.map(l => l.id === id ? { ...l, status } : l))
-    } else {
-      alert("Failed to update status")
-    }
+    setConfirmModal({
+      open: true,
+      title: "Confirm Status Update",
+      description: `Are you sure you want to mark this entry as ${status}?`,
+      onConfirm: async () => {
+        const success = await updateAttendanceLogStatus(id, status)
+        if (success) {
+          setAttendanceLogs(prev => prev.map(l => l.id === id ? { ...l, status } : l))
+        } else {
+          setTimeout(() => {
+            setConfirmModal({
+              open: true,
+              title: "Update Failed",
+              description: "There was an error updating the attendance status.",
+              isAlertOnly: true
+            })
+          }, 100)
+        }
+      }
+    })
   }
 
   // Filter sales/menu logs by date
@@ -579,7 +610,7 @@ export default function LogsPage() {
                             {getTypeBadge(log.type)}
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            {log.type === "in" ? "+" : log.type === "waste" ? "-" : ""}{log.amount} units by {log.employee_name}
+                            {log.type === "in" ? "+" : log.type === "waste" ? "-" : ""}{log.amount} {log.unit || 'units'} by {log.employee_name}
                           </p>
                           {log.notes && (
                             <p className="text-xs text-muted-foreground mt-1 italic">
@@ -874,6 +905,31 @@ export default function LogsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      {/* Global Alert/Confirm Dialog */}
+      <AlertDialog open={confirmModal.open} onOpenChange={(open) => setConfirmModal(prev => ({ ...prev, open }))}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmModal.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmModal.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            {!confirmModal.isAlertOnly && (
+              <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
+            )}
+            <AlertDialogAction 
+              className="rounded-sm" 
+              onClick={() => {
+                if (confirmModal.onConfirm) confirmModal.onConfirm()
+                setConfirmModal(prev => ({ ...prev, open: false }))
+              }}
+            >
+              {confirmModal.isAlertOnly ? "OK" : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

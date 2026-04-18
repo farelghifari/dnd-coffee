@@ -173,6 +173,57 @@ export default function EmployeeDashboard() {
   // Critical items count
   const criticalItems = inventory.filter(item => getStockHealth(item) === "critical").length
 
+  // Calculate missing shifts (absences)
+  const missedShifts = myShifts.filter(s => {
+    // Only check past shifts or today's shifts that have already passed their scheduled end time
+    const endTimeStr = s.end_time || '23:59'
+    const shiftEndDateObj = new Date(`${s.date}T${endTimeStr}`)
+    
+    // Handle overnight shifts
+    if (s.start_time && endTimeStr < s.start_time) {
+      shiftEndDateObj.setDate(shiftEndDateObj.getDate() + 1)
+    }
+    
+    if (shiftEndDateObj > new Date()) return false 
+    
+    const logExists = myAttendance.some(log => {
+      const logDate = log.date || (log.timestamp ? log.timestamp.split('T')[0] : '')
+      return logDate === s.date
+    })
+    
+    return !logExists
+  })
+
+  // Calculate late records (15 mins grace period)
+  const lateRecords = [...myShifts]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Newest first
+    .map(shift => {
+      const shiftLogs = myAttendance.filter(log => {
+        const logDate = log.date || (log.timestamp ? log.timestamp.split('T')[0] : '')
+        return logDate === shift.date && (log.type === 'clock-in' || log.action === 'clock-in')
+      }).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      
+      const firstIn = shiftLogs[0]
+      if (!firstIn) return null
+      
+      const shiftStartObj = new Date(`${shift.date}T${shift.start_time}`)
+      const realInObj = new Date(firstIn.timestamp || `${firstIn.date}T${firstIn.time}`)
+      const lateMins = Math.max(0, Math.floor((realInObj.getTime() - shiftStartObj.getTime()) / 60000))
+      
+      if (lateMins > 15) { 
+        return {
+          id: shift.id,
+          date: shift.date,
+          shiftName: getShiftDisplayName(shift),
+          startTime: shift.start_time,
+          clockInTime: format(realInObj, "HH:mm"),
+          lateMins,
+        }
+      }
+      return null
+    })
+    .filter(Boolean) as Array<{ id: string; date: string; shiftName: string; startTime: string; clockInTime: string; lateMins: number }>
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -591,6 +642,26 @@ export default function EmployeeDashboard() {
           <CardContent>
             <ScrollArea className="h-[300px] pr-4">
               <div className="flex flex-col gap-3">
+                {/* Absentee Alerts */}
+                {missedShifts.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-500 rounded-lg animate-pulse">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-destructive uppercase tracking-widest text-[10px]">
+                          Action Required
+                        </p>
+                        <p className="font-medium text-red-800 dark:text-red-200 text-sm mt-0.5">
+                          Unrecorded Shift(s) Detected
+                        </p>
+                        <p className="text-xs text-red-600 dark:text-red-300 mt-1">
+                          You were scheduled to work on <b>{missedShifts.slice(0,2).map(s => s.date).join(", ")}</b> but no attendance was found. This is marked as ABSENT and subject to salary deduction. Please contact Admin immediately if this is an error.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 {/* Low Stock Alerts */}
                 {criticalItems > 0 && (
                   <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -681,7 +752,9 @@ export default function EmployeeDashboard() {
                 const date = new Date(today)
                 date.setDate(today.getDate() + i)
                 const dateStr = getLocalYYYYMMDD(date)
-                const shiftsForDay = myShifts.filter(s => s.date === dateStr)
+                const shiftsForDay = myShifts
+                  .filter(s => s.date === dateStr)
+                  .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""))
                 
                 dates.push({
                   date,
@@ -789,6 +862,102 @@ export default function EmployeeDashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* Late Records Detail */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-orange-500" />
+            Lateness History
+          </CardTitle>
+          <CardDescription>
+            You have been late <b>{lateRecords.length}</b> time(s) so far.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[200px]">
+            {lateRecords.length > 0 ? (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {lateRecords.map((late) => (
+                  <div
+                    key={late.id}
+                    className="flex items-center justify-between p-3 border rounded-lg bg-orange-50/30 dark:bg-orange-950/20"
+                  >
+                    <div>
+                      <p className="font-medium">{format(new Date(late.date), "MMM d, yyyy")}</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        {late.shiftName} <span className="text-xs">({late.startTime})</span>
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-200 dark:bg-orange-900/50 dark:text-orange-300 font-mono">
+                        {late.lateMins}m Late
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        In @ {late.clockInTime}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                <CheckCircle2 className="h-10 w-10 mb-2 opacity-50 text-green-500" />
+                <p>Perfect Punctuality!</p>
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
+      {/* Absence History Detail */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            Absence History
+          </CardTitle>
+          <CardDescription>
+            You have missed <b>{missedShifts.length}</b> scheduled shift(s).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[200px]">
+            {missedShifts.length > 0 ? (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {[...missedShifts]
+                  .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                  .map((absent) => (
+                    <div
+                      key={absent.id}
+                      className="flex items-center justify-between p-3 border rounded-lg bg-red-50/30 dark:bg-red-950/20 shadow-sm"
+                    >
+                      <div>
+                        <p className="font-medium">{format(new Date(absent.date), "MMM d, yyyy")}</p>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          {getShiftDisplayName(absent)}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant="destructive" className="font-bold tracking-tighter">
+                          ABSENT
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {absent.start_time}-{absent.end_time}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-8">
+                <CheckCircle2 className="h-10 w-10 mb-2 opacity-50 text-emerald-500" />
+                <p>No Missing Shifts. Keep it up!</p>
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
     </div>
   )
 }

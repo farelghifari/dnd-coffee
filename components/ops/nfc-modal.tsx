@@ -36,9 +36,29 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
       setNfcInput("")
       setStatus("waiting")
       setMessage("")
-      setTimeout(() => {
-        inputRef.current?.focus()
-      }, 100)
+      setIsProcessing(false) // CRITICAL FIX: Reset processing state on reopen
+      
+      const focusInput = () => {
+        if (inputRef.current && document.activeElement !== inputRef.current) {
+          inputRef.current.focus()
+        }
+      }
+
+      // Initial focus
+      setTimeout(focusInput, 100)
+
+      // Keep focus: refocus every 2 seconds if lost
+      const interval = setInterval(focusInput, 2000)
+
+      // Refocus on click anywhere in the window
+      const handleWindowClick = () => focusInput()
+      window.addEventListener("click", handleWindowClick)
+
+      return () => {
+        clearInterval(interval)
+        window.removeEventListener("click", handleWindowClick)
+        setIsProcessing(false) // Reset on unmount/close
+      }
     }
   }, [isOpen])
 
@@ -49,32 +69,49 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
     if (isProcessing) return
     setIsProcessing(true)
     
-    // Clean the UID: trim whitespace, remove line breaks, convert to lowercase
-    const cleanUID = value.trim().replace(/[\r\n]/g, '').toLowerCase()
-    
-    if (cleanUID.length < 4) {
-      setIsProcessing(false)
-      return
-    }
-    
-    // Query Supabase for employee with this NFC
-    const employee = await getEmployeeByNFC(cleanUID)
-    
-    if (employee) {
-      setStatus("success")
-      setMessage(`Welcome, ${employee.nickname}!`)
-      setTimeout(() => {
-        onSuccess(employee.id, employee.nickname || employee.name)
-      }, 1500)
-    } else {
-      setStatus("error")
-      setMessage("Card not recognized. Please try again.")
-      setTimeout(() => {
-        setStatus("waiting")
-        setMessage("")
-        setNfcInput("")
+    try {
+      // Clean the UID: trim whitespace, remove line breaks
+      const cleanUID = value.trim().replace(/[\r\n]/g, '')
+      
+      if (cleanUID.length < 4) {
         setIsProcessing(false)
-        inputRef.current?.focus()
+        return
+      }
+      
+      // Query Supabase for employee with this NFC
+      const employee = await getEmployeeByNFC(cleanUID)
+      
+      if (employee) {
+        setStatus("success")
+        setMessage(`Welcome, ${employee.nickname || employee.name}!`)
+        setTimeout(() => {
+          onSuccess(employee.id, employee.nickname || employee.name)
+        }, 1500)
+      } else {
+        setStatus("error")
+        setMessage("Card not recognized. Please try again.")
+        setTimeout(() => {
+          if (isOpen) {
+            setStatus("waiting")
+            setMessage("")
+            setNfcInput("")
+            setIsProcessing(false)
+            inputRef.current?.focus()
+          }
+        }, 2000)
+      }
+    } catch (error) {
+      console.error("NFC Lookup Error:", error)
+      setStatus("error")
+      setMessage("System error. Please try again.")
+      setTimeout(() => {
+        if (isOpen) {
+          setStatus("waiting")
+          setMessage("")
+          setNfcInput("")
+          setIsProcessing(false)
+          inputRef.current?.focus()
+        }
       }, 2000)
     }
   }
@@ -89,29 +126,33 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
     }
     
     // Auto-trigger lookup after input completes (NFC readers input quickly)
-    // 150ms delay ensures all characters are captured
+    // 50ms delay is enough for modern readers and feels more responsive
     if (value.length >= 4) {
       timeoutRef.current = setTimeout(() => {
         processNFCLookup(value)
-      }, 150)
+      }, 50)
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // Also trigger on Enter key as fallback
-    if (e.key === "Enter" && nfcInput.length >= 4) {
+    if (e.key === "Enter" && e.currentTarget.value.length >= 4) {
       e.preventDefault()
+      const value = e.currentTarget.value
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
       }
-      processNFCLookup(nfcInput)
+      processNFCLookup(value)
     }
   }
 
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 bg-background/95 flex items-center justify-center p-6">
+    <div 
+      className="fixed inset-0 z-50 bg-background/95 flex items-center justify-center p-6 cursor-pointer"
+      onClick={() => inputRef.current?.focus()}
+    >
       <div className="w-full max-w-lg">
         {/* Close button */}
         <button
@@ -137,7 +178,11 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
             )}
           >
             {status === "waiting" && (
-              <CreditCard className="w-16 h-16 text-muted-foreground" />
+              <div className="relative">
+                <CreditCard className="w-16 h-16 text-muted-foreground" />
+                {/* Focus indicator dot */}
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-[var(--status-healthy)] rounded-full animate-pulse border-2 border-background" />
+              </div>
             )}
             {status === "success" && (
               <Check className="w-16 h-16 text-[var(--status-healthy)]" />
@@ -159,27 +204,45 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
             {status === "waiting" ? "Tap your NFC card" : message}
           </p>
 
-          {/* Hidden input for NFC reader keyboard emulation */}
+          {/* Focus-magnet input for NFC reader keyboard emulation */}
           <input
             ref={inputRef}
             type="text"
             value={nfcInput}
             onChange={handleNFCInput}
             onKeyDown={handleKeyDown}
-            className="sr-only"
+            className="absolute opacity-0 pointer-events-none w-1 h-1"
             aria-label="NFC card input"
             autoComplete="off"
             disabled={isProcessing || status !== "waiting"}
           />
 
           {/* Demo hint */}
-          <p className="text-sm text-muted-foreground mt-12">
-            Demo: Type one of these UIDs and press Enter:
-            <br />
-            <span className="font-mono text-xs mt-2 inline-block">
-              {activeEmployeesWithNFC.map(emp => `${emp.nfc_uid} (${emp.nickname})`).join(" | ") || "Loading..."}
-            </span>
-          </p>
+          <div className="mt-12">
+            <p className="text-sm text-muted-foreground mb-3">
+              Demo: Click a name to simulate a scan
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 max-w-md mx-auto">
+              {activeEmployeesWithNFC.map(emp => (
+                <button
+                  key={emp.id}
+                  onClick={(e) => {
+                    e.stopPropagation() // Prevent modal refocus trigger
+                    setNfcInput(emp.nfc_uid || "")
+                    if (emp.nfc_uid) {
+                      processNFCLookup(emp.nfc_uid)
+                    }
+                  }}
+                  className="px-3 py-1 bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground text-xs font-mono rounded-full transition-colors border border-border"
+                >
+                  {emp.nickname || emp.name}
+                </button>
+              ))}
+              {activeEmployeesWithNFC.length === 0 && (
+                <span className="text-xs text-muted-foreground italic">Loading demo data...</span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

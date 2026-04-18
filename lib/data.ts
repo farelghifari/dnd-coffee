@@ -115,6 +115,8 @@ export interface InventoryBatch {
   unitCost: number
   status: BatchStatus
   notes?: string
+  is_opened?: boolean
+  opened_at?: string
   createdAt: string
   updatedAt: string
 }

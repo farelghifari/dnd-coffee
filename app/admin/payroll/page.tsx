@@ -8,6 +8,7 @@ import {
   upsertPayroll,
   settlePayrollBatch,
   settlePayrollItems,
+  cancelPayrollItems,
   type Employee,
   type PayrollRecord
 } from "@/lib/api/supabase-service"
@@ -15,6 +16,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { 
   Wallet, 
   Calendar as CalendarIcon, 
@@ -26,7 +37,8 @@ import {
   Briefcase,
   Search,
   RefreshCw,
-  Users
+  Users,
+  RotateCcw
 } from "lucide-react"
 import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import { format, startOfMonth, endOfMonth, parseISO } from "date-fns"
@@ -48,6 +60,15 @@ export default function PayrollAdminPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+
+  // Modal state for cancel/settle confirmation
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean
+    type: 'cancel' | 'settle' | 'settle_all'
+    employeeId: string
+    employeeName: string
+    row?: any
+  }>({ open: false, type: 'cancel', employeeId: '', employeeName: '' })
 
   // Local state for adjustments and hourly rates (since they might not be in DB yet)
   const [adjustments, setAdjustments] = useState<Record<string, number>>({})
@@ -111,6 +132,9 @@ export default function PayrollAdminPage() {
       employment_type: string;
       regMins: number; 
       otMins: number; 
+      lateCount: number;
+      lateMins: number;
+      absentCount: number;
       status: "draft" | "settled" 
     }> = {}
     
@@ -122,15 +146,26 @@ export default function PayrollAdminPage() {
         employment_type: emp.employment_type || "part-time",
         regMins: 0,
         otMins: 0,
+        lateCount: 0,
+        lateMins: 0,
+        absentCount: 0,
         status: "draft"
       }
     })
     
-    // Sum minutes from report
+    // Sum minutes and stats from report
     attendanceReport.forEach(row => {
       if (agg[row.employee_id]) {
-        agg[row.employee_id].regMins += row.regularMinutes
-        agg[row.employee_id].otMins += row.overtimeMinutes
+        if (row.isAbsent) {
+          agg[row.employee_id].absentCount += 1;
+        } else {
+          agg[row.employee_id].regMins += row.regularMinutes;
+          agg[row.employee_id].otMins += row.overtimeMinutes;
+          if (row.isLate) {
+            agg[row.employee_id].lateCount += 1;
+            agg[row.employee_id].lateMins += Math.max(0, row.lateMinutes || 0);
+          }
+        }
       }
     })
     
@@ -189,9 +224,15 @@ export default function PayrollAdminPage() {
   }
 
   const handleSettleAll = async () => {
-    if (!confirm("Are you sure you want to SETTLE all payrolls for this period? This action is final.")) return
-    
-    setIsSaving(true)
+    setConfirmModal({
+      open: true,
+      type: 'settle_all',
+      employeeId: 'all',
+      employeeName: 'All Staff'
+    })
+  }
+
+  const trulySettleAll = async () => {
     // First save all current states as draft to ensure logic is updated
     for (const data of aggregatedData) {
       if (data.status === 'draft') {
@@ -402,6 +443,7 @@ export default function PayrollAdminPage() {
               <thead>
                 <tr className="bg-muted/50 border-y border-border">
                   <th className="p-4 font-semibold text-xs uppercase tracking-wider">Employee</th>
+                  <th className="p-4 font-semibold text-xs uppercase tracking-wider text-center">Attendance</th>
                   <th className="p-4 font-semibold text-xs uppercase tracking-wider text-right">Total Hours</th>
                   <th className="p-4 font-semibold text-xs uppercase tracking-wider text-right">Hourly Rate</th>
                   <th className="p-4 font-semibold text-xs uppercase tracking-wider text-right">Adjustment</th>
@@ -443,6 +485,21 @@ export default function PayrollAdminPage() {
                             <span className="text-[10px] uppercase text-muted-foreground font-bold">{row.employment_type}</span>
                           </div>
                         </td>
+                        <td className="p-4">
+                          <div className="flex flex-col gap-1 items-center justify-center text-xs">
+                            {row.absentCount > 0 ? (
+                              <span className="text-destructive font-bold">{row.absentCount} Absent</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                            {row.lateCount > 0 && (
+                              <span className="text-orange-500 font-medium">{row.lateCount} Late ({row.lateMins}m)</span>
+                            )}
+                            {row.absentCount === 0 && row.lateCount === 0 && (
+                              <span className="text-green-600 font-medium text-[10px] uppercase">Perfect</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4 text-right font-mono text-sm">
                           {totalHrs.toFixed(1)}h
                           <div className="text-[10px] text-amber-600 font-bold">
@@ -473,7 +530,8 @@ export default function PayrollAdminPage() {
                         <td className="p-4 text-center">
                           <Badge variant={isSettled ? "default" : "outline"} className={cn(
                             "text-[10px] rounded-sm uppercase font-black",
-                            isSettled ? "bg-green-600 hover:bg-green-600" : "text-amber-600 border-amber-600/30"
+                            isSettled ? "bg-green-600 hover:bg-green-600" : 
+                            "text-amber-600 border-amber-600/30"
                           )}>
                             {row.status}
                           </Badge>
@@ -490,6 +548,25 @@ export default function PayrollAdminPage() {
                             >
                               <Save className="h-4 w-4" />
                             </Button>
+                            
+                            {isSettled && (
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                disabled={isSaving}
+                                title="Cancel Settlement"
+                                onClick={() => setConfirmModal({
+                                  open: true,
+                                  type: 'cancel',
+                                  employeeId: row.employee_id,
+                                  employeeName: row.name
+                                })}
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            )}
+
                             {!isSettled && (
                               <Button 
                                 variant="ghost" 
@@ -497,12 +574,13 @@ export default function PayrollAdminPage() {
                                 className="h-8 w-8 text-green-600 hover:bg-green-50"
                                 disabled={isSaving}
                                 title="Settle Employee"
-                                onClick={async () => {
-                                  if (!confirm(`Settle payroll for ${row.name}?`)) return
-                                  await handleSave(row.employee_id, row)
-                                  const success = await settlePayrollItems([row.employee_id], format(dateRange.from, "yyyy-MM-dd"), format(dateRange.to, "yyyy-MM-dd"))
-                                  if (success) fetchAllData()
-                                }}
+                                onClick={() => setConfirmModal({
+                                  open: true,
+                                  type: 'settle',
+                                  employeeId: row.employee_id,
+                                  employeeName: row.name,
+                                  row
+                                })}
                               >
                                 <CheckCircle className="h-4 w-4" />
                               </Button>
@@ -528,6 +606,80 @@ export default function PayrollAdminPage() {
            </p>
          </div>
       )}
+
+      {/* Confirmation Modal */}
+      <AlertDialog open={confirmModal.open} onOpenChange={(open) => setConfirmModal(prev => ({ ...prev, open }))}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmModal.type === 'cancel' ? 'Cancel Settlement' : 
+               confirmModal.type === 'settle' ? 'Settle Payroll' : 
+               'Settle ALL Payrolls'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              {confirmModal.type === 'cancel' ? (
+                <>
+                  Are you sure you want to revert the payroll for <strong>{confirmModal.employeeName}</strong> back to <strong>Draft</strong>?
+                  <br /><br />
+                  The salary data will be preserved and can be re-edited.
+                </>
+              ) : confirmModal.type === 'settle' ? (
+                <>
+                  Are you sure you want to settle the payroll for <strong>{confirmModal.employeeName}</strong>?
+                  <br /><br />
+                  Once settled, the values will be locked until manually reverted.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to <strong>SETTLE ALL</strong> payrolls for the period of <strong>{format(dateRange.from, "dd MMM")} - {format(dateRange.to, "dd MMM yyyy")}</strong>?
+                  <br /><br />
+                  This will finalize the records for all staffers in the list. This action is final.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              className={cn(
+                "rounded-sm",
+                confirmModal.type === 'cancel' 
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" 
+                  : "bg-green-600 text-white hover:bg-green-700"
+              )}
+              onClick={async () => {
+                setIsSaving(true)
+                if (confirmModal.type === 'cancel') {
+                  const success = await cancelPayrollItems(
+                    [confirmModal.employeeId], 
+                    format(dateRange.from, "yyyy-MM-dd"), 
+                    format(dateRange.to, "yyyy-MM-dd")
+                  )
+                  if (success) await fetchAllData()
+                } else if (confirmModal.type === 'settle') {
+                  if (confirmModal.row) {
+                    await handleSave(confirmModal.employeeId, confirmModal.row)
+                  }
+                  const success = await settlePayrollItems(
+                    [confirmModal.employeeId], 
+                    format(dateRange.from, "yyyy-MM-dd"), 
+                    format(dateRange.to, "yyyy-MM-dd")
+                  )
+                  if (success) await fetchAllData()
+                } else if (confirmModal.type === 'settle_all') {
+                  await trulySettleAll()
+                }
+                setIsSaving(false)
+                setConfirmModal(prev => ({ ...prev, open: false }))
+              }}
+            >
+              {confirmModal.type === 'cancel' ? 'Revert to Draft' : 
+               confirmModal.type === 'settle' ? 'Confirm Settle' : 
+               'Confirm All'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

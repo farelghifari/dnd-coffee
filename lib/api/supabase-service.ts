@@ -138,6 +138,41 @@ export function getDefaultDisplayUnit(inventoryUnit: string): DisplayUnit {
   return 'pcs'
 }
 
+// Global utility for formatting inventory item stock values based on display config
+export function getDisplayUnit(item: Partial<InventoryItem>): DisplayUnit {
+  return (item.display_unit || getDefaultDisplayUnit(item.unit || 'pcs') || item.unit || 'pcs') as DisplayUnit;
+}
+
+export function getDisplayStock(amount: number, item: Partial<InventoryItem>): number {
+  if (amount === undefined || amount === null) return 0;
+  
+  const dUnit = getDisplayUnit(item);
+  let multiplier = item.conversion_rate || 1;
+  
+  if (multiplier === 1 && dUnit.toLowerCase() !== (item.unit || '').toLowerCase()) {
+    multiplier = getConversionRate(dUnit, item.unit || 'pcs') || 1;
+  }
+  
+  // Only apply division/conversion if unit requires it
+  const converted = amount / multiplier;
+  
+  // Avoid long decimals (max 4 decimal places)
+  return parseFloat(converted.toFixed(4));
+}
+
+export function resolveDisplayStockToDb(displayAmount: number, item: Partial<InventoryItem>): number {
+  if (displayAmount === undefined || displayAmount === null) return 0;
+  
+  const dUnit = getDisplayUnit(item);
+  let multiplier = item.conversion_rate || 1;
+  
+  if (multiplier === 1 && dUnit.toLowerCase() !== (item.unit || '').toLowerCase()) {
+    multiplier = getConversionRate(dUnit, item.unit || 'pcs') || 1;
+  }
+  
+  return displayAmount * multiplier;
+}
+
 // ========== TYPES MATCHING ACTUAL DB SCHEMA ==========
 
 // DB Schema: employees(id, name, email, password, role, position, employment_type, nfc_uid, status, super_admin_expires_at)
@@ -150,7 +185,7 @@ export interface Employee {
   position?: "barista" | "employee"
   employment_type: "full-time" | "part-time"
   nfc_uid: string | null
-  status: "active" | "inactive"
+  status: "active" | "inactive" | "deleted"
   super_admin_expires_at?: string | null // Timestamp for temporary super_admin expiration
   phone_number?: string | null
   avatar_url?: string | null
@@ -188,6 +223,8 @@ export interface InventoryItem {
   unit_cost?: number
   display_unit?: string
   conversion_rate?: number
+  supplier_name?: string
+  notes?: string
 }
 
 // DB Schema: inventory_transactions(id, item_id, employee_id, type, quantity)
@@ -226,6 +263,7 @@ export interface StockLog {
   id: string
   item_id: string
   item_name: string
+  unit?: string
   type: "in" | "out" | "waste" | "opname"
   amount: number
   employee_id?: string | null
@@ -246,6 +284,17 @@ export interface AttendanceLog {
   // For local/fallback compatibility
   employee_name?: string
   type?: "clock-in" | "clock-out"
+}
+
+export interface EmployeeKPI {
+  id: string
+  employee_id: string
+  points: number
+  category: string
+  notes?: string
+  date: string
+  created_by: string
+  created_at: string
 }
 
 // DB Schema: menu_items(id, name, type, price, status)
@@ -304,7 +353,7 @@ export interface OvertimeRequest {
 // System Activity Log - tracks all system changes
 export interface SystemLog {
   id: string
-  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action" | "contract_renewal"
+  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action" | "contract_renewal" | "kpi_change" | "employee_delete"
   actor: string // Who made the change (email or name)
   target: string // What was changed (item name, employee name, etc.)
   details: string // Description of the change
@@ -337,6 +386,7 @@ export async function getEmployees(): Promise<Employee[]> {
     const { data, error } = await supabase
       .from('employees')
       .select('*')
+      .neq('status', 'deleted')
       .order('name', { ascending: true })
     
     console.log("DATA (getEmployees):", data)
@@ -349,6 +399,7 @@ export async function getEmployees(): Promise<Employee[]> {
   }
   
   return getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
+    .filter(e => e.status !== 'deleted')
 }
 
 export async function getActiveEmployees(): Promise<Employee[]> {
@@ -399,6 +450,7 @@ export async function getEmployeeByEmail(email: string): Promise<Employee | null
       .from('employees')
       .select('*')
       .eq('email', email)
+      .neq('status', 'deleted')
       .single()
     
     console.log("DATA (getEmployeeByEmail):", data)
@@ -411,7 +463,7 @@ export async function getEmployeeByEmail(email: string): Promise<Employee | null
   }
   
   const employees = getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
-  return employees.find(e => e.email === email) || null
+  return employees.find(e => e.email === email && e.status !== 'deleted') || null
 }
 
 // NFC LOGIN - Use exact query: select * from employees where nfc_uid = scanned_uid and status = 'active'
@@ -428,38 +480,36 @@ export async function getEmployeeByNFC(nfcUid: string): Promise<Employee | null>
       .from('employees')
       .select('*')
       .eq('nfc_uid', cleanUID)
-      .eq('status', 'active')
+      .neq('status', 'deleted')
       .single()
     
     console.log("DATA (getEmployeeByNFC exact):", data)
-    console.log("ERROR (getEmployeeByNFC exact):", error)
+    if (error) console.log("ERROR (getEmployeeByNFC exact):", error)
     
-    // If no exact match, try case-insensitive
-    if (error || !data) {
-      const result = await supabase
+    // If no exact match found, or if error, try case-insensitive ilike
+    if (!data) {
+      console.log("NO EXACT MATCH, trying ilike for:", cleanUID)
+      const { data: ilikeData, error: ilikeError } = await supabase
         .from('employees')
         .select('*')
         .ilike('nfc_uid', cleanUID)
-        .eq('status', 'active')
-        .single()
+        .neq('status', 'deleted')
+        .maybeSingle() // Use maybeSingle to avoid 406 on multiples (UIDs should be unique)
       
-      data = result.data
-      error = result.error
+      data = ilikeData
+      error = ilikeError
       
       console.log("DATA (getEmployeeByNFC ilike):", data)
-      console.log("ERROR (getEmployeeByNFC ilike):", error)
+      if (ilikeError) console.log("ERROR (getEmployeeByNFC ilike):", ilikeError)
     }
     
-    if (error || !data) {
-      return null
-    }
-    return data
+    return data || null
   }
   
   // Fallback - use case-insensitive match
   const employees = getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
   return employees.find(e => 
-    e.nfc_uid?.toLowerCase() === cleanUID.toLowerCase() && e.status === 'active'
+    e.nfc_uid?.toLowerCase() === cleanUID.toLowerCase() && e.status !== 'deleted'
   ) || null
 }
 
@@ -693,6 +743,7 @@ export async function getAdmins(): Promise<Employee[]> {
       .from('employees')
       .select('*')
       .eq('role', 'admin')
+      .neq('status', 'deleted')
       .order('name', { ascending: true })
     
     console.log("DATA (getAdmins):", data)
@@ -705,17 +756,20 @@ export async function getAdmins(): Promise<Employee[]> {
   }
   
   const employees = getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
-  return employees.filter(e => e.role === 'admin')
+  return employees.filter(e => e.role === 'admin' && e.status !== 'deleted')
 }
 
 export async function deleteEmployee(id: string): Promise<boolean> {
   if (isSupabaseConfigured()) {
     const { error } = await supabase
       .from('employees')
-      .delete()
+      .update({ 
+        status: 'deleted',
+        nfc_uid: null // Free up NFC UID for reuse if it was assigned
+      })
       .eq('id', id)
     
-    console.log("ERROR (deleteEmployee):", error)
+    console.log("ERROR (deleteEmployee - Soft Delete):", error)
     
     if (error) {
       return false
@@ -724,8 +778,15 @@ export async function deleteEmployee(id: string): Promise<boolean> {
   }
   
   const employees = getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
-  const filtered = employees.filter(e => e.id !== id)
-  setStoredData(STORAGE_KEYS.employees, filtered)
+  const index = employees.findIndex(e => e.id === id)
+  if (index === -1) return false
+  
+  employees[index] = { 
+    ...employees[index], 
+    status: 'deleted',
+    nfc_uid: null 
+  }
+  setStoredData(STORAGE_KEYS.employees, employees)
   return true
 }
 
@@ -1042,6 +1103,7 @@ export async function updateInventoryStock(itemId: string, quantity: number, typ
       .insert([{
         item_id: itemId,
         employee_id: employeeId,
+        actor_name: actorName,
         type: type,
         quantity: quantity
       }])
@@ -1058,7 +1120,7 @@ export async function updateInventoryStock(itemId: string, quantity: number, typ
   if (updatedItemResult && item) {
     const typeLabel = type === 'in' ? 'Stock In' : type === 'out' ? 'Stock Out' : type === 'waste' ? 'Waste' : 'Opname'
     const detail = `${typeLabel}: ${quantity} ${item.unit} for ${item.name}`
-    await logActivity('inventory_change', actorName, itemId, detail)
+    await logActivity('inventory_change', actorName, item.name, detail)
   }
   
   return updatedItemResult
@@ -1081,6 +1143,10 @@ export interface UpsertInventoryData {
   unit_cost?: number
   display_unit?: string
   conversion_rate?: number
+  supplier_name?: string
+  notes?: string
+  received_date?: string
+  expired_date?: string
 }
 
 export async function upsertInventory(data: UpsertInventoryData, actorName: string = 'System'): Promise<InventoryItem | null> {
@@ -1103,7 +1169,7 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
     
     if (error) {
       // RPC failed (likely parameter mismatch or legacy function). Try direct update/insert.
-      const baseUpdate = {
+      const baseUpdate: Record<string, any> = {
         name: data.name,
         category: data.category,
         unit: data.unit,
@@ -1111,7 +1177,9 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
         min_stock: data.min_stock,
         max_stock: data.max_stock,
         daily_usage: data.daily_usage,
-        unit_cost: data.unit_cost
+        unit_cost: data.unit_cost,
+        supplier_name: data.supplier_name,
+        notes: data.notes
       }
       
       const extendedUpdate = {
@@ -1209,7 +1277,7 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
       ? `Updated inventory item details: ${resultItem.name}`
       : `Added new inventory item: ${resultItem.name} (${resultItem.stock} ${resultItem.unit})`
     
-    await logActivity('inventory_change', actorName, resultItem.id, detail)
+    await logActivity('inventory_change', actorName, resultItem.name, detail)
   }
 
   return resultItem
@@ -1304,7 +1372,7 @@ export async function stockOutManual(itemId: string, quantity: number, reason?: 
         await logActivity(
           'inventory_change', 
           actorName, 
-          itemId, 
+          item.name, 
           `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
         )
       }
@@ -1315,7 +1383,7 @@ export async function stockOutManual(itemId: string, quantity: number, reason?: 
       await logActivity(
         'inventory_change', 
         actorName, 
-        itemId, 
+        item.name, 
         `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
       )
     }
@@ -1329,7 +1397,7 @@ export async function stockOutManual(itemId: string, quantity: number, reason?: 
     await logActivity(
       'inventory_change', 
       actorName, 
-      itemId, 
+      item.name, 
       `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
     )
   }
@@ -1467,7 +1535,33 @@ export interface SalesLog {
   menu_name?: string
   quantity: number
   total_price: number
+  total_cost?: number // COGS
+  employee_id?: string // Barista
   created_at: string
+}
+
+
+export interface MonthlyTarget {
+  id: string
+  month: string
+  revenue_target: number
+  sales_target: number
+  aov_target: number
+  growth_percentage: number
+  is_automatic: boolean
+  updated_at?: string
+}
+
+export interface FinancialSummary {
+  revenue: number
+  cogs: number
+  waste: number
+  opex: number
+  grossProfit: number
+  netProfit: number
+  aov: number
+  salesPerHour: Record<string, number>
+  totalTransactions: number
 }
 
 export interface SalesReport {
@@ -1715,8 +1809,9 @@ export async function getStockLogs(): Promise<StockLog[]> {
         type,
         quantity,
         employee_id,
+        actor_name,
         created_at,
-        inventory_items(name),
+        inventory_items(name, unit, display_unit, conversion_rate),
         employees(name)
       `)
       .order('created_at', { ascending: false })
@@ -1730,17 +1825,25 @@ export async function getStockLogs(): Promise<StockLog[]> {
     }
     
     // Map to StockLog format
-    return (data || []).map(t => ({
-      id: t.id,
-      item_id: t.item_id,
-      item_name: (t.inventory_items as any)?.name || 'Unknown Item',
-      type: t.type,
-      amount: t.quantity,
-      employee_id: t.employee_id,
-      employee_name: (t.employees as any)?.name || 'Unknown User',
-      timestamp: t.created_at,
-      notes: '' // notes aren't in transactions table yet, but field is required by interface
-    }))
+    return (data || []).map(t => {
+      const item = t.inventory_items as any
+      const multiplier = item?.conversion_rate || 1
+      const displayAmount = parseFloat((t.quantity / multiplier).toFixed(4))
+      const displayUnit = item?.display_unit || item?.unit || ''
+      
+      return {
+        id: t.id,
+        item_id: t.item_id,
+        item_name: item?.name || 'Unknown Item',
+        unit: displayUnit,
+        type: t.type,
+        amount: displayAmount,
+        employee_id: t.employee_id,
+        employee_name: (t.employees as any)?.name || t.actor_name || 'Unknown User',
+        timestamp: t.created_at,
+        notes: '' // notes aren't in transactions table yet
+      }
+    })
   }
   
   const stored = getStoredData(STORAGE_KEYS.stockLogs, mockStockLogs)
@@ -1887,10 +1990,10 @@ export async function getAttendanceByEmployee(employeeId: string): Promise<Atten
 }
 
 // ATTENDANCE FIX - Clock In/Out must insert: employee_id, employee_name, date (today), time (now), action, status
-export async function addAttendanceLog(log: { employee_id: string; employee_name?: string; type: "clock-in" | "clock-out" }): Promise<AttendanceLog | null> {
+export async function addAttendanceLog(log: { employee_id: string; employee_name?: string; type: "clock-in" | "clock-out", manual_date?: string, manual_time?: string }): Promise<AttendanceLog | null> {
   const now = new Date()
-  const date = now.toISOString().split('T')[0]
-  const time = now.toTimeString().split(' ')[0]
+  const date = log.manual_date || now.toISOString().split('T')[0]
+  const time = log.manual_time || now.toTimeString().split(' ')[0]
   
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
@@ -1930,7 +2033,7 @@ export async function addAttendanceLog(log: { employee_id: string; employee_name
     action: log.type,
     status: 'present',
     type: log.type,
-    timestamp: now.toISOString()
+    timestamp: `${date}T${time}`
   }
   logs.unshift(newLog)
   setStoredData(STORAGE_KEYS.attendanceLogs, logs)
@@ -2293,7 +2396,35 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             isLate,
             isPenalty,
             lateMinutes,
+            isAbsent: false,
             sessions
+          })
+        }
+      } else if (empDayShift) {
+        // Rule 7: Absentee tracking
+        // They have a shift but no logs. If the shift's end time has already passed, they are absent.
+        const endTimeStr = empDayShift.end_time || '23:59'
+        const shiftEndObj = new Date(`${dateStr}T${endTimeStr}`)
+        
+        // Handle overnight shifts (e.g. 20:00 to 02:00) by adding 1 day to the end date
+        if (empDayShift.start_time && endTimeStr < empDayShift.start_time) {
+          shiftEndObj.setDate(shiftEndObj.getDate() + 1)
+        }
+        
+        const isConfirmedAbsent = new Date() > shiftEndObj
+        
+        if (isConfirmedAbsent) {
+          report.push({
+            employee_id: emp.id,
+            employee_name: emp.name,
+            date: dateStr,
+            regularMinutes: 0,
+            overtimeMinutes: 0,
+            isLate: false,
+            isPenalty: false,
+            lateMinutes: 0,
+            isAbsent: true,
+            sessions: []
           })
         }
       }
@@ -2948,16 +3079,71 @@ export async function rejectOvertimeRequest(id: string, reviewerName: string, no
 export function getStockHealth(item: InventoryItem): "healthy" | "warning" | "critical" {
   const stock = item.stock || item.current_stock || 0
   const dailyUsage = item.daily_usage || 1
+  const minStock = item.min_stock || 0
+  
+  if (stock <= 0) return "critical"
+  
+  // 1. Min stock check (User's primary concern)
+  if (stock < minStock) return "warning"
+  
+  // 2. Daily usage check (Longevity concern)
   const daysRemaining = stock / dailyUsage
   if (daysRemaining <= 1) return "critical"
   if (daysRemaining <= 3) return "warning"
+  
   return "healthy"
 }
 
 export function getDaysRemaining(item: InventoryItem): number {
   const stock = item.stock || item.current_stock || 0
   const dailyUsage = item.daily_usage || 1
-  return Math.round((stock / dailyUsage) * 10) / 10
+  return Math.max(0, Math.round((stock / dailyUsage) * 10) / 10)
+}
+
+/**
+ * Calculates the rolling daily usage for an item based on sales logs from the last 7 days.
+ * This looks up all menu recipes that use this item, aggregates the total quantity sold,
+ * and divides by 7.
+ */
+export async function calculateRollingDailyUsage(itemId: string): Promise<number> {
+  if (isSupabaseConfigured()) {
+    const today = new Date()
+    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    
+    // 1. Get all sales in last 7 days
+    const { data: sales, error: salesError } = await supabase
+      .from('sales_logs')
+      .select('menu_id, quantity')
+      .gte('created_at', sevenDaysAgo)
+    
+    if (salesError || !sales) return 0
+    
+    // 2. Get all recipes
+    const { data: recipes, error: recipeError } = await supabase
+      .from('menu_recipes')
+      .select('menu_item_id, quantity, unit')
+      .eq('inventory_item_id', itemId)
+    
+    if (recipeError || !recipes) return 0
+    
+    // Map recipe quantity (in base unit) for each menu
+    const recipeMap = new Map<string, { quantity: number; unit: string }>()
+    recipes.forEach(r => recipeMap.set(r.menu_item_id, { quantity: r.quantity, unit: r.unit }))
+    
+    // 3. Sum up usage
+    let totalUsage = 0
+    sales.forEach(sale => {
+      const recipe = recipeMap.get(sale.menu_id)
+      if (recipe) {
+        totalUsage += sale.quantity * recipe.quantity
+      }
+    })
+    
+    // 4. Return average per day (divided by 7)
+    return parseFloat((totalUsage / 7).toFixed(4))
+  }
+  
+  return 0
 }
 
 export function getOverallStockHealth(inventory: InventoryItem[]): number {
@@ -3012,16 +3198,25 @@ export async function getShiftConfigsByDayType(dayType: "weekday" | "weekend"): 
   return configs.filter(c => c.day_type === dayType || !c.day_type)
 }
 
-// Get on-shift employees based on today's attendance
+// Get on-shift employees based on today's and yesterday's attendance (for cross-day shifts)
 export async function getOnShiftEmployees(): Promise<Employee[]> {
   const today = getLocalYYYYMMDD()
-  const todayLogs = await getAttendanceLogsByDate(today)
-  const employees = await getActiveEmployees()
+  const yesterdayDate = new Date()
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1)
+  const yesterday = getLocalYYYYMMDD(yesterdayDate)
   
+  // Fetch logs from both days to handle shifts that cross midnight
+  const [todayLogs, yesterdayLogs, employees] = await Promise.all([
+    getAttendanceLogsByDate(today),
+    getAttendanceLogsByDate(yesterday),
+    getActiveEmployees()
+  ])
+  
+  const allLogs = [...yesterdayLogs, ...todayLogs]
   const clockedIn = new Set<string>()
   
   // Sort logs chronologically and process
-  const sortedLogs = [...todayLogs].sort((a, b) => {
+  const sortedLogs = allLogs.sort((a, b) => {
     const timeA = a.timestamp || `${a.date}T${a.time}`
     const timeB = b.timestamp || `${b.date}T${b.time}`
     return new Date(timeA).getTime() - new Date(timeB).getTime()
@@ -3431,6 +3626,7 @@ export interface AddBatchData {
   received_date: string
   expired_date: string
   notes?: string
+  is_opened?: boolean
 }
 
 export interface InventoryBatch {
@@ -3444,7 +3640,28 @@ export interface InventoryBatch {
   received_date: string
   expired_date: string
   notes?: string
+  is_opened: boolean
+  opened_at?: string
   created_at: string
+}
+
+export async function openBatch(batchId: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('inventory_batches')
+      .update({ 
+        is_opened: true, 
+        opened_at: new Date().toISOString() 
+      })
+      .eq('id', batchId)
+    
+    if (error) {
+      console.error("ERROR (openBatch):", error)
+      return false
+    }
+    return true
+  }
+  return false
 }
 
 // Generate batch number: CATEGORY-YYYYMMDD-HHMMSS
@@ -3475,34 +3692,47 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
       p_item_id: data.item_id,
       p_quantity: quantityInBaseUnit,
       p_unit_cost: data.unit_cost,
-      p_supplier_name: data.supplier_name,
+      p_supplier_name: data.supplier_name || null,
       p_received_date: data.received_date,
-      p_expired_date: data.expired_date,
-      p_notes: data.notes || '',
-      p_batch_number: batchNumber
+      p_expired_date: data.expired_date || null,
+      p_notes: data.notes || null,
+      p_actor_name: actorName
     })
     
     if (!rpcError && rpcResult) {
-      console.log("DATA (addBatch RPC):", rpcResult)
-      finalBatch = rpcResult
+      console.log("DATA (addBatch RPC) - batch ID:", rpcResult)
+      // RPC returns UUID, fetch the full batch record
+      const { data: batchRecord } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('id', rpcResult)
+        .single()
+      finalBatch = batchRecord
     } else {
       console.log("RPC add_batch not found or failed, using direct inserts:", rpcError)
       
       // Fallback: Manual transaction
       // 1. INSERT into inventory_batches
+      const insertData: any = {
+        item_id: data.item_id,
+        batch_number: batchNumber,
+        quantity: quantityInBaseUnit,
+        remaining_quantity: quantityInBaseUnit,
+        cost_per_unit: data.unit_cost,
+        supplier_name: data.supplier_name,
+        received_date: data.received_date,
+        expired_date: data.expired_date,
+        notes: data.notes || '',
+        is_opened: data.is_opened || false
+      }
+      
+      if (data.is_opened) {
+        insertData.opened_at = new Date().toISOString()
+      }
+
       const { data: batchData, error: batchError } = await supabase
         .from('inventory_batches')
-        .insert([{
-          item_id: data.item_id,
-          batch_number: batchNumber,
-          quantity: quantityInBaseUnit,
-          remaining_quantity: quantityInBaseUnit,
-          cost_per_unit: data.unit_cost,
-          supplier_name: data.supplier_name,
-          received_date: data.received_date,
-          expired_date: data.expired_date,
-          notes: data.notes || ''
-        }])
+        .insert([insertData])
         .select()
         .single()
       
@@ -3531,7 +3761,8 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
           item_id: data.item_id,
           type: 'in',
           quantity: quantityInBaseUnit,
-          employee_id: null
+          employee_id: null,
+          actor_name: actorName
         }])
 
       
@@ -3544,7 +3775,7 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
       await logActivity(
         'inventory_change', 
         actorName, 
-        data.item_id, 
+        item.name, 
         `Stock In: ${data.quantity} ${data.unit} added for ${item.name} (Batch: ${batchNumber})`
       )
     }
@@ -3570,6 +3801,7 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
     received_date: data.received_date,
     expired_date: data.expired_date,
     notes: data.notes,
+    is_opened: data.is_opened || false,
     created_at: new Date().toISOString()
   }
   
@@ -3583,6 +3815,26 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
   
   return newBatch
 }
+
+// ========== BATCH MANAGEMENT HELPERS ==========
+
+export async function updateBatch(batchId: string, updates: Partial<InventoryBatch>): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('inventory_batches')
+      .update(updates)
+      .eq('id', batchId)
+    
+    if (error) {
+      console.error("ERROR (updateBatch):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+
 
 // ========== GET BATCHES ==========
 // Get all batches for display in Batch Tracking page
@@ -3698,6 +3950,42 @@ export async function settlePayrollItems(employeeIds: string[], startDate: strin
     return true
   }
   return false
+}
+
+export async function cancelPayrollItems(employeeIds: string[], startDate: string, endDate: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('payrolls')
+      .update({ 
+        status: 'draft', 
+        updated_at: new Date().toISOString() 
+      })
+      .in('employee_id', employeeIds)
+      .eq('start_date', startDate)
+      .eq('end_date', endDate)
+    
+    if (error) {
+      console.error("ERROR (cancelPayrollItems):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+export async function getAllMenuRecipes(): Promise<any[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('menu_recipes')
+      .select('*')
+    
+    if (error) {
+      console.error("ERROR (getAllMenuRecipes):", error)
+      return []
+    }
+    return data || []
+  }
+  return []
 }
 
 export async function getEmployeePayrolls(employeeId: string): Promise<PayrollRecord[]> {
@@ -3906,3 +4194,189 @@ export async function getEmployeeFileUrl(path: string, bucket: 'avatars' | 'cont
   if (path.startsWith('/resources/')) return path
   return `/resources/${bucket}/${path}`
 }
+
+// ========== EMPLOYEE KPI ==========
+
+export async function getEmployeeKPIs(employeeId: string): Promise<EmployeeKPI[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('employee_kpis')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('date', { ascending: false })
+    
+    if (error) {
+      console.error("ERROR (getEmployeeKPIs):", error)
+      return []
+    }
+    return data || []
+  }
+  return []
+}
+
+export async function addEmployeeKPI(data: Omit<EmployeeKPI, 'id' | 'created_at'>): Promise<EmployeeKPI | null> {
+  if (isSupabaseConfigured()) {
+    const { data: result, error } = await supabase
+      .from('employee_kpis')
+      .insert([data])
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (addEmployeeKPI):", error)
+      return null
+    }
+    
+    // Get employee name for better logging
+    const { data: emp } = await supabase.from('employees').select('name, nickname').eq('id', data.employee_id).single()
+    const targetName = emp ? (emp.nickname || emp.name) : data.employee_id
+    
+    await logActivity(
+        'kpi_change', 
+        data.created_by || 'Admin', 
+        targetName, 
+        `KPI Point: ${data.points > 0 ? '+' : ''}${data.points} points added (${data.category})`
+      )
+
+    return result
+  }
+  return null
+}
+
+export async function deleteEmployeeKPI(id: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('employee_kpis')
+      .delete()
+      .eq('id', id)
+    
+    if (error) {
+      console.error("ERROR (deleteEmployeeKPI):", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+// ========== MONTHLY TARGETS ==========
+
+export async function getMonthlyTarget(month: string): Promise<MonthlyTarget | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('monthly_targets')
+      .select('*')
+      .eq('month', month)
+      .single()
+    
+    if (!error && data) return data
+    
+    // Auto-generate if not exists
+    return calculateAutoTarget(month)
+  }
+  return null
+}
+
+export async function upsertMonthlyTarget(target: Omit<MonthlyTarget, 'id'>): Promise<MonthlyTarget | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('monthly_targets')
+      .upsert(target, { onConflict: 'month' })
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (upsertMonthlyTarget):", error)
+      return null
+    }
+    return data
+  }
+  return null
+}
+
+async function calculateAutoTarget(month: string): Promise<MonthlyTarget | null> {
+  // Logic: Avg of last 3 months + Growth % (default 10%)
+  // For simplicity here, we'll fetch last 3 months and calculate
+  // But to stay performant for now, let's return a default based on current run if it's the first time
+  return {
+    id: 'auto-' + month,
+    month: month,
+    revenue_target: 10000000, // Default 10M IDR fallback
+    sales_target: 500,        // Default 500 units
+    aov_target: 20000,        // Default 20k AOV
+    growth_percentage: 10,
+    is_automatic: true
+  }
+}
+
+// ========== FINANCIAL ANALYTICS ==========
+
+export async function getFinancialSummary(month: string): Promise<FinancialSummary> {
+  const [year, monthNum] = month.split('-')
+  const startDate = `${month}-01T00:00:00.000Z`
+  const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0] + 'T23:59:59.999Z'
+
+  if (isSupabaseConfigured()) {
+    // 1. Revenue & COGS from sales_logs
+    const { data: salesData } = await supabase
+      .from('sales_logs')
+      .select('total_price, total_cost, created_at')
+      .gte('created_at', startDate)
+      .lte('created_at', endDate)
+    
+    const revenue = (salesData || []).reduce((sum, s) => sum + s.total_price, 0)
+    const cogs = (salesData || []).reduce((sum, s) => sum + (s.total_cost || 0), 0)
+    
+    // 2. OPEX from monthly_opex
+    const opexData = await getMonthlyOpex(month)
+    const opex = opexData.reduce((sum, o) => sum + o.amount, 0)
+    
+    // 3. Waste from inventory_transactions
+    const { data: wasteData } = await supabase
+      .from('inventory_transactions')
+      .select('quantity, item_id')
+      .eq('type', 'waste')
+      .gte('created_at', startDate)
+      .lte('created_at', endDate)
+    
+    // We need current item costs to estimate waste value
+    // (In a perfect world, we'd log cost at the time of waste too)
+    const inventory = await getInventory()
+    const itemCostMap = new Map(inventory.map(i => [i.id, i.unit_cost || 0]))
+    const waste = (wasteData || []).reduce((sum, w) => sum + (w.quantity * (itemCostMap.get(w.item_id) || 0)), 0)
+    
+    // 4. Calculations
+    const grossProfit = revenue - cogs
+    const netProfit = grossProfit - opex - waste
+    const totalTransactions = (salesData || []).length
+    const aov = totalTransactions > 0 ? revenue / totalTransactions : 0
+    
+    // 5. Sales per Hour
+    const salesPerHour: Record<string, number> = {}
+    for (const sale of salesData || []) {
+      const hour = new Date(sale.created_at).getHours()
+      const hourStr = `${hour}:00`
+      salesPerHour[hourStr] = (salesPerHour[hourStr] || 0) + 1
+    }
+    
+    return {
+      revenue,
+      cogs,
+      waste,
+      opex,
+      grossProfit,
+      netProfit,
+      aov,
+      salesPerHour,
+      totalTransactions
+    }
+  }
+
+  // Fallback empty stats
+  return {
+    revenue: 0, cogs: 0, waste: 0, opex: 0, 
+    grossProfit: 0, netProfit: 0, aov: 0, 
+    salesPerHour: {}, totalTransactions: 0
+  }
+}
+

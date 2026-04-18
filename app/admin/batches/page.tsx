@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/tabs"
 import { 
   Package, 
+  PackageOpen,
   Search, 
   AlertTriangle,
   Clock,
@@ -63,6 +64,7 @@ import {
   getBatches,
   getInventory,
   addBatch,
+  openBatch,
   stockOutManual,
   toBaseUnit,
   type DisplayUnit,
@@ -136,6 +138,8 @@ export default function BatchesPage() {
           expiryDate: b.expired_date,
           status,
           notes: b.notes,
+          is_opened: !!b.is_opened,
+          opened_at: b.opened_at,
           createdAt: b.created_at,
           updatedAt: b.created_at
         }
@@ -147,6 +151,18 @@ export default function BatchesPage() {
     }
     fetchData()
   }, [])
+
+  const handleOpenBatchAction = async (batchId: string) => {
+    try {
+      const success = await openBatch(batchId)
+      if (success) {
+        // Refresh local state or re-fetch
+        setBatches(prev => prev.map(b => b.id === batchId ? { ...b, is_opened: true, opened_at: new Date().toISOString() } : b))
+      }
+    } catch (err) {
+      console.error("Failed to open batch:", err)
+    }
+  }
 
   
   // Record Movement form state
@@ -543,10 +559,18 @@ export default function BatchesPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={cn("gap-1", status.color)}>
-                            {status.icon}
-                            {status.label}
-                          </Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="outline" className={cn("gap-1", status.color)}>
+                              {status.icon}
+                              {status.label}
+                            </Badge>
+                            {batch.is_opened && (
+                              <Badge variant="secondary" className="gap-1 bg-amber-100 text-amber-700 border-amber-200">
+                                <PackageOpen className="w-3 h-3" />
+                                Opened
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu>
@@ -572,6 +596,15 @@ export default function BatchesPage() {
                                   }}>
                                     Record Movement
                                   </DropdownMenuItem>
+                                  {!batch.is_opened && (
+                                    <DropdownMenuItem onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleOpenBatchAction(batch.id)
+                                    }}>
+                                      <PackageOpen className="w-4 h-4 mr-2" />
+                                      Open Batch
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem 
                                     className="text-red-600"
                                     onClick={(e) => {

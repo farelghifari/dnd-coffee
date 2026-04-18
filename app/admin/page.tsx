@@ -15,6 +15,8 @@ import {
   getOperationalCapacity,
   getPurchaseRecommendations,
   getAttendanceStats,
+  getDisplayStock,
+  getDisplayUnit,
   type InventoryItem,
   type Employee,
   type StockLog,
@@ -210,7 +212,7 @@ export default function AdminDashboard() {
                     <div>
                       <p className="font-medium text-sm">{item.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {item.current_stock} {item.unit} remaining
+                        {getDisplayStock(item.current_stock || 0, item)} {getDisplayUnit(item)} remaining
                       </p>
                     </div>
                     <span
@@ -256,7 +258,7 @@ export default function AdminDashboard() {
                     <div>
                       <p className="font-medium text-sm">{item.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        Buy {recommendedQty} {item.unit}
+                        Buy {getDisplayStock(recommendedQty, item)} {getDisplayUnit(item)}
                       </p>
                     </div>
                     <span className="text-xs text-muted-foreground">
@@ -408,7 +410,13 @@ export default function AdminDashboard() {
                       <div>
                         <p className="font-medium text-sm">{log.item_name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {log.amount} units by {log.employee_name}
+                          {(() => {
+                            const item = inventory.find(i => i.id === log.item_id);
+                            if (item) {
+                              return `${getDisplayStock(log.amount, item)} ${getDisplayUnit(item)}`;
+                            }
+                            return `${log.amount} units`;
+                          })()} by {log.employee_name}
                         </p>
                       </div>
                     </div>

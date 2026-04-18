@@ -5,6 +5,7 @@ import {
   getAttendanceReportData,
   getEmployees,
   getShiftAssignments,
+  addAttendanceLog,
   type Employee,
   type ShiftAssignment
 } from "@/lib/api/supabase-service"
@@ -12,6 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { 
   Users, 
@@ -40,6 +43,12 @@ export default function AttendanceReportPage() {
   })
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
+  
+  // Resolve Absent Modal State
+  const [resolveModalOpen, setResolveModalOpen] = useState(false)
+  const [resolveData, setResolveData] = useState<{ employee_id: string; employee_name: string; date: string } | null>(null)
+  const [resolveTimes, setResolveTimes] = useState({ clockIn: "08:00", clockOut: "17:00" })
+  const [isResolving, setIsResolving] = useState(false)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -76,11 +85,48 @@ export default function AttendanceReportPage() {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
   };
+  
+  const handleResolveAbsent = async () => {
+    if (!resolveData) return
+    setIsResolving(true)
+    
+    // Add manual clock in
+    await addAttendanceLog({
+      employee_id: resolveData.employee_id,
+      employee_name: resolveData.employee_name,
+      type: "clock-in",
+      manual_date: resolveData.date,
+      manual_time: `${resolveTimes.clockIn}:00`
+    })
+    
+    // Add manual clock out
+    await addAttendanceLog({
+      employee_id: resolveData.employee_id,
+      employee_name: resolveData.employee_name,
+      type: "clock-out",
+      manual_date: resolveData.date,
+      manual_time: `${resolveTimes.clockOut}:00`
+    })
+    
+    setResolveModalOpen(false)
+    setResolveData(null)
+    setIsResolving(false)
+    await refreshReport()
+  }
 
   const filteredReport = useMemo(() => {
-    return reportData.filter(r => 
-      r.employee_name.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    return [...reportData]
+      .filter(r => r.employee_name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => {
+        // First sort by date descending
+        const dateCompare = b.date.localeCompare(a.date)
+        if (dateCompare !== 0) return dateCompare
+        
+        // Then sort by latest session time if available
+        const aTime = a.sessions?.[0]?.clockIn || "00:00"
+        const bTime = b.sessions?.[0]?.clockIn || "00:00"
+        return bTime.localeCompare(aTime)
+      })
   }, [reportData, searchQuery])
 
   // Rule 6: Stats for the summary cards
@@ -89,14 +135,19 @@ export default function AttendanceReportPage() {
       totalHours: 0,
       totalOT: 0,
       lateCount: 0,
-      penaltyCount: 0
+      penaltyCount: 0,
+      absentCount: 0
     }
     
     filteredReport.forEach(r => {
-      stats.totalHours += r.regularMinutes / 60
-      stats.totalOT += r.overtimeMinutes / 60
-      if (r.isLate) stats.lateCount++
-      if (r.isPenalty) stats.penaltyCount++
+      if (r.isAbsent) {
+        stats.absentCount++
+      } else {
+        stats.totalHours += r.regularMinutes / 60
+        stats.totalOT += r.overtimeMinutes / 60
+        if (r.isLate) stats.lateCount++
+        if (r.isPenalty) stats.penaltyCount++
+      }
     })
     
     return stats
@@ -173,12 +224,12 @@ export default function AttendanceReportPage() {
 
         <Card className="rounded-sm border-border shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Penalty Category</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Absences</CardTitle>
             <ShieldAlert className="w-4 h-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">{summaryStats.penaltyCount}</div>
-            <p className="text-[10px] text-destructive/70 mt-1 font-bold">Late &gt; 15 minutes</p>
+            <div className="text-2xl font-bold text-destructive">{summaryStats.absentCount}</div>
+            <p className="text-[10px] text-destructive/70 mt-1 font-bold">Scheduled but no clock-in</p>
           </CardContent>
         </Card>
       </div>
@@ -252,6 +303,50 @@ export default function AttendanceReportPage() {
         </CardContent>
       </Card>
 
+      {/* Resolve Absent Modal */}
+      <Dialog open={resolveModalOpen} onOpenChange={setResolveModalOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Resolve Absent Status</DialogTitle>
+            <DialogDescription>
+              Manually insert clock-in and clock-out logs for {resolveData?.employee_name} on {resolveData?.date}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="clockIn" className="text-right">
+                Clock In
+              </Label>
+              <Input
+                id="clockIn"
+                type="time"
+                className="col-span-3"
+                value={resolveTimes.clockIn}
+                onChange={(e) => setResolveTimes({...resolveTimes, clockIn: e.target.value})}
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="clockOut" className="text-right">
+                Clock Out
+              </Label>
+              <Input
+                id="clockOut"
+                type="time"
+                className="col-span-3"
+                value={resolveTimes.clockOut}
+                onChange={(e) => setResolveTimes({...resolveTimes, clockOut: e.target.value})}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResolveModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleResolveAbsent} disabled={isResolving}>
+              {isResolving ? "Saving..." : "Save Logs"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Main Table */}
       <Card className="rounded-sm border-border shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -307,26 +402,56 @@ export default function AttendanceReportPage() {
                         )}
                       </td>
                       <td className="p-4">
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-1.5 text-xs">
-                             <span className="font-mono text-green-600 dark:text-green-500">{format(new Date(row.sessions[0].clockIn), "HH:mm")}</span>
-                             <span className="text-muted-foreground">—</span>
-                             <span className="font-mono text-muted-foreground">
-                               {row.sessions[row.sessions.length - 1].clockOut 
-                                 ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
-                                 : "Active"}
-                             </span>
+                        {row.isAbsent ? (
+                          <div className="flex flex-col items-start gap-1 text-xs">
+                            <span className="font-bold text-destructive">Did not clock in</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-muted-foreground">Subject to penalty/deduction</span>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-5 text-[10px] px-2 py-0 border-primary/20 text-primary hover:bg-primary/10"
+                                onClick={() => {
+                                  setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
+                                  setResolveTimes({ 
+                                    clockIn: shift?.start_time?.substring(0,5) || "08:00", 
+                                    clockOut: shift?.end_time?.substring(0,5) || "17:00" 
+                                  })
+                                  setResolveModalOpen(true)
+                                }}
+                              >
+                                Resolve
+                              </Button>
+                            </div>
                           </div>
-                          {row.sessions[row.sessions.length - 1].isAutoClockOut && (
-                            <span className="text-[9px] text-orange-500 uppercase font-bold mt-0.5">
-                              Auto Tap-out
-                            </span>
-                          )}
-                        </div>
+                        ) : (
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-1.5 text-xs">
+                               <span className="font-mono text-green-600 dark:text-green-500">{format(new Date(row.sessions[0].clockIn), "HH:mm")}</span>
+                               <span className="text-muted-foreground">—</span>
+                               <span className="font-mono text-muted-foreground">
+                                 {row.sessions[row.sessions.length - 1].clockOut 
+                                   ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
+                                   : (!shift && row.sessions[0]?.otStatus === 'rejected') ? (
+                                     <span className="text-destructive font-bold text-[10px] uppercase tracking-wider bg-destructive/10 px-1 py-0.5 rounded-sm">Rejected</span>
+                                   ) : "Active"}
+                               </span>
+                            </div>
+                            {row.sessions[row.sessions.length - 1].isAutoClockOut && (
+                              <span className="text-[9px] text-orange-500 uppercase font-bold mt-0.5">
+                                Auto Tap-out
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                        <td className="p-4 text-center">
                         <div className="flex justify-center gap-2">
-                          {!shift ? (
+                          {row.isAbsent ? (
+                            <Badge className="bg-destructive/10 text-destructive border-none rounded-sm text-[10px] font-black tracking-widest uppercase">
+                              ABSENT
+                            </Badge>
+                          ) : !shift ? (
                             <Badge variant="outline" className="text-[10px] rounded-sm text-muted-foreground border-dashed uppercase">UNSCHEDULED</Badge>
                           ) : row.isLate ? (
                             <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 rounded-sm text-[10px] font-bold uppercase">
@@ -338,14 +463,14 @@ export default function AttendanceReportPage() {
                         </div>
                       </td>
                       <td className="p-4 text-right font-mono text-sm">
-                        {formatHours(row.regularMinutes)}
+                        {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.regularMinutes)}
                       </td>
                       <td className="p-4 text-right font-mono text-sm">
                         <div className="flex flex-col items-end gap-1">
                           <span className={cn(row.overtimeMinutes > 0 ? "text-amber-600 font-bold" : "text-muted-foreground")}>
-                            {formatHours(row.overtimeMinutes)}
+                            {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.overtimeMinutes)}
                           </span>
-                          {!shift && row.sessions[0]?.otStatus && (
+                          {!shift && !row.isAbsent && row.sessions[0]?.otStatus && (
                             <Badge variant="outline" className={cn(
                               "text-[8.5px] uppercase px-1 py-0 h-4 border-none leading-none tracking-tight",
                               row.sessions[0].otStatus === 'approved' ? "text-green-600 bg-green-500/10" :
@@ -358,10 +483,12 @@ export default function AttendanceReportPage() {
                         </div>
                       </td>
                       <td className="p-4 text-right font-mono text-sm font-bold">
-                        {formatHours(totalMinutes)}
+                        {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(totalMinutes)}
                       </td>
                       <td className="p-4 text-center">
-                        {row.isPenalty ? (
+                        {row.isAbsent ? (
+                           <span className="text-muted-foreground text-[10px]">—</span>
+                        ) : row.isPenalty ? (
                           <Badge className="bg-destructive text-destructive-foreground border-none rounded-sm text-[10px] font-black animate-pulse">
                             LATE &gt;15m
                           </Badge>

@@ -1,9 +1,18 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { X, Minus, Plus, Check, AlertTriangle, Layers, Clock, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { type InventoryItem } from "@/lib/api/supabase-service"
+import { 
+  type InventoryItem, 
+  getDisplayUnit, 
+  getDisplayStock, 
+  resolveDisplayStockToDb,
+  toBaseUnit,
+  fromBaseUnit,
+  getAllowedUnitsForItem,
+  type DisplayUnit
+} from "@/lib/api/supabase-service"
 import { 
   inventoryBatches, 
   type InventoryBatch, 
@@ -26,6 +35,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
   const [amount, setAmount] = useState(0)
   const [notes, setNotes] = useState("")
   const [step, setStep] = useState<"select" | "batch" | "amount">("select")
+  const [currentUnit, setCurrentUnit] = useState<DisplayUnit>("ml")
 
   // Get batches for selected item (FIFO - oldest first)
   const availableBatches = useMemo(() => {
@@ -38,6 +48,17 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
       )
       .sort((a, b) => new Date(a.receivedDate).getTime() - new Date(b.receivedDate).getTime())
   }, [selectedItem])
+
+  const selectedInventoryItem = useMemo(() => {
+    return inventory.find(i => i.id === selectedItem)
+  }, [inventory, selectedItem])
+
+  // Reset unit when item changes
+  useEffect(() => {
+    if (selectedInventoryItem) {
+      setCurrentUnit((selectedInventoryItem.unit as DisplayUnit) || "ml")
+    }
+  }, [selectedInventoryItem])
 
   // Check if item has batches
   const hasBatches = availableBatches.length > 0
@@ -73,9 +94,14 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
 
   const handleSubmit = () => {
     if (selectedItem && amount > 0) {
+      const selectedInventoryItem = inventory.find((i) => i.id === selectedItem)
+      
+      // Convert the entered amount from the selected display unit back to base unit for DB
+      const dbAmount = selectedInventoryItem ? toBaseUnit(amount, currentUnit) : amount
+      
       onSubmit({ 
         itemId: selectedItem, 
-        amount, 
+        amount: dbAmount, 
         notes: notes || undefined,
         batchId: selectedBatch || undefined
       })
@@ -110,18 +136,28 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     }
   }
 
-  const selectedInventoryItem = inventory.find((i) => i.id === selectedItem)
+
   const selectedBatchItem = selectedBatch ? inventoryBatches.find(b => b.id === selectedBatch) : null
   
-  // Get max available - either from batch or from item stock
+  // Calculate display parameters if item selected
+  const displayUnit = selectedInventoryItem ? getDisplayUnit(selectedInventoryItem) : 'pcs'
+  const displayCurrentStock = selectedInventoryItem ? getDisplayStock(selectedInventoryItem.current_stock || 0, selectedInventoryItem) : 0
+  const displayBatchQty = selectedBatchItem && selectedInventoryItem ? getDisplayStock(selectedBatchItem.currentQuantity, selectedInventoryItem) : 0
+  
+  // Get max available - either from batch or from item stock (using display amounts)
   const maxAvailable = selectedBatchItem 
-    ? selectedBatchItem.currentQuantity 
-    : selectedInventoryItem?.current_stock || 0
+    ? displayBatchQty 
+    : displayCurrentStock
   
   // Check if amount exceeds available stock for out/waste
+  const baseAmount = toBaseUnit(amount, currentUnit)
+  const baseMaxAvailable = selectedBatchItem 
+    ? selectedBatchItem.currentQuantity 
+    : (selectedInventoryItem?.current_stock || 0)
+
   const exceedsStock = selectedInventoryItem && 
     (actionType === "stock-out" || actionType === "waste") && 
-    amount > maxAvailable
+    baseAmount > baseMaxAvailable
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("id-ID", {
@@ -170,7 +206,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                     <p className="font-medium text-sm">{item.name}</p>
                     <p className="text-xs text-muted-foreground capitalize">{item.category}</p>
                     <p className="text-xs text-muted-foreground mt-2">
-                      Current: {item.current_stock} {item.unit}
+                      Current: {getDisplayStock(item.current_stock || 0, item)} {getDisplayUnit(item)}
                     </p>
                     {hasBatches && (actionType === "stock-out" || actionType === "waste") && (
                       <div className="flex items-center gap-1 mt-2">
@@ -221,7 +257,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                       </p>
                       <div className="flex items-center gap-4 mt-2 text-xs">
                         <span className="text-muted-foreground">
-                          Qty: <span className="font-medium text-foreground">{batch.currentQuantity}</span>
+                          Qty: <span className="font-medium text-foreground">{selectedInventoryItem ? getDisplayStock(batch.currentQuantity, selectedInventoryItem) : batch.currentQuantity}</span>
                         </span>
                         <span className={cn(
                           isExpired ? "text-red-600" : isExpiringSoon ? "text-amber-600" : "text-muted-foreground"
@@ -261,12 +297,12 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                     {selectedBatchItem.batchNumber}
                   </Badge>
                   <p className="text-muted-foreground text-sm mt-2">
-                    Available: {selectedBatchItem.currentQuantity} {selectedInventoryItem?.unit}
+                    Available: {displayBatchQty} {displayUnit}
                   </p>
                 </div>
               ) : (
                 <p className="text-muted-foreground">
-                  Current stock: {selectedInventoryItem?.current_stock} {selectedInventoryItem?.unit}
+                  Current stock: {displayCurrentStock} {displayUnit}
                 </p>
               )}
             </div>
@@ -285,19 +321,44 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                   <Minus className="w-8 h-8" />
                 </button>
                 
-                <div className="w-32 text-center">
+                <div className="w-48 text-center flex flex-col items-center">
                   <input
                     type="number"
                     value={amount}
-                    onChange={(e) => setAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                    onChange={(e) => setAmount(Math.max(0, parseFloat(e.target.value) || 0))}
                     className={cn(
                       "w-full text-center text-5xl font-light bg-transparent border-none outline-none",
                       exceedsStock && "text-[var(--status-critical)]"
                     )}
                   />
-                  <p className="text-muted-foreground text-sm mt-1">
-                    {selectedInventoryItem?.unit}
-                  </p>
+                  
+                  {/* Unit Selector */}
+                  <div className="flex items-center gap-1 mt-2">
+                    {(() => {
+                      const allowedUnits = selectedInventoryItem ? getAllowedUnitsForItem(selectedInventoryItem.unit || "pcs") : ["pcs"] as DisplayUnit[]
+                      
+                      return allowedUnits.map((u) => (
+                        <button
+                          key={u}
+                          onClick={() => {
+                            // Convert current amount to the new unit so the "value" stays physically the same
+                            const baseQty = toBaseUnit(amount, currentUnit)
+                            const convertedQty = fromBaseUnit(baseQty, u as DisplayUnit)
+                            setAmount(parseFloat(convertedQty.toFixed(4)))
+                            setCurrentUnit(u as DisplayUnit)
+                          }}
+                          className={cn(
+                            "px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-sm border transition-all",
+                            currentUnit === u 
+                              ? "bg-primary text-primary-foreground border-primary" 
+                              : "text-muted-foreground border-border hover:border-primary/50"
+                          )}
+                        >
+                          {u}
+                        </button>
+                      ))
+                    })()}
+                  </div>
                 </div>
                 
                 <button
@@ -333,10 +394,10 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
               {selectedBatchItem && (
                 <div className="flex justify-center">
                   <button
-                    onClick={() => setAmount(selectedBatchItem.currentQuantity)}
+                    onClick={() => setAmount(displayBatchQty)}
                     className="px-4 py-2 rounded-sm bg-primary/10 text-primary hover:bg-primary/20 text-sm transition-colors"
                   >
-                    Use all ({selectedBatchItem.currentQuantity})
+                    Use all ({displayBatchQty})
                   </button>
                 </div>
               )}

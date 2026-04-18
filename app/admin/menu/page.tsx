@@ -48,6 +48,16 @@ import {
   Trash2,
   X
 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 
 const categories = ["all", "coffee", "non-coffee", "food"] as const
@@ -69,6 +79,7 @@ export default function MenuPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<string | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // Form state
   const [formName, setFormName] = useState("")
@@ -243,14 +254,18 @@ export default function MenuPage() {
   }
 
   // CORE RULE: After success → REFRESH PAGE IMMEDIATELY
-  const handleDeleteItem = async (id: string) => {
-    if (confirm("Are you sure you want to delete this menu item?")) {
-      const result = await deleteMenuItem(id)
-      // CORE RULE: REFRESH PAGE after delete
-      if (result) {
-        window.location.reload()
-      }
+  const handleDeleteItem = (id: string) => {
+    setDeleteConfirmId(id)
+  }
+
+  const trulyDeleteItem = async () => {
+    if (!deleteConfirmId) return
+    const result = await deleteMenuItem(deleteConfirmId)
+    // CORE RULE: REFRESH PAGE after delete
+    if (result) {
+      window.location.reload()
     }
+    setDeleteConfirmId(null)
   }
 
   // Open ingredients modal
@@ -339,6 +354,22 @@ export default function MenuPage() {
 
   return (
     <div>
+      {/* Alert Dialog (Delete Confirmation) */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This menu item will be permanently deleted from the system.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction className="rounded-sm bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={trulyDeleteItem}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <header className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-light tracking-tight">Menu</h1>

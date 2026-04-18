@@ -26,6 +26,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -94,6 +104,13 @@ export default function SchedulingPage() {
   const [customEndTime, setCustomEndTime] = useState("17:00")
   const [editingShift, setEditingShift] = useState<ShiftAssignment | null>(null)
 
+  // Custom Alert State
+  const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; description: string }>({
+    open: false,
+    title: "",
+    description: "",
+  })
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
@@ -130,7 +147,10 @@ export default function SchedulingPage() {
   // Get shifts for a specific date
   const getShiftsForDate = (dateStr: string) => {
     return shiftAssignments
-      .filter(shift => shift.date === dateStr)
+      .filter(shift => 
+        shift.date === dateStr && 
+        employees.some(e => e.id === shift.employee_id)
+      )
       .sort((a, b) => a.start_time.localeCompare(b.start_time))
   }
 
@@ -235,7 +255,11 @@ export default function SchedulingPage() {
         s => s.employee_id === selectedEmployeeId && s.date === selectedCell.date
       )
       if (existingShiftsByEmployee.length >= 2) {
-        alert("Full-time employees can only have a maximum of 2 shifts per day.")
+        setAlertModal({
+          open: true,
+          title: "Shift Limit Reached",
+          description: "Full-time employees can only have a maximum of 2 shifts per day."
+        })
         return
       }
     }
@@ -245,7 +269,11 @@ export default function SchedulingPage() {
       s => s.date === selectedCell.date
     )
     if (!editingShift && allExistingShiftsForDate.length >= 5) {
-      alert("A maximum of 5 assignments is allowed per day.")
+      setAlertModal({
+        open: true,
+        title: "Assignment Limit Reached",
+        description: "A maximum of 5 assignments is allowed per day."
+      })
       return
     }
 
@@ -577,18 +605,33 @@ export default function SchedulingPage() {
       </div>
 
       {/* Shift Config Legend */}
-      <div className="mt-4 flex items-center gap-4 justify-center flex-wrap">
-        {shiftConfigs.map((config, index) => (
-          <div key={config.id} className="flex items-center gap-2">
-            <div className={cn("w-4 h-4 rounded-sm border", SHIFT_COLORS[index % SHIFT_COLORS.length])} />
-            <span className="text-xs text-muted-foreground">
-              {config.name} ({config.start_time}-{config.end_time})
-            </span>
+      <div className="mt-4 flex flex-col gap-2 items-center">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Shift Legend</p>
+        <div className="flex items-center gap-4 justify-center flex-wrap">
+          {[...shiftConfigs]
+            .sort((a, b) => {
+              const aIsFT = a.name.includes("Full-time")
+              const bIsFT = b.name.includes("Full-time")
+              if (aIsFT && !bIsFT) return -1
+              if (!aIsFT && bIsFT) return 1
+              return a.start_time.localeCompare(b.start_time)
+            })
+            .map((config) => {
+              const configIndex = shiftConfigs.findIndex(c => c.id === config.id)
+              return (
+                <div key={config.id} className="flex items-center gap-2">
+                  <div className={cn("w-4 h-4 rounded-sm border", SHIFT_COLORS[configIndex % SHIFT_COLORS.length])} />
+                  <span className="text-xs text-muted-foreground">
+                    {config.name} ({config.start_time.substring(0, 5)}-{config.end_time.substring(0, 5)})
+                  </span>
+                </div>
+              )
+            })
+          }
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-sm border bg-muted border-border" />
+            <span className="text-xs text-muted-foreground">Custom</span>
           </div>
-        ))}
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-sm border bg-muted border-border" />
-          <span className="text-xs text-muted-foreground">Custom</span>
         </div>
       </div>
 
@@ -663,39 +706,56 @@ export default function SchedulingPage() {
               </RadioGroup>
             </div>
 
-            {/* Predefined Shift Selection */}
+            {/* Predefined Shift Selection with Grouping */}
             {shiftType === "predefined" && (
-              <div className="space-y-2">
-                <Label>Select Shift</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {shiftConfigs.length === 0 ? (
-                    <div className="p-4 text-center text-muted-foreground border rounded-sm">
-                      <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No shift configurations found</p>
-                      <p className="text-xs">Super admin can add shifts in Settings</p>
+              <div className="space-y-4">
+                {["Full-time", "Part-time"].map((type) => {
+                  const filteredConfigs = shiftConfigs
+                    .filter(c => c.name.includes(type))
+                    .sort((a, b) => a.start_time.localeCompare(b.start_time))
+                  
+                  if (filteredConfigs.length === 0) return null
+
+                  return (
+                    <div key={type} className="space-y-2">
+                      <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
+                        {type} Shifts
+                      </Label>
+                      <div className="grid grid-cols-1 gap-2">
+                        {filteredConfigs.map((config) => {
+                          const configIndex = shiftConfigs.findIndex(c => c.id === config.id)
+                          return (
+                            <button
+                              key={config.id}
+                              onClick={() => setSelectedShiftConfigId(config.id)}
+                              className={cn(
+                                "p-3 rounded-sm border text-left transition-all",
+                                selectedShiftConfigId === config.id
+                                  ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                                  : "border-border hover:border-primary/30"
+                              )}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-sm">{config.name}</span>
+                                <Badge variant="outline" className={cn("rounded-sm font-mono text-[10px]", SHIFT_COLORS[configIndex % SHIFT_COLORS.length])}>
+                                  {config.start_time.substring(0, 5)} - {config.end_time.substring(0, 5)}
+                                </Badge>
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                  ) : (
-                    shiftConfigs.map((config, index) => (
-                      <button
-                        key={config.id}
-                        onClick={() => setSelectedShiftConfigId(config.id)}
-                        className={cn(
-                          "p-3 rounded-sm border text-left transition-all",
-                          selectedShiftConfigId === config.id
-                            ? "border-foreground bg-foreground/5"
-                            : "border-border hover:border-foreground/30"
-                        )}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">{config.name}</span>
-                          <Badge variant="outline" className={cn("rounded-sm", SHIFT_COLORS[index % SHIFT_COLORS.length])}>
-                            {config.start_time} - {config.end_time}
-                          </Badge>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
+                  )
+                })}
+                
+                {shiftConfigs.length === 0 && (
+                  <div className="p-4 text-center text-muted-foreground border border-dashed rounded-sm">
+                    <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No shift configurations found</p>
+                    <p className="text-xs">Super admin can add shifts in Settings</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -741,6 +801,23 @@ export default function SchedulingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Global Alert Dialog */}
+      <AlertDialog open={alertModal.open} onOpenChange={(open) => setAlertModal(prev => ({ ...prev, open }))}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{alertModal.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {alertModal.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction className="rounded-sm" onClick={() => setAlertModal(prev => ({ ...prev, open: false }))}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

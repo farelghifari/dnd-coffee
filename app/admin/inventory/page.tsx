@@ -23,6 +23,8 @@ import {
   addInventoryOpname,
   uploadOpexAttachment,
   getSalesReport,
+  openBatch,
+  calculateRollingDailyUsage,
   subscribeToInventoryTransactions,
   subscribeToInventoryItems,
   toBaseUnit,
@@ -30,7 +32,11 @@ import {
   getConversionRate,
   getAllowedUnitsForItem,
   getDefaultDisplayUnit,
+  getBatches,
+  updateBatch,
+  getBatchesByItem,
   type InventoryItem,
+  type InventoryBatch,
   type MenuItem,
   type MenuRecipeIngredient,
   type MonthlyOpex,
@@ -58,6 +64,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { 
   Package, 
   Search, 
@@ -67,6 +83,7 @@ import {
   Trash2,
   MoreVertical,
   PackagePlus,
+  PackageOpen,
   ArrowDownCircle,
   Coffee,
   AlertTriangle,
@@ -91,8 +108,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 
-const inventoryCategories = ["all", "beans", "milk", "syrup", "cups", "food"] as const
-const categoryOptions = ["beans", "milk", "syrup", "cups", "food"] as const
+const DEFAULT_CATEGORIES = ["beans", "milk", "syrup", "cups", "food", "other"]
 const unitOptions: DisplayUnit[] = ["gram", "ml", "pcs", "kg", "liter"]
 const menuCategories = ["all", "coffee", "non-coffee", "food"] as const
 
@@ -114,7 +130,18 @@ export default function InventoryPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [menuSearchQuery, setMenuSearchQuery] = useState("")
   const [selectedMenuCategory, setSelectedMenuCategory] = useState<string>("all")
+  const [batches, setBatches] = useState<InventoryBatch[]>([])
+  const [customCategories, setCustomCategories] = useState<string[]>([])
+  const [newCategoryInput, setNewCategoryInput] = useState("")
   const [error, setError] = useState<string | null>(null)
+
+  // Dynamic categories: merge defaults with categories found in existing data + user-added
+  const allCategoryOptions = Array.from(new Set([
+    ...DEFAULT_CATEGORIES,
+    ...inventory.map(i => i.category).filter(Boolean),
+    ...customCategories
+  ])).sort()
+  const inventoryCategories = ["all", ...allCategoryOptions]
 
   // Modals
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
@@ -125,12 +152,15 @@ export default function InventoryPage() {
   const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
   const [isAddOpexModalOpen, setIsAddOpexModalOpen] = useState(false)
   const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
+  
+  // Custom Delete Alert State
+  const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'item' | 'menu' | null, id: string | null}>({ isOpen: false, type: null, id: null })
 
   // Forms
   const [formData, setFormData] = useState({
     id: "",
     name: "",
-    category: "beans" as typeof categoryOptions[number],
+    category: "beans",
     unit: "gram",
     displayUnit: "gram" as DisplayUnit,
     currentStock: "",
@@ -138,8 +168,15 @@ export default function InventoryPage() {
     minStock: "",
     maxStock: "",
     unitCost: "",
-    conversionRate: "1"
+    conversionRate: "1",
+    supplierName: "",
+    notes: "",
+    receivedDate: new Date().toISOString().split("T")[0],
+    expiryDate: ""
   })
+
+  const [rollingUsage, setRollingUsage] = useState<number | null>(null)
+  const [isCalculatingUsage, setIsCalculatingUsage] = useState(false)
 
   const [stockInForm, setStockInForm] = useState({
     category: "all" as string,
@@ -150,7 +187,8 @@ export default function InventoryPage() {
     supplierName: "",
     receivedDate: new Date().toISOString().split("T")[0],
     expiredDate: "",
-    notes: ""
+    notes: "",
+    is_opened: false
   })
 
   const [stockOutForm, setStockOutForm] = useState({
@@ -172,7 +210,7 @@ export default function InventoryPage() {
 
   const [opexForm, setOpexForm] = useState({
     month: new Date().toISOString().slice(0, 7), // YYYY-MM
-    category: "Gaji",
+    category: "Salary",
     amount: "",
     notes: ""
   })
@@ -187,7 +225,7 @@ export default function InventoryPage() {
     reason: ""
   })
 
-  const opexCategories = ["Gaji", "Sewa", "Listrik/Air", "Pajak", "Marketing", "Maintenance", "Lainnya"]
+  const opexCategories = ["Salary", "Rent", "Utilities", "Tax", "Marketing", "Maintenance", "Other"]
 
   useEffect(() => {
     fetchData()
@@ -237,16 +275,17 @@ export default function InventoryPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const [invData, menuData, opexData, opnameData, salesData] = await Promise.all([
+      const [invData, menuData, opexData, opnameData, salesData, batchData] = await Promise.all([
         getInventory(),
         getMenuItems(),
         getMonthlyOpex(),
         getInventoryOpnames(),
-        getSalesReport()
+        getSalesReport(),
+        getBatches()
       ])
       
       const menusWithRecipes = await Promise.all(
-        menuData.map(async (menu) => {
+        menuData.map(async (menu: any) => {
           const recipe = await getMenuRecipes(menu.id)
           return { 
             ...menu, 
@@ -261,6 +300,7 @@ export default function InventoryPage() {
       setMonthlyOpex(opexData)
       setSalesReport(salesData)
       setOpnameHistory(opnameData)
+      setBatches(batchData)
     } catch (err) {
       console.error("Error fetching data:", err)
       setError("Failed to load inventory data")
@@ -281,8 +321,14 @@ export default function InventoryPage() {
       minStock: "",
       maxStock: "",
       unitCost: "",
-      conversionRate: "1"
+      conversionRate: "1",
+      supplierName: "",
+      notes: "",
+      receivedDate: new Date().toISOString().split("T")[0],
+      expiryDate: ""
     })
+    setRollingUsage(null)
+    setIsCalculatingUsage(false)
     setError(null)
   }
 
@@ -312,7 +358,7 @@ export default function InventoryPage() {
       const dailyVal = (parseFloat(formData.dailyUsage) || 0) * multiplier
       const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
       
-      await upsertInventory({
+      const resultItem = await upsertInventory({
         name: formData.name,
         category: formData.category as any,
         unit: formData.unit,
@@ -322,8 +368,24 @@ export default function InventoryPage() {
         min_stock: minVal,
         max_stock: maxVal,
         daily_usage: dailyVal,
-        unit_cost: normalizedCost
+        unit_cost: normalizedCost,
+        supplier_name: formData.supplierName,
+        notes: formData.notes
       }, actorName)
+
+      // Automatically add the first batch if currentStock is provided
+      if (stockVal > 0 && resultItem?.id) {
+        await addBatch({
+          item_id: resultItem.id, 
+          quantity: stockVal,
+          unit: formData.unit as any,
+          unit_cost: normalizedCost,
+          supplier_name: formData.supplierName,
+          received_date: formData.receivedDate,
+          expired_date: formData.expiryDate,
+          notes: "Initial stock"
+        }, actorName)
+      }
       
       setIsAddItemModalOpen(false)
       resetItemForm()
@@ -357,8 +419,25 @@ export default function InventoryPage() {
         min_stock: minVal,
         max_stock: maxVal,
         daily_usage: dailyVal,
-        unit_cost: normalizedCost
+        unit_cost: normalizedCost,
+        supplier_name: formData.supplierName,
+        notes: formData.notes
       }, actorName)
+
+      // Update primary batch dates if they exist
+      try {
+        const itemBatches = await getBatchesByItem(formData.id)
+        if (itemBatches.length > 0) {
+          const primaryBatch = itemBatches[0]
+          await updateBatch(primaryBatch.id, {
+            supplier_name: formData.supplierName,
+            received_date: formData.receivedDate,
+            expired_date: formData.expiryDate
+          })
+        }
+      } catch (e) {
+        console.error("Failed to update batch dates:", e)
+      }
       
       setIsEditItemModalOpen(false)
       resetItemForm()
@@ -368,7 +447,7 @@ export default function InventoryPage() {
     }
   }
 
-  const openEditItemModal = (item: InventoryItem) => {
+  const openEditItemModal = async (item: InventoryItem) => {
     // Priority 1: Stored display_unit from DB
     // Priority 2: Standard default derived from system unit
     // Priority 3: The system unit itself
@@ -382,6 +461,39 @@ export default function InventoryPage() {
       multiplier = getConversionRate(dUnit, item.unit)
     }
     
+    // Auto-calculate daily usage from rolling average
+    setIsCalculatingUsage(true)
+    let calculatedUsage = 0
+    try {
+      const usage = await calculateRollingDailyUsage(item.id)
+      calculatedUsage = usage / multiplier
+      setRollingUsage(calculatedUsage)
+    } catch (e) {
+      console.error(e)
+      setRollingUsage(null)
+    } finally {
+      setIsCalculatingUsage(false)
+    }
+
+    // Fetch batch info to get expiry/received dates
+    let batchReceivedDate = new Date().toISOString().split("T")[0]
+    let batchExpiryDate = ""
+    try {
+      const itemBatches = await getBatchesByItem(item.id)
+      if (itemBatches.length > 0) {
+        // Get dates from the oldest batch (first one created)
+        const primaryBatch = itemBatches[0]
+        if (primaryBatch.received_date) {
+          batchReceivedDate = new Date(primaryBatch.received_date).toISOString().split("T")[0]
+        }
+        if (primaryBatch.expired_date) {
+          batchExpiryDate = new Date(primaryBatch.expired_date).toISOString().split("T")[0]
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch batch info:", e)
+    }
+
     setFormData({
       id: item.id,
       name: item.name,
@@ -390,16 +502,36 @@ export default function InventoryPage() {
       displayUnit: dUnit,
       conversionRate: multiplier.toString(),
       currentStock: parseFloat(((item.stock || 0) / multiplier).toFixed(4)).toString(),
-      dailyUsage: parseFloat(((item.daily_usage || 0) / multiplier).toFixed(4)).toString(),
+      dailyUsage: calculatedUsage.toString(),
       minStock: parseFloat(((item.min_stock || 0) / multiplier).toFixed(4)).toString(),
       maxStock: parseFloat(((item.max_stock || 0) / multiplier).toFixed(4)).toString(),
-      unitCost: parseFloat(((item.unit_cost || 0) * multiplier).toFixed(4)).toString()
+      unitCost: parseFloat(((item.unit_cost || 0) * multiplier).toFixed(4)).toString(),
+      supplierName: item.supplier_name || "",
+      notes: item.notes || "",
+      receivedDate: batchReceivedDate,
+      expiryDate: batchExpiryDate
     })
+
     setIsEditItemModalOpen(true)
   }
 
+  const handleOpenBatch = async (batchId: string) => {
+    try {
+      await openBatch(batchId)
+      fetchData()
+      // Also re-fetch batches if they aren't part of fetchData
+      const updatedBatches = await getBatches()
+      setBatches(updatedBatches)
+    } catch (err) {
+      setError("Failed to open batch")
+    }
+  }
+
   const handleDeleteItem = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this item? This will also affect existing recipes.")) return
+    setDeleteConfirm({ isOpen: true, type: 'item', id })
+  }
+
+  const trulyDeleteItem = async (id: string) => {
     try {
       await deleteInventoryItem(id)
       fetchData()
@@ -440,7 +572,8 @@ export default function InventoryPage() {
         supplierName: "", 
         receivedDate: new Date().toISOString().split("T")[0], 
         expiredDate: "", 
-        notes: "" 
+        notes: "",
+        is_opened: false 
       })
       fetchData()
     } catch (err) {
@@ -605,7 +738,10 @@ export default function InventoryPage() {
   }
 
   const handleDeleteMenu = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this menu item?")) return
+    setDeleteConfirm({ isOpen: true, type: 'menu', id })
+  }
+
+  const trulyDeleteMenu = async (id: string) => {
     try {
       await deleteMenuItem(id)
       fetchData()
@@ -691,6 +827,25 @@ export default function InventoryPage() {
 
   return (
     <div>
+      {/* Alert Dialog (Delete Confirmation) */}
+      <AlertDialog open={deleteConfirm.isOpen} onOpenChange={(open) => setDeleteConfirm(prev => ({...prev, isOpen: open}))}>
+        <AlertDialogContent className="rounded-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirm.type === 'item' ? "This will definitively delete this inventory item and affect existing recipes handling it." : "This menu item will be permanently deleted from the system."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction className="rounded-sm bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => {
+              if (deleteConfirm.type === 'item' && deleteConfirm.id) trulyDeleteItem(deleteConfirm.id)
+              else if (deleteConfirm.type === 'menu' && deleteConfirm.id) trulyDeleteMenu(deleteConfirm.id)
+            }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <header className="mb-8">
         <h1 className="text-3xl font-light tracking-tight">Inventory</h1>
         <p className="text-muted-foreground">
@@ -721,7 +876,7 @@ export default function InventoryPage() {
         <TabsContent value="raw-materials">
           {canEdit && (
             <div className="flex gap-2 mb-6">
-              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
+              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "", is_opened: false }); setIsAddStockModalOpen(true); }}>
                 <PackagePlus className="w-4 h-4 mr-2" />
                 Stock In
               </Button>
@@ -1111,9 +1266,50 @@ export default function InventoryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={(v) => setFormData(p => ({ ...p, category: v as any }))}>
+                <Select value={formData.category} onValueChange={(v) => {
+                  if (v === '__add_new__') return;
+                  setFormData(p => ({ ...p, category: v as any }));
+                }}>
                   <SelectTrigger id="category"><SelectValue placeholder="Category"/></SelectTrigger>
-                  <SelectContent>{categoryOptions.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    {allCategoryOptions.map(c => <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>)}
+                    <div className="p-2 border-t">
+                      <div className="flex gap-1">
+                        <Input 
+                          placeholder="New category..." 
+                          value={newCategoryInput}
+                          onChange={(e) => setNewCategoryInput(e.target.value)}
+                          className="h-7 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter' && newCategoryInput.trim()) {
+                              const cat = newCategoryInput.trim().toLowerCase();
+                              setCustomCategories(p => [...new Set([...p, cat])]);
+                              setFormData(p => ({ ...p, category: cat as any }));
+                              setNewCategoryInput("");
+                            }
+                          }}
+                        />
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="h-7 px-2 text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (newCategoryInput.trim()) {
+                              const cat = newCategoryInput.trim().toLowerCase();
+                              setCustomCategories(p => [...new Set([...p, cat])]);
+                              setFormData(p => ({ ...p, category: cat as any }));
+                              setNewCategoryInput("");
+                            }
+                          }}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
@@ -1183,9 +1379,46 @@ export default function InventoryPage() {
                 <Input id="current-stock" type="number" placeholder="0" value={formData.currentStock} onChange={(e) => setFormData(p => ({...p, currentStock: e.target.value}))} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="daily-usage">Daily Usage</Label>
-                <Input id="daily-usage" type="number" placeholder="0" value={formData.dailyUsage} onChange={(e) => setFormData(p => ({...p, dailyUsage: e.target.value}))} />
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="daily-usage">Daily Usage</Label>
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase">Auto (7-day avg)</span>
+                </div>
+                <div className="relative">
+                  <Input 
+                    id="daily-usage" 
+                    type="number" 
+                    placeholder="0" 
+                    value={isCalculatingUsage ? "" : formData.dailyUsage} 
+                    readOnly 
+                    className="bg-muted/50 cursor-not-allowed tabular-nums"
+                  />
+                  {isCalculatingUsage && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground animate-pulse">Calculating...</span>
+                  )}
+                </div>
+                <p className="text-[9px] text-muted-foreground italic">Calculated automatically from the 7-day average sales</p>
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="received-date">Received Date</Label>
+                <Input id="received-date" type="date" value={formData.receivedDate} onChange={(e) => setFormData(p => ({ ...p, receivedDate: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="expiry-date">Expiry Date</Label>
+                <Input id="expiry-date" type="date" value={formData.expiryDate} onChange={(e) => setFormData(p => ({ ...p, expiryDate: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="supplier-name">Default Supplier</Label>
+              <Input id="supplier-name" placeholder="Supplier Name" value={formData.supplierName} onChange={(e) => setFormData(p => ({ ...p, supplierName: e.target.value }))} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="item-notes">Notes</Label>
+              <Textarea id="item-notes" placeholder="Notes/Storage info" value={formData.notes} onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))} />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1238,13 +1471,11 @@ export default function InventoryPage() {
                 }}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    <SelectItem value="beans">Beans</SelectItem>
-                    <SelectItem value="milk">Milk</SelectItem>
-                    <SelectItem value="syrup">Syrup</SelectItem>
-                    <SelectItem value="cups">Cups</SelectItem>
-                    <SelectItem value="food">Food</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {inventoryCategories.map(c => (
+                      <SelectItem key={c} value={c} className="capitalize">
+                        {c === "all" ? "All Categories" : c}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1271,8 +1502,29 @@ export default function InventoryPage() {
                 <Input type="number" placeholder="0" value={stockInForm.quantity} onChange={(e) => setStockInForm(p => ({ ...p, quantity: e.target.value }))} />
               </div>
               <div className="space-y-2">
-                <Label>Unit Cost (IDR)</Label>
+                <Label>Unit</Label>
+                <Select value={stockInForm.displayUnit} onValueChange={(v) => setStockInForm(p => ({ ...p, displayUnit: v as DisplayUnit }))}>
+                  <SelectTrigger className="rounded-sm font-semibold uppercase text-[10px]"><SelectValue/></SelectTrigger>
+                  <SelectContent>
+                    {(() => {
+                      const item = inventory.find(i => i.id === stockInForm.itemId);
+                      const base = item?.unit || 'pcs';
+                      const units = getAllowedUnitsForItem(base);
+                      if (item?.display_unit && !units.includes(item.display_unit as any)) {
+                        units.push(item.display_unit as any);
+                      }
+                      return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Unit Cost (IDR)</Label>
+              <div className="flex items-center gap-2">
                 <Input type="number" placeholder="0" value={stockInForm.unitCost} onChange={(e) => setStockInForm(p => ({ ...p, unitCost: e.target.value }))} />
+                <span className="text-[10px] text-muted-foreground whitespace-nowrap uppercase font-bold">per {stockInForm.displayUnit}</span>
               </div>
             </div>
 
@@ -1296,6 +1548,19 @@ export default function InventoryPage() {
               <Label>Notes</Label>
               <Textarea placeholder="Additional details..." value={stockInForm.notes} onChange={(e) => setStockInForm(p => ({ ...p, notes: e.target.value }))} />
             </div>
+
+            <div className="flex items-center space-x-2">
+              <input 
+                type="checkbox" 
+                id="is-opened" 
+                checked={stockInForm.is_opened || false} 
+                onChange={(e) => setStockInForm(p => ({ ...p, is_opened: e.target.checked }))}
+                className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
+              />
+              <Label htmlFor="is-opened" className="text-sm font-medium leading-none cursor-pointer">
+                Opened
+              </Label>
+            </div>
           </div>
           <DialogFooter><Button onClick={handleStockIn}>Stock In</Button></DialogFooter>
         </DialogContent>
@@ -1311,7 +1576,7 @@ export default function InventoryPage() {
             <DialogTitle>Stock Out (Manual)</DialogTitle>
             <DialogDescription>Manually subtract stock for waste, damage, or other reasons.</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Category</Label>
@@ -1320,13 +1585,11 @@ export default function InventoryPage() {
                 }}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    <SelectItem value="beans">Beans</SelectItem>
-                    <SelectItem value="milk">Milk</SelectItem>
-                    <SelectItem value="syrup">Syrup</SelectItem>
-                    <SelectItem value="cups">Cups</SelectItem>
-                    <SelectItem value="food">Food</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {inventoryCategories.map(c => (
+                      <SelectItem key={c} value={c} className="capitalize">
+                        {c === "all" ? "All Categories" : c}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1334,7 +1597,7 @@ export default function InventoryPage() {
                 <Label>Select Item</Label>
                 <Select value={stockOutForm.itemId} onValueChange={(v) => {
                   const item = inventory.find(i => i.id === v);
-                  setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+                  setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? (item.display_unit as DisplayUnit || getDefaultDisplayUnit(item.unit)) : 'pcs' }));
                 }}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
@@ -1347,22 +1610,72 @@ export default function InventoryPage() {
               </div>
             </div>
             
-            <div className="space-y-2">
-              <Label>Quantity to Remove</Label>
-              <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Quantity</Label>
+                <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit</Label>
+                <Select value={stockOutForm.displayUnit} onValueChange={(v) => setStockOutForm(p => ({ ...p, displayUnit: v as DisplayUnit }))}>
+                  <SelectTrigger className="rounded-sm font-semibold uppercase text-[10px]"><SelectValue/></SelectTrigger>
+                  <SelectContent>
+                    {(() => {
+                      const item = inventory.find(i => i.id === stockOutForm.itemId);
+                      const base = item?.unit || 'pcs';
+                      const units = getAllowedUnitsForItem(base);
+                      if (item?.display_unit && !units.includes(item.display_unit as any)) {
+                        units.push(item.display_unit as any);
+                      }
+                      return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {stockOutForm.itemId && (
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase font-bold text-muted-foreground">FIFO Suggestions (Prioritize Opened)</Label>
+                <div className="space-y-1">
+                  {batches
+                    .filter(b => b.item_id === stockOutForm.itemId && b.remaining_quantity > 0)
+                    .sort((a, b) => {
+                      // Sort by opened first, then by received date
+                      if (a.is_opened && !b.is_opened) return -1;
+                      if (!a.is_opened && b.is_opened) return 1;
+                      return new Date(a.received_date).getTime() - new Date(b.received_date).getTime();
+                    })
+                    .slice(0, 3)
+                    .map(b => (
+                      <div key={b.id} className={cn("p-2 text-[10px] border rounded-sm flex items-center justify-between", b.is_opened ? "bg-amber-50 border-amber-200" : "bg-muted/30 border-border")}>
+                        <div className="flex items-center gap-2">
+                          {b.is_opened && <PackageOpen className="w-3 h-3 text-amber-600" />}
+                          <span className="font-mono">{b.batch_number}</span>
+                          <span className="text-muted-foreground">({b.remaining_quantity} {inventory.find(i => i.id === b.item_id)?.unit})</span>
+                        </div>
+                        {b.is_opened ? <span className="text-amber-600 font-bold">Opened</span> : <span className="text-muted-foreground">New</span>}
+                      </div>
+                    ))
+                  }
+                  {batches.filter(b => b.item_id === stockOutForm.itemId && b.remaining_quantity > 0).length === 0 && (
+                    <p className="text-[10px] text-muted-foreground italic">No active batches for this item</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Waste Category / Reason</Label>
               <Select value={stockOutForm.reason} onValueChange={(v) => setStockOutForm(p => ({ ...p, reason: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select a reason" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Basi/Expired">Basi / Expired</SelectItem>
-                  <SelectItem value="Rusak">Rusak</SelectItem>
-                  <SelectItem value="Terbuang Operasional">Terbuang Operasional</SelectItem>
-                  <SelectItem value="Salah Produksi">Salah Produksi</SelectItem>
+                  <SelectItem value="Spoiled/Expired">Spoiled / Expired</SelectItem>
+                  <SelectItem value="Damaged">Damaged</SelectItem>
+                  <SelectItem value="Operational Waste">Operational Waste</SelectItem>
+                  <SelectItem value="Production Error">Production Error</SelectItem>
                   <SelectItem value="Shrinkage">Shrinkage / Susut</SelectItem>
-                  <SelectItem value="Lainnya">Lainnya</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1437,11 +1750,16 @@ export default function InventoryPage() {
                         <div className="flex gap-1">
                           <Input className="h-9 flex-1" type="number" placeholder="0" value={ing.quantity} onChange={(e) => updateIngredient(idx, 'quantity', e.target.value)} />
                           <Select value={currentUnit} onValueChange={(v) => handleIngredientUnitChange(idx, v as DisplayUnit)}>
-                            <SelectTrigger className="h-9 w-[80px] text-[10px] font-bold uppercase"><SelectValue/></SelectTrigger>
+                            <SelectTrigger className="h-9 w-[80px] text-[10px] font-bold uppercase [&>span]:truncate"><SelectValue/></SelectTrigger>
                             <SelectContent>
-                              {getAllowedUnitsForItem(invItem?.unit || 'pcs').map(u => (
-                                <SelectItem key={u} value={u}>{u}</SelectItem>
-                              ))}
+                              {(() => {
+                                const base = invItem?.unit || 'pcs';
+                                const units = getAllowedUnitsForItem(base);
+                                if (invItem?.display_unit && !units.includes(invItem.display_unit as any)) {
+                                  units.push(invItem.display_unit as any);
+                                }
+                                return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
+                              })()}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1519,7 +1837,7 @@ export default function InventoryPage() {
                     }));
                   }
                 }}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
+                  <SelectTrigger className="rounded-sm w-full [&>span]:truncate"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
                     {inventory
                       .filter(i => opnameForm.category === "all" || i.category === opnameForm.category)
@@ -1531,19 +1849,22 @@ export default function InventoryPage() {
             </div>
             
             {opnameForm.itemId && (
-              <div className="p-3 bg-muted/30 rounded-sm border border-border grid grid-cols-2 gap-4">
-                <div className="flex flex-col">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">Expected (System)</span>
-                  <span className="text-sm font-mono font-bold">{opnameForm.theoreticalStock} {opnameForm.displayUnit}</span>
+              <div className="p-3 bg-muted/30 rounded-sm border border-border flex flex-col gap-3">
+                <div className="flex justify-between items-start">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Expected (System)</span>
+                    <span className="text-sm font-mono font-bold">{opnameForm.theoreticalStock} <span className="opacity-70 text-xs">{opnameForm.displayUnit}</span></span>
+                  </div>
+                  <div className="flex flex-col text-right">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Actual Result</span>
+                    <span className="text-sm font-mono font-bold">{parseFloat(opnameForm.actualStock) || 0} <span className="opacity-70 text-xs">{opnameForm.displayUnit}</span></span>
+                  </div>
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] uppercase font-bold text-muted-foreground">Actual Result</span>
-                  <span className="text-sm font-mono font-bold">{parseFloat(opnameForm.actualStock) || 0} {opnameForm.displayUnit}</span>
-                </div>
-                <div className="col-span-2 pt-2 border-t border-border flex justify-between items-center">
-                  <span className="text-xs font-medium">Difference (Waste)</span>
-                  <span className={cn("text-sm font-mono font-bold", (parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock < 0 ? "text-destructive" : "text-emerald-500")}>
-                    {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock} {opnameForm.displayUnit}
+                <div className="pt-2 border-t border-border flex justify-between items-center bg-background p-2 rounded-sm mt-1">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Difference (Waste)</span>
+                  <span className={cn("text-base font-mono font-bold tracking-tight", (parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock < 0 ? "text-destructive" : "text-emerald-500")}>
+                    {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock > 0 ? "+" : ""}
+                    {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock} <span className="opacity-70 text-xs font-normal ml-1">{opnameForm.displayUnit}</span>
                   </span>
                 </div>
               </div>
@@ -1597,13 +1918,14 @@ export default function InventoryPage() {
               <Label>{(parseFloat(opnameForm.actualStock) || 0) < opnameForm.theoreticalStock ? 'Waste Category' : 'Notes / Reason'}</Label>
               {parseFloat(opnameForm.actualStock) < opnameForm.theoreticalStock ? (
                 <Select value={opnameForm.reason} onValueChange={(v) => setOpnameForm(p => ({ ...p, reason: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Pilih kategori waste..."/></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Select waste category..."/></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Basi/Expired">Basi/Expired</SelectItem>
-                    <SelectItem value="Rusak">Rusak</SelectItem>
-                    <SelectItem value="Terbuang Operasional">Terbuang Operasional</SelectItem>
-                    <SelectItem value="Salah Produksi">Salah Produksi</SelectItem>
-                    <SelectItem value="Shrinkage">Penyusutan (Shrinkage)</SelectItem>
+                    <SelectItem value="Spoiled/Expired">Spoiled / Expired</SelectItem>
+                    <SelectItem value="Damaged">Damaged</SelectItem>
+                    <SelectItem value="Operational Waste">Operational Waste</SelectItem>
+                    <SelectItem value="Production Error">Production Error</SelectItem>
+                    <SelectItem value="Shrinkage">Shrinkage / Susut</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
                   </SelectContent>
                 </Select>
               ) : (
