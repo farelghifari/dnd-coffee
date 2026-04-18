@@ -58,7 +58,7 @@ function generateId(prefix: string) {
 // Base units: gram, ml, pcs
 
 export type DisplayUnit = 'kg' | 'gram' | 'liter' | 'ml' | 'pcs'
-export type BaseUnit = 'gram' | 'ml' | 'pcs'
+export type BaseUnit = 'gram' | 'ml' | 'pcs' | 'kg' | 'liter'
 
 export const UNIT_CONVERSIONS: Record<DisplayUnit, { baseUnit: BaseUnit; multiplier: number }> = {
   kg: { baseUnit: 'gram', multiplier: 1000 },
@@ -67,6 +67,28 @@ export const UNIT_CONVERSIONS: Record<DisplayUnit, { baseUnit: BaseUnit; multipl
   ml: { baseUnit: 'ml', multiplier: 1 },
   pcs: { baseUnit: 'pcs', multiplier: 1 }
 }
+
+/**
+ * Returns the conversion multiplier from a display unit to a base unit.
+ * Example: 'liter' to 'ml' returns 1000.
+ */
+export function getConversionRate(displayUnit: string, baseUnit: string): number {
+  const d = displayUnit.toLowerCase();
+  const b = baseUnit.toLowerCase();
+  
+  if (d === b) return 1;
+  
+  // Weights
+  if ((d === 'kg' && b === 'gram') || (d === 'kilogram' && b === 'gram')) return 1000;
+  if (d === 'gram' && b === 'kg') return 0.001;
+  
+  // Volumes
+  if ((d === 'liter' && b === 'ml') || (d === 'l' && b === 'ml')) return 1000;
+  if (d === 'ml' && b === 'liter') return 0.001;
+  
+  return 1;
+}
+
 
 // Convert display unit to base unit
 export function toBaseUnit(value: number, unit: DisplayUnit): number {
@@ -130,10 +152,24 @@ export interface Employee {
   nfc_uid: string | null
   status: "active" | "inactive"
   super_admin_expires_at?: string | null // Timestamp for temporary super_admin expiration
+  phone_number?: string | null
+  avatar_url?: string | null
+  contract_pdf_url?: string | null
+  contract_start_date?: string | null
+  contract_end_date?: string | null
   // For local/fallback compatibility
   nickname?: string
   avatar?: string
   created_at?: string
+}
+
+export interface EmployeeContract {
+  id: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  contract_pdf_url: string | null
+  created_at: string
 }
 
 // DB Schema: inventory_items(id, name, category, unit, stock)
@@ -150,6 +186,8 @@ export interface InventoryItem {
   daily_usage?: number
   last_updated?: string
   unit_cost?: number
+  display_unit?: string
+  conversion_rate?: number
 }
 
 // DB Schema: inventory_transactions(id, item_id, employee_id, type, quantity)
@@ -159,6 +197,7 @@ export interface InventoryTransaction {
   employee_id: string | null
   type: "in" | "out" | "waste" | "opname"
   quantity: number
+  waste_reason?: string | null
 }
 
 // DB Schema: monthly_opex(id, month, category, amount, notes, attachment_url)
@@ -265,7 +304,7 @@ export interface OvertimeRequest {
 // System Activity Log - tracks all system changes
 export interface SystemLog {
   id: string
-  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action"
+  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action" | "contract_renewal"
   actor: string // Who made the change (email or name)
   target: string // What was changed (item name, employee name, etc.)
   details: string // Description of the change
@@ -481,6 +520,11 @@ export async function updateEmployee(id: string, updates: Partial<Employee>): Pr
     if (updates.nfc_uid !== undefined) dbUpdates.nfc_uid = updates.nfc_uid
     if (updates.status !== undefined) dbUpdates.status = updates.status
     if (updates.super_admin_expires_at !== undefined) dbUpdates.super_admin_expires_at = updates.super_admin_expires_at
+    if (updates.phone_number !== undefined) dbUpdates.phone_number = updates.phone_number
+    if (updates.avatar_url !== undefined) dbUpdates.avatar_url = updates.avatar_url
+    if (updates.contract_pdf_url !== undefined) dbUpdates.contract_pdf_url = updates.contract_pdf_url
+    if (updates.contract_start_date !== undefined) dbUpdates.contract_start_date = updates.contract_start_date
+    if (updates.contract_end_date !== undefined) dbUpdates.contract_end_date = updates.contract_end_date
     
     console.log("NEW ROLE:", updates.role)
     console.log("EXPIRES:", updates.super_admin_expires_at)
@@ -682,6 +726,63 @@ export async function deleteEmployee(id: string): Promise<boolean> {
   const employees = getStoredData(STORAGE_KEYS.employees, mockEmployees as Employee[])
   const filtered = employees.filter(e => e.id !== id)
   setStoredData(STORAGE_KEYS.employees, filtered)
+  return true
+}
+
+// ========== EMPLOYEE CONTRACTS & RENEWAL ==========
+
+export async function getEmployeeContractHistory(employeeId: string): Promise<EmployeeContract[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('employee_contracts')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('end_date', { ascending: false })
+    
+    if (error) {
+      console.log("ERROR (getEmployeeContractHistory):", error)
+      return []
+    }
+    return data || []
+  }
+  return [] // Not implemented for localStorage
+}
+
+export async function renewEmployeeContract(
+  employeeId: string, 
+  newContract: { start_date: string; end_date: string; pdf_url: string | null },
+  actorName: string = 'System'
+): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    // 1. Call the database RPC function to handle the renewal atomically
+    // This function handles archiving old contract and updating with new one
+    const { data: success, error: rpcError } = await supabase.rpc('renew_employee_contract', {
+      p_employee_id: employeeId,
+      p_new_start_date: newContract.start_date,
+      p_new_end_date: newContract.end_date,
+      p_new_pdf_url: newContract.pdf_url
+    })
+    
+    if (rpcError || !success) {
+      console.log("ERROR (renewEmployeeContract RPC):", rpcError)
+      return false
+    }
+
+    // 2. Log the renewal activity (Still handled in frontend/log table)
+    const employee = await getEmployeeById(employeeId)
+    if (employee) {
+      await logActivity(
+        'contract_renewal',
+        actorName,
+        employee.name,
+        `Renewed contract until ${newContract.end_date}`
+      )
+    }
+
+    return true
+  }
+  
+  // Local storage fallback (partial)
   return true
 }
 
@@ -978,6 +1079,8 @@ export interface UpsertInventoryData {
   max_stock?: number
   daily_usage?: number
   unit_cost?: number
+  display_unit?: string
+  conversion_rate?: number
 }
 
 export async function upsertInventory(data: UpsertInventoryData, actorName: string = 'System'): Promise<InventoryItem | null> {
@@ -999,38 +1102,85 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
     })
     
     if (error) {
-      console.log("ERROR (upsertInventory RPC):", error)
-      // Fallback to direct insert/update if RPC doesn't exist
+      // RPC failed (likely parameter mismatch or legacy function). Try direct update/insert.
+      const baseUpdate = {
+        name: data.name,
+        category: data.category,
+        unit: data.unit,
+        stock: data.stock,
+        min_stock: data.min_stock,
+        max_stock: data.max_stock,
+        daily_usage: data.daily_usage,
+        unit_cost: data.unit_cost
+      }
+      
+      const extendedUpdate = {
+        ...baseUpdate,
+        display_unit: data.display_unit,
+        conversion_rate: data.conversion_rate
+      }
+      
       if (data.id) {
-        resultItem = await updateInventoryItem(data.id, {
-          name: data.name,
-          category: data.category as InventoryItem['category'],
-          unit: data.unit,
-          stock: data.stock,
-          current_stock: data.stock,
-          min_stock: data.min_stock,
-          max_stock: data.max_stock,
-          daily_usage: data.daily_usage,
-          unit_cost: data.unit_cost
-        })
+        // Try update with all columns first
+        let { data: updated, error: uError } = await supabase
+          .from('inventory_items')
+          .update(extendedUpdate)
+          .eq('id', data.id)
+          .select()
+          .single()
+        
+        // If it fails due to missing columns, retry with only base columns
+        if (uError && (uError.message?.includes('column') || uError.code === '42703')) {
+          const retry = await supabase
+            .from('inventory_items')
+            .update(baseUpdate)
+            .eq('id', data.id)
+            .select()
+            .single()
+          updated = retry.data
+          uError = retry.error
+        }
+        
+        if (uError) console.error("CRITICAL ERROR (upsert fallback):", uError)
+        resultItem = updated ? { ...updated, current_stock: updated.stock } : null
       } else {
-        resultItem = await addInventoryItem({
-          name: data.name,
-          category: data.category,
-          unit: data.unit,
-          stock: data.stock
-        })
+        // Try insert with all columns first
+        let { data: inserted, error: iError } = await supabase
+          .from('inventory_items')
+          .insert([extendedUpdate])
+          .select()
+          .single()
+        
+        if (iError && (iError.message?.includes('column') || iError.code === '42703')) {
+          const retry = await supabase
+            .from('inventory_items')
+            .insert([baseUpdate])
+            .select()
+            .single()
+          inserted = retry.data
+          iError = retry.error
+        }
+        
+        if (iError) console.error("CRITICAL ERROR (upsert fallback):", iError)
+        resultItem = inserted ? { ...inserted, current_stock: inserted.stock } : null
       }
     } else {
-      // Return the upserted item
-      if (result) {
-        resultItem = { ...result, current_stock: result.stock }
-      } else if (data.id) {
-        resultItem = await getInventoryItem(data.id)
-      } else {
-        // For new items, fetch by name (best effort)
-        const allItems = await getInventory()
-        resultItem = allItems.find(i => i.name === data.name) || null
+      // RPC succeeded. Now optionally patch the columns that RPC might have missed
+      const targetId = result?.id || data.id
+      
+      if (targetId && (data.display_unit || data.conversion_rate)) {
+        await supabase
+          .from('inventory_items')
+          .update({
+            display_unit: data.display_unit,
+            conversion_rate: data.conversion_rate || 1
+          })
+          .eq('id', targetId)
+        // We don't log error here because it's non-fatal if columns are missing
+      }
+      
+      if (targetId) {
+        resultItem = await getInventoryItem(targetId)
       }
     }
   } else {
@@ -3674,7 +3824,7 @@ export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'cre
     // 2. Update Inventory Item Stock to match Actual Stock
     const { error: updateError } = await supabase
       .from('inventory_items')
-      .update({ stock: data.actual_stock, updated_at: new Date().toISOString() })
+      .update({ stock: data.actual_stock })
       .eq('id', data.item_id)
 
     if (updateError) {
@@ -3689,6 +3839,7 @@ export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'cre
         type: type,
         quantity: Math.abs(data.difference),
         actor_name: data.actor_name,
+        waste_reason: type === 'waste' ? data.reason : null,
         created_at: new Date().toISOString()
       }])
     }
@@ -3722,4 +3873,36 @@ export async function uploadOpexAttachment(file: File): Promise<string | null> {
     return data.publicUrl
   }
   return null
+}
+
+// ========== STORAGE INTEGRATION ==========
+export async function uploadEmployeeFile(file: File, bucket: 'avatars' | 'contracts', path: string): Promise<string | null> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('folder', bucket)
+    formData.append('filename', path)
+
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    })
+    
+    const json = await res.json()
+    if (json.success) {
+      return json.path
+    }
+    
+    console.error(`Error uploading to ${bucket}:`, json.error)
+    return null
+  } catch (e) {
+    console.error(`Exception uploading to ${bucket}:`, e)
+    return null
+  }
+}
+
+export async function getEmployeeFileUrl(path: string, bucket: 'avatars' | 'contracts'): Promise<string | null> {
+  if (!path) return null
+  if (path.startsWith('/resources/')) return path
+  return `/resources/${bucket}/${path}`
 }

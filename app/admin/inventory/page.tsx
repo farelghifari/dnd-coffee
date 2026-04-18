@@ -27,9 +27,9 @@ import {
   subscribeToInventoryItems,
   toBaseUnit,
   fromBaseUnit,
+  getConversionRate,
   getAllowedUnitsForItem,
   getDefaultDisplayUnit,
-  UNIT_CONVERSIONS,
   type InventoryItem,
   type MenuItem,
   type MenuRecipeIngredient,
@@ -137,10 +137,12 @@ export default function InventoryPage() {
     dailyUsage: "",
     minStock: "",
     maxStock: "",
-    unitCost: ""
+    unitCost: "",
+    conversionRate: "1"
   })
 
   const [stockInForm, setStockInForm] = useState({
+    category: "all" as string,
     itemId: "",
     quantity: "",
     displayUnit: "pcs" as DisplayUnit,
@@ -152,6 +154,7 @@ export default function InventoryPage() {
   })
 
   const [stockOutForm, setStockOutForm] = useState({
+    category: "all" as string,
     itemId: "",
     quantity: "",
     displayUnit: "pcs" as DisplayUnit,
@@ -176,6 +179,7 @@ export default function InventoryPage() {
   const [opexFile, setOpexFile] = useState<File | null>(null)
 
   const [opnameForm, setOpnameForm] = useState({
+    category: "all" as string,
     itemId: "",
     actualStock: "",
     displayUnit: "pcs" as DisplayUnit,
@@ -276,7 +280,8 @@ export default function InventoryPage() {
       dailyUsage: "",
       minStock: "",
       maxStock: "",
-      unitCost: ""
+      unitCost: "",
+      conversionRate: "1"
     })
     setError(null)
   }
@@ -297,18 +302,22 @@ export default function InventoryPage() {
     if (!formData.name || !formData.currentStock) return
     
     try {
-      const stockVal = toBaseUnit(parseFloat(formData.currentStock) || 0, formData.displayUnit)
-      const minVal = toBaseUnit(parseFloat(formData.minStock) || 0, formData.displayUnit)
-      const maxVal = toBaseUnit(parseFloat(formData.maxStock) || 0, formData.displayUnit)
-      const dailyVal = toBaseUnit(parseFloat(formData.dailyUsage) || 0, formData.displayUnit)
+      const multiplier = parseFloat(formData.conversionRate) || 
+                         getConversionRate(formData.displayUnit, formData.unit) || 
+                         1
       
-      const multiplier = UNIT_CONVERSIONS[formData.displayUnit]?.multiplier || 1
+      const stockVal = (parseFloat(formData.currentStock) || 0) * multiplier
+      const minVal = (parseFloat(formData.minStock) || 0) * multiplier
+      const maxVal = (parseFloat(formData.maxStock) || 0) * multiplier
+      const dailyVal = (parseFloat(formData.dailyUsage) || 0) * multiplier
       const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
       
       await upsertInventory({
         name: formData.name,
         category: formData.category as any,
         unit: formData.unit,
+        display_unit: formData.displayUnit,
+        conversion_rate: multiplier,
         stock: stockVal,
         min_stock: minVal,
         max_stock: maxVal,
@@ -328,12 +337,13 @@ export default function InventoryPage() {
     if (!formData.id || !formData.name || !formData.currentStock) return
     
     try {
-      const stockVal = toBaseUnit(parseFloat(formData.currentStock) || 0, formData.displayUnit)
-      const minVal = toBaseUnit(parseFloat(formData.minStock) || 0, formData.displayUnit)
-      const maxVal = toBaseUnit(parseFloat(formData.maxStock) || 0, formData.displayUnit)
-      const dailyVal = toBaseUnit(parseFloat(formData.dailyUsage) || 0, formData.displayUnit)
-      
-      const multiplier = UNIT_CONVERSIONS[formData.displayUnit]?.multiplier || 1
+      const multiplier = parseFloat(formData.conversionRate) || 
+                       getConversionRate(formData.displayUnit, formData.unit) || 
+                       1
+    const stockVal = (parseFloat(formData.currentStock) || 0) * multiplier
+      const minVal = (parseFloat(formData.minStock) || 0) * multiplier
+      const maxVal = (parseFloat(formData.maxStock) || 0) * multiplier
+      const dailyVal = (parseFloat(formData.dailyUsage) || 0) * multiplier
       const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
 
       await upsertInventory({
@@ -341,6 +351,8 @@ export default function InventoryPage() {
         name: formData.name,
         category: formData.category as any,
         unit: formData.unit,
+        display_unit: formData.displayUnit,
+        conversion_rate: multiplier,
         stock: stockVal,
         min_stock: minVal,
         max_stock: maxVal,
@@ -357,8 +369,18 @@ export default function InventoryPage() {
   }
 
   const openEditItemModal = (item: InventoryItem) => {
-    const dUnit = getDefaultDisplayUnit(item.unit)
-    const multiplier = UNIT_CONVERSIONS[dUnit]?.multiplier || 1
+    // Priority 1: Stored display_unit from DB
+    // Priority 2: Standard default derived from system unit
+    // Priority 3: The system unit itself
+    const dUnit = (item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit) as DisplayUnit
+    
+    // Priority 1: Stored conversion_rate from DB (if not the default 1 or if units are the same)
+    // Priority 2: Standard conversion rate based on units
+    // Priority 3: Fallback 1
+    let multiplier = item.conversion_rate || 1
+    if (multiplier === 1 && dUnit.toLowerCase() !== item.unit.toLowerCase()) {
+      multiplier = getConversionRate(dUnit, item.unit)
+    }
     
     setFormData({
       id: item.id,
@@ -366,10 +388,11 @@ export default function InventoryPage() {
       category: item.category as any,
       unit: item.unit,
       displayUnit: dUnit,
-      currentStock: parseFloat(fromBaseUnit(item.stock || 0, dUnit).toFixed(4)).toString(),
-      dailyUsage: parseFloat(fromBaseUnit(item.daily_usage || 0, dUnit).toFixed(4)).toString(),
-      minStock: parseFloat(fromBaseUnit(item.min_stock || 0, dUnit).toFixed(4)).toString(),
-      maxStock: parseFloat(fromBaseUnit(item.max_stock || 0, dUnit).toFixed(4)).toString(),
+      conversionRate: multiplier.toString(),
+      currentStock: parseFloat(((item.stock || 0) / multiplier).toFixed(4)).toString(),
+      dailyUsage: parseFloat(((item.daily_usage || 0) / multiplier).toFixed(4)).toString(),
+      minStock: parseFloat(((item.min_stock || 0) / multiplier).toFixed(4)).toString(),
+      maxStock: parseFloat(((item.max_stock || 0) / multiplier).toFixed(4)).toString(),
       unitCost: parseFloat(((item.unit_cost || 0) * multiplier).toFixed(4)).toString()
     })
     setIsEditItemModalOpen(true)
@@ -391,14 +414,14 @@ export default function InventoryPage() {
     
     try {
       const item = inventory.find(i => i.id === stockInForm.itemId)
-      const receivedQty = toBaseUnit(parseFloat(stockInForm.quantity), stockInForm.displayUnit)
+      const multiplier = item?.conversion_rate || getConversionRate(stockInForm.displayUnit, item?.unit || 'pcs') || 1
+      const baseQuantity = parseFloat(stockInForm.quantity) * multiplier
       
-      const multiplier = UNIT_CONVERSIONS[stockInForm.displayUnit]?.multiplier || 1
       const normalizedCost = (parseFloat(stockInForm.unitCost) || 0) / multiplier
       
       await addBatch({
         item_id: stockInForm.itemId,
-        quantity: parseFloat(stockInForm.quantity),
+        quantity: baseQuantity,
         unit: stockInForm.displayUnit,
         unit_cost: normalizedCost,
         supplier_name: stockInForm.supplierName,
@@ -409,6 +432,7 @@ export default function InventoryPage() {
       
       setIsAddStockModalOpen(false)
       setStockInForm({ 
+        category: "all",
         itemId: "", 
         quantity: "", 
         displayUnit: "pcs", 
@@ -429,7 +453,9 @@ export default function InventoryPage() {
     if (!stockOutForm.itemId || !stockOutForm.quantity) return
     
     try {
-      const baseQty = toBaseUnit(parseFloat(stockOutForm.quantity), stockOutForm.displayUnit)
+      const item = inventory.find(i => i.id === stockOutForm.itemId)
+      const multiplier = item?.conversion_rate || getConversionRate(stockOutForm.displayUnit, item?.unit || 'pcs') || 1
+      const baseQty = parseFloat(stockOutForm.quantity) * multiplier
       
       await stockOutManual(
         stockOutForm.itemId,
@@ -439,7 +465,7 @@ export default function InventoryPage() {
       )
       
       setIsStockOutModalOpen(false)
-      setStockOutForm({ itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
+      setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
       fetchData()
     } catch (err) {
       setError("Failed to remove stock")
@@ -623,7 +649,12 @@ export default function InventoryPage() {
       if (!item) return
       
       const theoretical = item.stock || 0
-      const actual = toBaseUnit(parseFloat(opnameForm.actualStock), opnameForm.displayUnit)
+      // Use stored conversion_rate if matches display_unit, otherwise use global converter
+      const multiplier = (item.display_unit === opnameForm.displayUnit && item.conversion_rate) ? 
+        item.conversion_rate : 
+        getConversionRate(opnameForm.displayUnit, item.unit);
+        
+      const actual = parseFloat(opnameForm.actualStock) * (multiplier || 1)
       
       await addInventoryOpname({
         item_id: opnameForm.itemId,
@@ -635,7 +666,7 @@ export default function InventoryPage() {
       })
       
       setIsRecordOpnameModalOpen(false)
-      setOpnameForm({ itemId: "", actualStock: "", displayUnit: "pcs", theoreticalStock: 0, reason: "" })
+      setOpnameForm({ category: "all", itemId: "", actualStock: "", displayUnit: "pcs", theoreticalStock: 0, reason: "" })
       fetchData()
     } catch (err) {
       setError("Failed to record stock opname")
@@ -690,13 +721,13 @@ export default function InventoryPage() {
         <TabsContent value="raw-materials">
           {canEdit && (
             <div className="flex gap-2 mb-6">
-              <Button className="rounded-sm" onClick={() => { setStockInForm({ itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
+              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
                 <PackagePlus className="w-4 h-4 mr-2" />
                 Stock In
               </Button>
-              <Button variant="outline" className="rounded-sm" onClick={() => { setStockOutForm({ itemId: "", quantity: "", displayUnit: "pcs", reason: "" }); setIsStockOutModalOpen(true); }}>
+              <Button variant="outline" className="rounded-sm" onClick={() => { setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" }); setIsStockOutModalOpen(true); }}>
                 <ArrowDownCircle className="w-4 h-4 mr-2" />
-                Stock Out
+                Waste / Stock Out
               </Button>
               <Button variant="outline" className="rounded-sm" onClick={() => { resetItemForm(); setIsAddItemModalOpen(true); }}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -765,10 +796,26 @@ export default function InventoryPage() {
                           <td className="py-4 px-4"><span className="font-medium">{item.name}</span></td>
                           <td className="py-4 px-4 text-sm text-muted-foreground capitalize">{item.category}</td>
                           <td className="py-4 px-4 text-right font-mono">
-                            {parseFloat(fromBaseUnit(item.stock ?? 0, (item.unit as DisplayUnit) || 'pcs').toFixed(4))} {item.unit}
+                            {(() => {
+                              const dUnit = item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit
+                              let multiplier = item.conversion_rate || 1
+                              if (multiplier === 1 && dUnit.toLowerCase() !== item.unit.toLowerCase()) {
+                                multiplier = getConversionRate(dUnit, item.unit)
+                              }
+                              const val = (item.stock ?? 0) / multiplier
+                              return `${parseFloat(val.toFixed(4))} ${dUnit}`
+                            })()}
                           </td>
-                          <td className="py-4 px-4 text-right font-mono text-muted-foreground">
-                            {parseFloat(fromBaseUnit(item.daily_usage ?? 0, (item.unit as DisplayUnit) || 'pcs').toFixed(4))} {item.unit}/day
+                          <td className="py-4 px-4 text-right">
+                            {(() => {
+                              const dUnit = (item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit) as DisplayUnit
+                              let multiplier = item.conversion_rate || 1;
+                              if (multiplier === 1 && dUnit.toLowerCase() !== item.unit.toLowerCase()) {
+                                multiplier = getConversionRate(dUnit, item.unit);
+                              }
+                              const val = (item.daily_usage ?? 0) / multiplier
+                              return `${parseFloat(val.toFixed(4))} ${dUnit}/day`
+                            })()}
                           </td>
                           <td className="py-4 px-4 text-right font-mono">{daysRemaining}</td>
                           <td className="py-4 px-4 text-center">
@@ -1010,24 +1057,33 @@ export default function InventoryPage() {
                     <th className="text-right py-3 px-4 text-muted-foreground">System</th>
                     <th className="text-right py-3 px-4 text-muted-foreground">Actual</th>
                     <th className="text-right py-3 px-4 text-muted-foreground">Waste</th>
+                    <th className="text-left py-3 px-4 text-muted-foreground">Reason</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {opnameHistory.map((opname) => {
-                    const item = inventory.find(i => i.id === opname.item_id);
-                    const unit = (item?.unit as DisplayUnit) || 'pcs';
-                    return (
-                      <tr key={opname.id} className="border-b border-border">
-                        <td className="py-4 px-4 text-xs">{new Date(opname.created_at).toLocaleString()}</td>
-                        <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
-                        <td className="py-4 px-4 text-right font-mono">{parseFloat(fromBaseUnit(opname.theoretical_stock, unit).toFixed(4))} {unit}</td>
-                        <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(fromBaseUnit(opname.actual_stock, unit).toFixed(4))} {unit}</td>
-                        <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
-                          {opname.difference > 0 ? '+' : ''}{parseFloat(fromBaseUnit(opname.difference, unit).toFixed(4))} {unit}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                    {opnameHistory.map((opname) => {
+                      const item = inventory.find(i => i.id === opname.item_id);
+                      const dUnit = (item?.display_unit || getDefaultDisplayUnit(item?.unit || 'pcs') || item?.unit || 'pcs') as DisplayUnit;
+                      let multiplier = item?.conversion_rate || 1;
+                      if (multiplier === 1 && dUnit.toLowerCase() !== (item?.unit || '').toLowerCase()) {
+                        multiplier = getConversionRate(dUnit, item?.unit || 'pcs');
+                      }
+                      
+                      return (
+                        <tr key={opname.id} className="border-b border-border">
+                          <td className="py-4 px-4 text-xs">{new Date(opname.created_at).toLocaleString()}</td>
+                          <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
+                          <td className="py-4 px-4 text-right font-mono">{parseFloat(((opname.theoretical_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
+                          <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(((opname.actual_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
+                          <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
+                            {opname.difference > 0 ? '+' : ''}{parseFloat(((opname.difference || 0) / multiplier).toFixed(4))} {dUnit}
+                          </td>
+                          <td className="py-4 px-4 text-xs text-muted-foreground max-w-[150px] truncate" title={opname.reason || ""}>
+                            {opname.reason || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </CardContent>
@@ -1061,11 +1117,63 @@ export default function InventoryPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="unit">Base Unit</Label>
-                <Select value={formData.displayUnit} onValueChange={(v) => setFormData(p => ({ ...p, unit: v, displayUnit: v as DisplayUnit }))}>
+                <Label htmlFor="unit">Base Unit (System)</Label>
+                <Select value={formData.unit} onValueChange={(v) => setFormData(p => ({ ...p, unit: v }))}>
                   <SelectTrigger id="unit"><SelectValue/></SelectTrigger>
-                  <SelectContent>{unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                  <SelectContent>
+                    <SelectItem value="gram">gram</SelectItem>
+                    <SelectItem value="ml">ml</SelectItem>
+                    <SelectItem value="pcs">pcs</SelectItem>
+                    <SelectItem value="kg">kg</SelectItem>
+                    <SelectItem value="liter">liter</SelectItem>
+                  </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="display-unit">Display Unit (Ops)</Label>
+                <Input id="display-unit" placeholder="e.g., botol, pack, liter" value={formData.displayUnit} onChange={(e) => setFormData(p => ({ ...p, displayUnit: e.target.value as any }))} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="conversion">Conversion Rate</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">1 {formData.displayUnit || 'item'} =</span>
+                  <Input 
+                    type="number" 
+                    step="any"
+                    className="h-8 w-24 p-2 rounded-sm" 
+                    value={formData.conversionRate} 
+                    onChange={(e) => {
+                      const newRateStr = e.target.value;
+                      const oldRate = parseFloat(formData.conversionRate) || 1;
+                      const newRate = parseFloat(newRateStr) || 1;
+                      
+                      setFormData(p => ({ 
+                        ...p, 
+                        conversionRate: newRateStr,
+                        currentStock: p.currentStock ? ((parseFloat(p.currentStock) * oldRate) / newRate).toFixed(4).replace(/\.?0+$/, "") : "",
+                        dailyUsage: p.dailyUsage ? ((parseFloat(p.dailyUsage) * oldRate) / newRate).toFixed(4).replace(/\.?0+$/, "") : "",
+                        minStock: p.minStock ? ((parseFloat(p.minStock) * oldRate) / newRate).toFixed(4).replace(/\.?0+$/, "") : "",
+                        maxStock: p.maxStock ? ((parseFloat(p.maxStock) * oldRate) / newRate).toFixed(4).replace(/\.?0+$/, "") : "",
+                        unitCost: p.unitCost ? ((parseFloat(p.unitCost) / oldRate) * newRate).toFixed(4).replace(/\.?0+$/, "") : ""
+                      }))
+                    }} 
+                  />
+                  <span className="text-xs text-muted-foreground">{formData.unit}</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-6 text-[10px] text-primary p-0 h-auto font-bold" 
+                  onClick={() => {
+                    const rate = getConversionRate(formData.displayUnit, formData.unit);
+                    setFormData(p => ({ ...p, conversionRate: rate.toString() }));
+                  }}
+                >
+                  Reset to standard ({getConversionRate(formData.displayUnit, formData.unit)})
+                </Button>
               </div>
             </div>
 
@@ -1093,7 +1201,16 @@ export default function InventoryPage() {
 
             <div className="space-y-2">
               <Label htmlFor="unit-cost">Unit Cost (IDR)</Label>
-              <Input id="unit-cost" type="number" placeholder="0" value={formData.unitCost} onChange={(e) => setFormData(p => ({...p, unitCost: e.target.value}))} />
+              <div className="flex items-center gap-2">
+                <Input id="unit-cost" type="number" step="any" placeholder="0" value={formData.unitCost} onChange={(e) => setFormData(p => ({...p, unitCost: e.target.value}))} />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">per {formData.displayUnit || 'item'}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground italic">
+                {formData.displayUnit && formData.conversionRate && parseFloat(formData.conversionRate) > 1 ? 
+                  `Equals ${formatPrice((parseFloat(formData.unitCost) || 0) / (parseFloat(formData.conversionRate) || 1))} per ${formData.unit}` : 
+                  ""
+                }
+              </p>
             </div>
           </div>
           <DialogFooter>
@@ -1103,22 +1220,49 @@ export default function InventoryPage() {
       </Dialog>
       
       {/* Stock In Modal */}
-      <Dialog open={isAddStockModalOpen} onOpenChange={setIsAddStockModalOpen}>
+      <Dialog open={isAddStockModalOpen} onOpenChange={(open) => {
+        setIsAddStockModalOpen(open);
+        if (open) setStockInForm(p => ({ ...p, category: "all" }));
+      }}>
         <DialogContent className="sm:max-w-[500px] rounded-sm">
           <DialogHeader>
             <DialogTitle>Stock In</DialogTitle>
             <DialogDescription>Record incoming stock for a specific item.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-            <div className="space-y-2">
-              <Label>Select Item</Label>
-              <Select value={stockInForm.itemId} onValueChange={(v) => {
-                const item = inventory.find(i => i.id === v);
-                setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
-              }}>
-                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
-                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={stockInForm.category} onValueChange={(v) => {
+                  setStockInForm(p => ({ ...p, category: v, itemId: "" }));
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="beans">Beans</SelectItem>
+                    <SelectItem value="milk">Milk</SelectItem>
+                    <SelectItem value="syrup">Syrup</SelectItem>
+                    <SelectItem value="cups">Cups</SelectItem>
+                    <SelectItem value="food">Food</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Select Item</Label>
+                <Select value={stockInForm.itemId} onValueChange={(v) => {
+                  const item = inventory.find(i => i.id === v);
+                  setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
+                  <SelectContent>
+                    {inventory
+                      .filter(i => stockInForm.category === "all" || i.category === stockInForm.category)
+                      .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1158,22 +1302,49 @@ export default function InventoryPage() {
       </Dialog>
 
       {/* Stock Out Modal */}
-      <Dialog open={isStockOutModalOpen} onOpenChange={setIsStockOutModalOpen}>
+      <Dialog open={isStockOutModalOpen} onOpenChange={(open) => {
+        setIsStockOutModalOpen(open);
+        if (!open) setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" });
+      }}>
         <DialogContent className="sm:max-w-[425px] rounded-sm">
           <DialogHeader>
             <DialogTitle>Stock Out (Manual)</DialogTitle>
             <DialogDescription>Manually subtract stock for waste, damage, or other reasons.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label>Select Item</Label>
-              <Select value={stockOutForm.itemId} onValueChange={(v) => {
-                const item = inventory.find(i => i.id === v);
-                setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
-              }}>
-                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
-                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={stockOutForm.category} onValueChange={(v) => {
+                  setStockOutForm(p => ({ ...p, category: v, itemId: "" }));
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="beans">Beans</SelectItem>
+                    <SelectItem value="milk">Milk</SelectItem>
+                    <SelectItem value="syrup">Syrup</SelectItem>
+                    <SelectItem value="cups">Cups</SelectItem>
+                    <SelectItem value="food">Food</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Select Item</Label>
+                <Select value={stockOutForm.itemId} onValueChange={(v) => {
+                  const item = inventory.find(i => i.id === v);
+                  setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
+                  <SelectContent>
+                    {inventory
+                      .filter(i => stockOutForm.category === "all" || i.category === stockOutForm.category)
+                      .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             
             <div className="space-y-2">
@@ -1182,8 +1353,18 @@ export default function InventoryPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Reason</Label>
-              <Textarea placeholder="Damage, waste, expired, etc." value={stockOutForm.reason} onChange={(e) => setStockOutForm(p => ({ ...p, reason: e.target.value }))} />
+              <Label>Waste Category / Reason</Label>
+              <Select value={stockOutForm.reason} onValueChange={(v) => setStockOutForm(p => ({ ...p, reason: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select a reason" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Basi/Expired">Basi / Expired</SelectItem>
+                  <SelectItem value="Rusak">Rusak</SelectItem>
+                  <SelectItem value="Terbuang Operasional">Terbuang Operasional</SelectItem>
+                  <SelectItem value="Salah Produksi">Salah Produksi</SelectItem>
+                  <SelectItem value="Shrinkage">Shrinkage / Susut</SelectItem>
+                  <SelectItem value="Lainnya">Lainnya</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter><Button variant="destructive" onClick={handleStockOutManual}>Confirm removal</Button></DialogFooter>
@@ -1266,6 +1447,16 @@ export default function InventoryPage() {
                         </div>
                       </div>
                     </div>
+                    {invItem && (
+                      <div className="flex justify-between items-center px-1 pt-1 border-t border-border/50">
+                        <span className="text-[10px] text-muted-foreground">
+                          Cost: {formatPrice(invItem.unit_cost || 0)} / {invItem.unit}
+                        </span>
+                        <span className="text-[10px] font-bold text-primary">
+                          Subtotal: {formatPrice((invItem.unit_cost || 0) * toBaseUnit(Number(ing.quantity) || 0, currentUnit))}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1285,22 +1476,58 @@ export default function InventoryPage() {
       </Dialog>
 
       {/* Record Opname Modal */}
-      <Dialog open={isRecordOpnameModalOpen} onOpenChange={setIsRecordOpnameModalOpen}>
+      <Dialog open={isRecordOpnameModalOpen} onOpenChange={(open) => {
+        setIsRecordOpnameModalOpen(open);
+        if (open) setOpnameForm(p => ({ ...p, category: "all" }));
+      }}>
         <DialogContent className="sm:max-w-[425px] rounded-sm">
           <DialogHeader>
             <DialogTitle>Stock Take (Opname)</DialogTitle>
             <DialogDescription>Perform a physical stock count audit.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label>Select Item</Label>
-              <Select value={opnameForm.itemId} onValueChange={(v) => {
-                const item = inventory.find(i => i.id === v);
-                setOpnameForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs', theoreticalStock: item ? fromBaseUnit(item.stock, item ? getDefaultDisplayUnit(item.unit) : 'pcs') : 0 }));
-              }}>
-                <SelectTrigger><SelectValue placeholder="Select Item"/></SelectTrigger>
-                <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={opnameForm.category} onValueChange={(v) => {
+                  setOpnameForm(p => ({ ...p, category: v, itemId: "" }));
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="beans">Beans</SelectItem>
+                    <SelectItem value="milk">Milk</SelectItem>
+                    <SelectItem value="syrup">Syrup</SelectItem>
+                    <SelectItem value="cups">Cups</SelectItem>
+                    <SelectItem value="food">Food</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Select Item</Label>
+                <Select value={opnameForm.itemId} onValueChange={(v) => {
+                  const item = inventory.find(i => i.id === v);
+                  if (item) {
+                    const dUnit = (item.display_unit as DisplayUnit) || getDefaultDisplayUnit(item.unit);
+                    const theoretical = fromBaseUnit(item.stock, dUnit);
+                    setOpnameForm(p => ({ 
+                      ...p, 
+                      itemId: v, 
+                      displayUnit: dUnit, 
+                      theoreticalStock: parseFloat(theoretical.toFixed(4)) 
+                    }));
+                  }
+                }}>
+                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
+                  <SelectContent>
+                    {inventory
+                      .filter(i => opnameForm.category === "all" || i.category === opnameForm.category)
+                      .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             
             {opnameForm.itemId && (
@@ -1323,13 +1550,65 @@ export default function InventoryPage() {
             )}
 
             <div className="space-y-2">
-              <Label>Actual Physical Count ({opnameForm.displayUnit})</Label>
-              <Input type="number" placeholder="0" value={opnameForm.actualStock} onChange={(e) => setOpnameForm(p => ({ ...p, actualStock: e.target.value }))} />
+              <Label>Actual Physical Count</Label>
+              <div className="flex gap-2">
+                <Input 
+                  type="number" 
+                  placeholder="0" 
+                  className="flex-1"
+                  value={opnameForm.actualStock} 
+                  onChange={(e) => setOpnameForm(p => ({ ...p, actualStock: e.target.value }))} 
+                />
+                <Select 
+                  value={opnameForm.displayUnit} 
+                  onValueChange={(v) => {
+                    const item = inventory.find(i => i.id === opnameForm.itemId);
+                    if (item) {
+                      const newUnit = v as DisplayUnit;
+                      const theoretical = fromBaseUnit(item.stock, newUnit);
+                      setOpnameForm(p => ({ 
+                        ...p, 
+                        displayUnit: newUnit, 
+                        theoreticalStock: parseFloat(theoretical.toFixed(4)) 
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[100px] rounded-sm font-semibold uppercase text-[10px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(() => {
+                      const item = inventory.find(i => i.id === opnameForm.itemId);
+                      const base = item?.unit || 'pcs';
+                      const units = getAllowedUnitsForItem(base);
+                      // Add custom display unit if it's not in the standard list
+                      if (item?.display_unit && !units.includes(item.display_unit as any)) {
+                        units.push(item.display_unit as any);
+                      }
+                      return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
-              <Label>Notes / Reason</Label>
-              <Textarea placeholder="Explain any discrepancies..." value={opnameForm.reason} onChange={(e) => setOpnameForm(p => ({ ...p, reason: e.target.value }))} />
+              <Label>{(parseFloat(opnameForm.actualStock) || 0) < opnameForm.theoreticalStock ? 'Waste Category' : 'Notes / Reason'}</Label>
+              {parseFloat(opnameForm.actualStock) < opnameForm.theoreticalStock ? (
+                <Select value={opnameForm.reason} onValueChange={(v) => setOpnameForm(p => ({ ...p, reason: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Pilih kategori waste..."/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Basi/Expired">Basi/Expired</SelectItem>
+                    <SelectItem value="Rusak">Rusak</SelectItem>
+                    <SelectItem value="Terbuang Operasional">Terbuang Operasional</SelectItem>
+                    <SelectItem value="Salah Produksi">Salah Produksi</SelectItem>
+                    <SelectItem value="Shrinkage">Penyusutan (Shrinkage)</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Textarea placeholder="Explain any discrepancies..." value={opnameForm.reason} onChange={(e) => setOpnameForm(p => ({ ...p, reason: e.target.value }))} />
+              )}
             </div>
           </div>
           <DialogFooter><Button onClick={handleAddOpname}>Record Audit</Button></DialogFooter>

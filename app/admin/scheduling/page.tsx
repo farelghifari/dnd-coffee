@@ -129,7 +129,9 @@ export default function SchedulingPage() {
 
   // Get shifts for a specific date
   const getShiftsForDate = (dateStr: string) => {
-    return shiftAssignments.filter(shift => shift.date === dateStr)
+    return shiftAssignments
+      .filter(shift => shift.date === dateStr)
+      .sort((a, b) => a.start_time.localeCompare(b.start_time))
   }
 
   // Navigate weeks

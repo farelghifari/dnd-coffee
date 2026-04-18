@@ -95,13 +95,14 @@ export default function BatchesPage() {
   const { isSuperAdmin } = useAuth()
   const canEdit = isSuperAdmin()
   
-  const [batches, setBatches] = useState<InventoryBatch[]>([])
+  const [batches, setBatches] = useState<(InventoryBatch & { category?: string })[]>([])
   const [movements, setMovements] = useState<BatchMovement[]>([])
   const [inventoryList, setInventoryList] = useState<InventoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedStatus, setSelectedStatus] = useState<string>("all")
   const [selectedItem, setSelectedItem] = useState<string>("all")
-  const [selectedBatch, setSelectedBatch] = useState<InventoryBatch | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string>("all")
+  const [selectedBatch, setSelectedBatch] = useState<(InventoryBatch & { category?: string }) | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -112,18 +113,21 @@ export default function BatchesPage() {
         getBatches(),
         getInventory()
       ])
-      const mappedBatches: InventoryBatch[] = fetchedBatches.map((b: any) => {
+      const mappedBatches: (InventoryBatch & { category?: string })[] = fetchedBatches.map((b: any) => {
         let status: BatchStatus = "active"
         const remaining = Number(b.remaining_quantity)
         const daysToExpiry = getDaysUntilExpiry(b.expired_date)
         if (remaining <= 0) status = "depleted"
         else if (daysToExpiry <= 0) status = "expired"
 
+        const item = fetchedInventory.find((i: any) => i.id === b.item_id)
+
         return {
           id: b.id,
           batchNumber: b.batch_number,
           inventoryItemId: b.item_id,
           inventoryItemName: b.inventory_items?.name || 'Unknown',
+          category: item?.category || 'other',
           supplier: b.supplier_name,
           initialQuantity: Number(b.quantity),
           currentQuantity: remaining,
@@ -160,14 +164,15 @@ export default function BatchesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Filter batches
-  const filteredBatches = batches.filter((batch) => {
+  const filteredBatches = (batches as (InventoryBatch & { category?: string })[]).filter((batch) => {
     const matchesSearch = 
       (batch.batchNumber || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (batch.inventoryItemName || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (batch.supplier || "").toLowerCase().includes(searchQuery.toLowerCase())
     const matchesStatus = selectedStatus === "all" || batch.status === selectedStatus
+    const matchesCategory = selectedCategory === "all" || batch.category === selectedCategory
     const matchesItem = selectedItem === "all" || batch.inventoryItemId === selectedItem
-    return matchesSearch && matchesStatus && matchesItem
+    return matchesSearch && matchesStatus && matchesCategory && matchesItem
   })
 
   // Get expiring soon batches (within 7 days)
@@ -432,20 +437,37 @@ export default function BatchesPage() {
                 className="pl-9 rounded-sm"
               />
             </div>
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <SelectTrigger className="w-full sm:w-40 rounded-sm">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="beans">Beans</SelectItem>
+                <SelectItem value="milk">Milk</SelectItem>
+                <SelectItem value="syrup">Syrup</SelectItem>
+                <SelectItem value="cups">Cups</SelectItem>
+                <SelectItem value="food">Food</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={selectedItem} onValueChange={setSelectedItem}>
               <SelectTrigger className="w-full sm:w-48 rounded-sm">
-                <SelectValue placeholder="Filter by item" />
+                <SelectValue placeholder="Item" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Items</SelectItem>
-                {inventoryList.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
-                ))}
+                {inventoryList
+                  .filter(item => selectedCategory === "all" || item.category === selectedCategory)
+                  .map((item) => (
+                    <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                  ))
+                }
               </SelectContent>
             </Select>
             <Select value={selectedStatus} onValueChange={setSelectedStatus}>
               <SelectTrigger className="w-full sm:w-40 rounded-sm">
-                <SelectValue placeholder="Filter by status" />
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
@@ -490,7 +512,12 @@ export default function BatchesPage() {
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => openBatchDetail(batch)}
                       >
-                        <TableCell className="font-medium">{batch.batchNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col">
+                            <span>{batch.batchNumber}</span>
+                            <span className="text-[10px] uppercase text-muted-foreground font-semibold">{(batch as any).category}</span>
+                          </div>
+                        </TableCell>
                         <TableCell>{batch.inventoryItemName}</TableCell>
                         <TableCell className="text-muted-foreground">{batch.supplier}</TableCell>
                         <TableCell className="text-right">
