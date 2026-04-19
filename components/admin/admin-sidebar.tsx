@@ -38,6 +38,7 @@ const baseNavItems = [
   { href: "/admin/attendance-report", label: "Attendance Report", icon: ClipboardList },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/forecasting", label: "Forecasting", icon: TrendingUp },
+  { href: "/admin/outlets", label: "Outlets", icon: Layers },
   { href: "/admin/logs", label: "Logs", icon: ClipboardList },
 ]
 

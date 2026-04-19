@@ -12,17 +12,23 @@ import {
   getOverallStockHealth,
   getStockHealth,
   getShiftConfigs,
-  getAttendanceStats,
-  getEmployeePayrolls,
-  getOvertimeRequests,
-  calculateRegulatedSession,
-  type Employee,
-  type AttendanceLog,
+   getAttendanceStats,
+   getEmployeePayrolls,
+   getOvertimeRequests,
+   addOvertimeRequest,
+   hasShiftOnDate,
+   getDailyWorkDuration,
+   calculateRegulatedSession,
+   getOutlets,
+   addAttendanceLog,
+   type Employee,
+   type AttendanceLog,
   type InventoryItem,
   type ShiftAssignment,
   type ShiftConfig,
   type PayrollRecord,
-  type OvertimeRequest
+  type OvertimeRequest,
+  type Outlet
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -38,12 +44,16 @@ import {
   TrendingUp,
   LayoutDashboard,
   Wallet,
-  Users
+  Users,
+  MapPin,
+  Navigation,
+  Locate
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { format } from "date-fns"
-import { cn, getLocalYYYYMMDD } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD, calculateDistance } from "@/lib/utils"
+import { toast } from "sonner"
 
 export default function EmployeeDashboard() {
   const { user, canAccessAdmin } = useAuth()
@@ -64,6 +74,12 @@ export default function EmployeeDashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [myPayrolls, setMyPayrolls] = useState<PayrollRecord[]>([])
   const [overtimeRequests, setOvertimeRequests] = useState<OvertimeRequest[]>([])
+  const [outlets, setOutlets] = useState<Outlet[]>([])
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [nearestOutlet, setNearestOutlet] = useState<{ outlet: Outlet; distance: number } | null>(null)
+  const [isLocating, setIsLocating] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [locationError, setLocationError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -74,7 +90,7 @@ export default function EmployeeDashboard() {
 
       setIsLoading(true)
       
-      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData, otData] = await Promise.all([
+      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData, otData, outletsData] = await Promise.all([
         getEmployeeById(user.employeeId),
         getAttendanceByEmployee(user.employeeId),
         getShiftsByEmployee(user.employeeId),
@@ -83,7 +99,8 @@ export default function EmployeeDashboard() {
         getShiftConfigs(),
         getAttendanceStats(user.employeeId),
         getEmployeePayrolls(user.employeeId),
-        getOvertimeRequests()
+        getOvertimeRequests(),
+        getOutlets()
       ])
 
 
@@ -96,12 +113,62 @@ export default function EmployeeDashboard() {
       setPerformanceStats(statsData as any)
       setMyPayrolls(payrollData)
       setOvertimeRequests(otData)
+      setOutlets(outletsData)
       setIsLoading(false)
 
     }
 
     fetchData()
   }, [user?.employeeId])
+
+  // Get current location periodically or on mount
+  useEffect(() => {
+    if (outlets.length === 0) return
+
+    const getPosition = () => {
+      setIsLocating(true)
+      setLocationError(null)
+      
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude
+          const lng = position.coords.longitude
+          setUserLocation({ lat, lng })
+          
+          // Find nearest outlet
+          let minDistance = Infinity
+          let closest: Outlet | null = null
+          
+          outlets.filter(o => o.is_active).forEach(outlet => {
+            const dist = calculateDistance(lat, lng, outlet.latitude, outlet.longitude)
+            if (dist < minDistance) {
+              minDistance = dist
+              closest = outlet
+            }
+          })
+          
+          if (closest) {
+            setNearestOutlet({ outlet: closest, distance: minDistance })
+          }
+          setIsLocating(false)
+        },
+        (error) => {
+          let msg = "Could not get location"
+          if (error.code === 1) msg = "Location access denied"
+          else if (error.code === 2) msg = "Location unavailable"
+          else if (error.code === 3) msg = "Location timeout"
+          
+          setLocationError(msg)
+          setIsLocating(false)
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      )
+    }
+
+    getPosition()
+    const interval = setInterval(getPosition, 60000) // Refresh location every minute
+    return () => clearInterval(interval)
+  }, [outlets])
 
   // Get today's attendance
   const today = getLocalYYYYMMDD()
@@ -150,15 +217,75 @@ export default function EmployeeDashboard() {
     const [startH, startM] = startTime.split(":").map(Number)
     const [endH, endM] = endTime.split(":").map(Number)
     
-    let startMinutes = startH * 60 + startM
-    let endMinutes = endH * 60 + endM
-    
-    // Handle overnight shifts
-    if (endMinutes < startMinutes) {
-      endMinutes += 24 * 60
+    let diff = (endH * 60 + endM) - (startH * 60 + startM)
+    if (diff < 0) diff += 24 * 60 // Handle overnight shifts
+    return diff / 60
+  }
+
+  const handleClockAction = async (type: "clock-in" | "clock-out") => {
+    if (!user?.employeeId || !userLocation || !nearestOutlet) {
+      toast.error("Required data missing. Ensure GPS is enabled.")
+      return
     }
+
+    // Validate distance
+    if (nearestOutlet.distance > nearestOutlet.outlet.radius_meters) {
+      toast.error(`You are too far from ${nearestOutlet.outlet.name} (${Math.round(nearestOutlet.distance)}m away)`)
+      return
+    }
+
+    setIsSubmitting(true)
+
+    // Capture device info
+    const deviceInfo = `${navigator.platform} - ${navigator.userAgent.split(')')[0].split('(')[1]}`
     
-    return (endMinutes - startMinutes) / 60
+    try {
+      const today = getLocalYYYYMMDD()
+      const hasShift = await hasShiftOnDate(user.employeeId, today)
+      
+      const attendanceLog = await addAttendanceLog({
+        employee_id: user.employeeId,
+        employee_name: employee?.name || user.name,
+        type,
+        method: 'personal',
+        device_info: deviceInfo,
+        latitude: userLocation.lat,
+        longitude: userLocation.lng,
+        outlet_id: nearestOutlet.outlet.id,
+        is_ops_device: false
+      })
+
+      if (type === "clock-in") {
+        const duration = await getDailyWorkDuration(user.employeeId, today)
+        
+        if (hasShift) {
+          if (duration.isLate) {
+            toast.warning(`Clocked in successfully — LATE (> 15 mins)`)
+          } else {
+            toast.success(`Clocked in successfully — Punctual`)
+          }
+        } else {
+          // No shift - create overtime request
+          if (attendanceLog) {
+            await addOvertimeRequest({
+              employee_id: user.employeeId,
+              employee_name: employee?.name || user.name || "Unknown",
+              attendance_log_id: attendanceLog.id,
+              request_date: today,
+              clock_in_time: new Date().toISOString(),
+              status: "pending"
+            })
+          }
+          toast.warning("Clocked in (No shift scheduled — Overtime request submitted for approval)")
+        }
+      } else {
+        toast.error("Failed to record attendance")
+      }
+    } catch (error) {
+      toast.error("An error occurred")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Determine shift type based on duration: >= 8 hours = Full Time, < 8 hours = Part Time
@@ -260,15 +387,15 @@ export default function EmployeeDashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* Clock Status */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 text-primary font-bold">
             <CardTitle className="text-sm font-medium">Clock Status</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
+            <Clock className="h-4 w-4" />
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2">
               {clockedIn ? (
                 <>
-                  <Badge variant="default" className="bg-green-500 hover:bg-green-600">
+                  <Badge variant="default" className="bg-green-500 hover:bg-green-600 rounded-sm">
                     Clocked In
                   </Badge>
                   <span className="text-xs text-muted-foreground">
@@ -276,8 +403,68 @@ export default function EmployeeDashboard() {
                   </span>
                 </>
               ) : (
-                <Badge variant="secondary">Not Clocked In</Badge>
+                <Badge variant="secondary" className="rounded-sm">Not Clocked In</Badge>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Mobile Attendance Control */}
+        <Card className="border-primary/20 shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Mobile Attendance</CardTitle>
+            <Navigation className={cn("h-4 w-4", nearestOutlet ? "text-primary" : "text-muted-foreground")} />
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                {isLocating ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="w-3 h-3 border-2 border-primary border-t-transparent animate-spin rounded-full" />
+                    Locating...
+                  </div>
+                ) : nearestOutlet ? (
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5 overflow-hidden">
+                      <MapPin className="w-3 h-3 text-primary shrink-0" />
+                      <span className="text-xs font-medium truncate">{nearestOutlet.outlet.name}</span>
+                    </div>
+                    <span className={cn(
+                      "text-[10px] font-mono",
+                      nearestOutlet.distance <= nearestOutlet.outlet.radius_meters 
+                        ? "text-green-500" 
+                        : "text-destructive"
+                    )}>
+                      {Math.round(nearestOutlet.distance)}m away (Radius: {nearestOutlet.outlet.radius_meters}m)
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertTriangle className="w-3 h-3" />
+                    {locationError || "Location Required"}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button 
+                  size="sm" 
+                  className="h-8 rounded-sm text-[11px]" 
+                  disabled={clockedIn || isSubmitting || !nearestOutlet || nearestOutlet.distance > nearestOutlet.outlet.radius_meters}
+                  onClick={() => handleClockAction("clock-in")}
+                >
+                  {isSubmitting ? "..." : "Clock In"}
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="h-8 rounded-sm text-[11px]" 
+                  disabled={!clockedIn || isSubmitting || !nearestOutlet || nearestOutlet.distance > nearestOutlet.outlet.radius_meters}
+                  onClick={() => handleClockAction("clock-out")}
+                >
+                  {isSubmitting ? "..." : "Clock Out"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -475,7 +662,6 @@ export default function EmployeeDashboard() {
                             // Dangling clock-in, close previous
                             const otReq = otMap.get(currentIn.id)
                             const session = calculateRegulatedSession(currentIn, null, shift, otReq?.status || 'none')
-                            allProcessed.push({ ...currentIn })
                             if (session.isAutoClockOut && session.clockOut) {
                               allProcessed.push({
                                 id: `virtual-${currentIn.id}`,

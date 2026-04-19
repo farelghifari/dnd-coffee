@@ -6,8 +6,10 @@ import {
   getEmployees,
   getShiftAssignments,
   addAttendanceLog,
+  getOutlets,
   type Employee,
-  type ShiftAssignment
+  type ShiftAssignment,
+  type Outlet
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,17 +19,20 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { 
-  Users, 
-  CalendarIcon, 
-  Clock, 
-  Search, 
+  ShieldAlert,
+  Timer as TimerIcon,
+  Smartphone,
+  Fingerprint,
+  Info,
+  Users,
+  CalendarIcon,
+  Clock,
+  Search,
   AlertTriangle,
   FileText,
   Download,
   ChevronLeft,
-  ChevronRight,
-  ShieldAlert,
-  Timer as TimerIcon
+  ChevronRight
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, startOfMonth, endOfMonth, isSameDay, subDays, addDays, parseISO } from "date-fns"
@@ -43,6 +48,7 @@ export default function AttendanceReportPage() {
   })
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
+  const [outlets, setOutlets] = useState<Outlet[]>([])
   
   // Resolve Absent Modal State
   const [resolveModalOpen, setResolveModalOpen] = useState(false)
@@ -53,17 +59,19 @@ export default function AttendanceReportPage() {
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
-      const [empData, shiftData, initialReport] = await Promise.all([
+      const [empData, shiftData, initialReport, outletsData] = await Promise.all([
         getEmployees(),
         getShiftAssignments(),
         getAttendanceReportData(
           format(dateRange.from, "yyyy-MM-dd"),
           format(dateRange.to, "yyyy-MM-dd")
-        )
+        ),
+        getOutlets()
       ])
       setEmployees(empData)
       setShifts(shiftData)
       setReportData(initialReport)
+      setOutlets(outletsData)
       setIsLoading(false)
     }
     fetchData()
@@ -357,7 +365,8 @@ export default function AttendanceReportPage() {
                 <th className="text-left p-4 font-medium text-sm text-muted-foreground">Date</th>
                 <th className="text-left p-4 font-medium text-sm text-muted-foreground">Shift</th>
                 <th className="text-left p-4 font-medium text-sm text-muted-foreground">Actual Clock</th>
-                 <th className="text-center p-4 font-medium text-sm text-muted-foreground">Performance</th>
+                <th className="text-center p-4 font-medium text-sm text-muted-foreground">Method</th>
+                <th className="text-center p-4 font-medium text-sm text-muted-foreground">Performance</th>
                 <th className="text-right p-4 font-medium text-sm text-muted-foreground">Reg. Hours</th>
                 <th className="text-right p-4 font-medium text-sm text-muted-foreground">OT Hours</th>
                 <th className="text-right p-4 font-medium text-sm text-muted-foreground">Total Hours</th>
@@ -434,6 +443,8 @@ export default function AttendanceReportPage() {
                                    ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
                                    : (!shift && row.sessions[0]?.otStatus === 'rejected') ? (
                                      <span className="text-destructive font-bold text-[10px] uppercase tracking-wider bg-destructive/10 px-1 py-0.5 rounded-sm">Rejected</span>
+                                   ) : (!shift && (row.sessions[0]?.otStatus === 'pending' || row.sessions[0]?.otStatus === 'none')) ? (
+                                     <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending OT</span>
                                    ) : "Active"}
                                </span>
                             </div>
@@ -444,6 +455,59 @@ export default function AttendanceReportPage() {
                             )}
                           </div>
                         )}
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="flex flex-col items-center gap-0.5 hover:bg-muted p-1 rounded-md transition-colors">
+                                {row.method === 'personal' ? (
+                                  <>
+                                    <Smartphone className="w-4 h-4 text-primary" />
+                                    <span className="text-[9px] font-bold text-primary uppercase">Mobile</span>
+                                  </>
+                                ) : row.method === 'nfc' ? (
+                                  <>
+                                    <Fingerprint className="w-4 h-4 text-orange-500" />
+                                    <span className="text-[9px] font-bold text-orange-600 uppercase tracking-tighter">OPS NFC</span>
+                                  </>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-64 p-4 rounded-sm shadow-xl border-primary/20" align="center">
+                              <div className="space-y-3">
+                                <div className="flex items-center gap-2 border-b pb-2">
+                                  <Info className="w-4 h-4 text-primary" />
+                                  <h4 className="font-bold text-sm tracking-tight">Clock-in Metadata</h4>
+                                </div>
+                                
+                                <div className="grid grid-cols-3 gap-y-2 text-xs">
+                                  <span className="text-muted-foreground">Method</span>
+                                  <span className="col-span-2 font-medium capitalize">{row.method || 'NFC (System)'}</span>
+                                  
+                                  <span className="text-muted-foreground">Outlet</span>
+                                  <span className="col-span-2 font-medium">{outlets.find(o => o.id === row.outletId)?.name || 'Main Outlet / Onsite'}</span>
+                                  
+                                  <span className="text-muted-foreground">Device</span>
+                                  <span className="col-span-2 font-mono text-[10px] break-all leading-tight">
+                                    {row.deviceInfo || (row.method === 'nfc' ? 'Operational Terminal' : 'Unknown')}
+                                  </span>
+                                  
+                                  <span className="text-muted-foreground">IP Addr</span>
+                                  <span className="col-span-2 font-mono text-[10px]">{row.sessions?.[0]?.ipAddress || '—'}</span>
+                                </div>
+
+                                {row.method === 'personal' && row.sessions?.[0]?.latitude && (
+                                  <div className="pt-2 border-t text-[10px] text-muted-foreground italic">
+                                    Coord: {row.sessions[0].latitude}, {row.sessions[0].longitude}
+                                  </div>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
                       </td>
                        <td className="p-4 text-center">
                         <div className="flex justify-center gap-2">

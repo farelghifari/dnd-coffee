@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation"
 import { useEffect } from "react"
 import { Spinner } from "@/components/ui/spinner"
 import { Toaster } from "@/components/ui/sonner"
+import { NotificationBell } from "@/components/admin/notification-bell"
 
 function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   const { user, isLoading, canAccessAdmin, isSuperAdmin } = useAuth()
@@ -45,11 +46,16 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen bg-background flex overflow-hidden">
       <AdminSidebar />
-      <main className="flex-1 p-6 md:p-8 overflow-auto">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-16 border-b border-border flex items-center justify-end px-6 md:px-8 bg-card/50 backdrop-blur-sm z-10 shrink-0">
+          <NotificationBell />
+        </header>
+        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+          {children}
+        </main>
+      </div>
       <Toaster />
     </div>
   )

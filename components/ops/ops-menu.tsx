@@ -117,7 +117,9 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         const attendanceLog = await addAttendanceLog({
           employee_id: employeeId,
           employee_name: employeeName,
-          type: selectedAction
+          type: selectedAction,
+          method: 'nfc',
+          is_ops_device: true
         })
         
         // Calculate current status (lateness etc)
@@ -149,7 +151,9 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         await addAttendanceLog({
           employee_id: employeeId,
           employee_name: employeeName,
-          type: selectedAction
+          type: selectedAction,
+          method: 'nfc',
+          is_ops_device: true
         })
         
         // Calculate regulated duration

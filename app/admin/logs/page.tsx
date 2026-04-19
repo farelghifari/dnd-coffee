@@ -57,9 +57,12 @@ import {
   ShieldCheck,
   Settings,
   CalendarDays,
-  Clock,
   Coffee,
-  ShoppingCart
+  ShoppingCart,
+  Smartphone,
+  Fingerprint,
+  MapPin,
+  Clock
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
@@ -133,12 +136,27 @@ export default function LogsPage() {
   }, [])
 
   // Format price in IDR (Rupiah) - no decimals
-  const formatPrice = (price: number) => {
+  const formatPrice = (price: number | undefined | null) => {
+    if (price == null || isNaN(price)) return "Rp 0"
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
       currency: "IDR",
       minimumFractionDigits: 0,
     }).format(price)
+  }
+
+  const safeFormatTime = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "--:--"
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return "--:--"
+    return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })
+  }
+
+  const safeFormatDate = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "Unknown Date"
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return "Unknown Date"
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
 
   // Filter stock logs by date and other criteria
@@ -621,17 +639,10 @@ export default function LogsPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-mono">
-                          {new Date(log.timestamp).toLocaleTimeString("en-US", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false
-                          })}
+                          {safeFormatTime(log.timestamp)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(log.timestamp).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric"
-                          })}
+                          {safeFormatDate(log.timestamp)}
                         </p>
                       </div>
                     </div>
@@ -685,6 +696,25 @@ export default function LogsPage() {
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
                               <p className="font-medium text-lg leading-none">{log.employee_name || "Unknown"}</p>
+                              <div className="flex items-center gap-1.5 ml-2">
+                                {log.method === 'personal' ? (
+                                  <Badge className="bg-primary/10 text-primary border-primary/20 flex gap-1 items-center px-1.5 h-5 rounded-sm">
+                                    <Smartphone className="w-3 h-3" />
+                                    <span className="text-[10px] font-bold uppercase">Mobile</span>
+                                  </Badge>
+                                ) : (
+                                  <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 flex gap-1 items-center px-1.5 h-5 rounded-sm">
+                                    <Fingerprint className="w-3 h-3" />
+                                    <span className="text-[10px] font-bold uppercase">OPS NFC</span>
+                                  </Badge>
+                                )}
+                                {log.outlet_id && (
+                                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <MapPin className="w-2.5 h-2.5" />
+                                    Loc ID: {log.outlet_id.substring(0,8)}
+                                  </span>
+                                )}
+                              </div>
                               {log.status === "rejected" ? (
                                 <Badge variant="destructive" className="text-[10px] h-4 rounded-none uppercase">REJECTED</Badge>
                               ) : log.status === "approved" ? (
@@ -738,17 +768,10 @@ export default function LogsPage() {
                         <div className="flex items-center gap-6">
                           <div className="text-right">
                             <p className="text-sm font-mono font-medium">
-                              {new Date(log.timestamp).toLocaleTimeString("en-US", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: false
-                              })}
+                              {safeFormatTime(log.timestamp)}
                             </p>
                             <p className="text-xs text-muted-foreground uppercase tracking-widest">
-                              {new Date(log.timestamp).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric"
-                              })}
+                              {safeFormatDate(log.timestamp)}
                             </p>
                           </div>
                           
@@ -826,17 +849,10 @@ export default function LogsPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-mono font-medium">
-                          {new Date(log.created_at).toLocaleTimeString("en-US", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false
-                          })}
+                          {safeFormatTime(log.created_at)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(log.created_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric"
-                          })}
+                          {safeFormatDate(log.created_at)}
                         </p>
                       </div>
                     </div>
@@ -884,17 +900,10 @@ export default function LogsPage() {
                       </div>
                       <div className="text-right">
                         <p className="text-sm font-mono">
-                          {new Date(log.timestamp).toLocaleTimeString("en-US", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false
-                          })}
+                          {safeFormatTime(log.timestamp)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date(log.timestamp).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric"
-                          })}
+                          {safeFormatDate(log.timestamp)}
                         </p>
                       </div>
                     </div>

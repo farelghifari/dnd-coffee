@@ -21,7 +21,8 @@ const STORAGE_KEYS = {
   shiftAssignments: "dnd_shift_assignments",
   overtimeRequests: "dnd_overtime_requests",
   shiftConfigs: "dnd_shift_configs",
-  systemLogs: "dnd_system_logs"
+  systemLogs: "dnd_system_logs",
+  outlets: "dnd_outlets"
 }
 
 // Helper to safely get from localStorage
@@ -272,6 +273,16 @@ export interface StockLog {
   notes?: string
 }
 
+export interface Outlet {
+  id: string
+  name: string
+  latitude: number
+  longitude: number
+  radius_meters: number
+  is_active: boolean
+  created_at?: string
+}
+
 // DB Schema: attendance_logs(id, employee_id, date, time, action, status)
 export interface AttendanceLog {
   id: string
@@ -281,6 +292,14 @@ export interface AttendanceLog {
   timestamp: string
   action: "clock-in" | "clock-out"
   status: string
+  // New metadata
+  method?: 'personal' | 'nfc'
+  device_info?: string
+  latitude?: number
+  longitude?: number
+  ip_address?: string
+  outlet_id?: string
+  is_ops_device?: boolean
   // For local/fallback compatibility
   employee_name?: string
   type?: "clock-in" | "clock-out"
@@ -1990,7 +2009,21 @@ export async function getAttendanceByEmployee(employeeId: string): Promise<Atten
 }
 
 // ATTENDANCE FIX - Clock In/Out must insert: employee_id, employee_name, date (today), time (now), action, status
-export async function addAttendanceLog(log: { employee_id: string; employee_name?: string; type: "clock-in" | "clock-out", manual_date?: string, manual_time?: string }): Promise<AttendanceLog | null> {
+// ATTENDANCE FIX - Clock In/Out must insert: employee_id, employee_name, date (today), time (now), action, status
+export async function addAttendanceLog(log: { 
+  employee_id: string; 
+  employee_name?: string; 
+  type: "clock-in" | "clock-out"; 
+  manual_date?: string; 
+  manual_time?: string;
+  method?: 'personal' | 'nfc';
+  device_info?: string;
+  latitude?: number;
+  longitude?: number;
+  ip_address?: string;
+  outlet_id?: string;
+  is_ops_device?: boolean;
+}): Promise<AttendanceLog | null> {
   const now = new Date()
   const date = log.manual_date || now.toISOString().split('T')[0]
   const time = log.manual_time || now.toTimeString().split(' ')[0]
@@ -2004,7 +2037,14 @@ export async function addAttendanceLog(log: { employee_id: string; employee_name
         date: date,
         time: time,
         action: log.type,
-        status: 'present'
+        status: 'present',
+        method: log.method || 'nfc',
+        device_info: log.device_info,
+        latitude: log.latitude,
+        longitude: log.longitude,
+        ip_address: log.ip_address,
+        outlet_id: log.outlet_id,
+        is_ops_device: log.is_ops_device || false
       }])
       .select()
       .single()
@@ -2033,7 +2073,14 @@ export async function addAttendanceLog(log: { employee_id: string; employee_name
     action: log.type,
     status: 'present',
     type: log.type,
-    timestamp: `${date}T${time}`
+    timestamp: `${date}T${time}`,
+    method: log.method || 'nfc',
+    device_info: log.device_info,
+    latitude: log.latitude,
+    longitude: log.longitude,
+    ip_address: log.ip_address,
+    outlet_id: log.outlet_id,
+    is_ops_device: log.is_ops_device || false
   }
   logs.unshift(newLog)
   setStoredData(STORAGE_KEYS.attendanceLogs, logs)
@@ -2230,7 +2277,11 @@ export function calculateRegulatedSession(
     lateMinutes,
     isPenalty,
     isAutoClockOut,
-    otStatus
+    otStatus,
+    method: clockInLog?.method || clockOutLog?.method,
+    deviceInfo: clockInLog?.device_info || clockOutLog?.device_info,
+    ipAddress: clockInLog?.ip_address || clockOutLog?.ip_address,
+    outletId: clockInLog?.outlet_id || clockOutLog?.outlet_id
   }
 }
 
@@ -2348,8 +2399,13 @@ export async function getAttendanceReportData(startDate: string, endDate: string
       
       if (empDayLogs.length > 0) {
         // Calculate duration logic fully in-memory
-        const sessions: any[] = []
+        const dailySessions: any[] = []
         let currentInLog: AttendanceLog | null = null
+        let dayIsLate = false
+        let dayIsPenalty = false
+        let rowMethod: string | undefined
+        let rowDeviceInfo: string | undefined
+        let rowOutletId: string | undefined
 
         const sortedLogs = [...empDayLogs].sort((a, b) => 
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -2364,8 +2420,15 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             const otReq = otMap.get(currentInLog.id)
             const otStatus = otReq?.status || 'none'
 
-            const sessionData = calculateRegulatedSession(currentInLog, log, empDayShift, otStatus)
-            sessions.push(sessionData)
+            const session = calculateRegulatedSession(currentInLog, log, empDayShift, otStatus)
+            dailySessions.push(session)
+            
+            if (session.isLate) dayIsLate = true
+            if (session.isPenalty) dayIsPenalty = true
+            if (!rowMethod) rowMethod = session.method
+            if (!rowDeviceInfo) rowDeviceInfo = session.deviceInfo
+            if (!rowOutletId) rowOutletId = session.outletId
+            
             currentInLog = null
           }
         }
@@ -2373,19 +2436,23 @@ export async function getAttendanceReportData(startDate: string, endDate: string
         if (currentInLog) {
           const otReq = otMap.get(currentInLog.id)
           const otStatus = otReq?.status || 'none'
-          const sessionData = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus)
-          sessions.push(sessionData)
+          const session = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus)
+          dailySessions.push(session)
+          
+          if (session.isLate) dayIsLate = true
+          if (session.isPenalty) dayIsPenalty = true
+          if (!rowMethod) rowMethod = session.method
+          if (!rowDeviceInfo) rowDeviceInfo = session.deviceInfo
+          if (!rowOutletId) rowOutletId = session.outletId
         }
 
-        if (sessions.length > 0) {
-          let regularMinutes = sessions.reduce((sum, s) => sum + s.regularMinutes, 0)
+        if (dailySessions.length > 0) {
+          let regularMinutes = dailySessions.reduce((sum, s) => sum + s.regularMinutes, 0)
           // Rule 1: Max 8 hours per day
           regularMinutes = Math.min(regularMinutes, 480)
           
-          const overtimeMinutes = sessions.reduce((sum, s) => sum + s.overtimeMinutes, 0)
-          const isLate = sessions.some(s => s.isLate)
-          const isPenalty = sessions.some(s => s.isPenalty)
-          const lateMinutes = sessions.reduce((max, s) => Math.max(max, s.lateMinutes || 0), 0)
+          const overtimeMinutes = dailySessions.reduce((sum, s) => sum + s.overtimeMinutes, 0)
+          const lateMinutes = dailySessions.reduce((max, s) => Math.max(max, s.lateMinutes || 0), 0)
 
           report.push({
             employee_id: emp.id,
@@ -2393,11 +2460,14 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             date: dateStr,
             regularMinutes,
             overtimeMinutes,
-            isLate,
-            isPenalty,
+            isLate: dayIsLate,
+            isPenalty: dayIsPenalty,
             lateMinutes,
             isAbsent: false,
-            sessions
+            sessions: dailySessions,
+            method: rowMethod,
+            deviceInfo: rowDeviceInfo,
+            outletId: rowOutletId
           })
         }
       } else if (empDayShift) {
@@ -2909,6 +2979,80 @@ export async function updateShiftAssignment(id: string, updates: Partial<ShiftAs
   return shifts[index]
 }
 
+// ========== OUTLETS ==========
+
+export async function getOutlets(): Promise<Outlet[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('outlets')
+      .select('*')
+      .order('name', { ascending: true })
+    
+    if (error) {
+      console.error("ERROR (getOutlets):", error)
+      return []
+    }
+    return data || []
+  }
+  
+  return getStoredData(STORAGE_KEYS.outlets, [
+    { 
+      id: 'main-1', 
+      name: 'Main Outlet', 
+      latitude: -6.200000, 
+      longitude: 106.816666, 
+      radius_meters: 100, 
+      is_active: true 
+    }
+  ] as Outlet[])
+}
+
+export async function addOutlet(outlet: Omit<Outlet, 'id'>): Promise<Outlet | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('outlets')
+      .insert([outlet])
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (addOutlet):", error)
+      return null
+    }
+    return data
+  }
+  
+  const outlets = await getOutlets()
+  const newOutlet = { ...outlet, id: generateId('out') } as Outlet
+  outlets.push(newOutlet)
+  setStoredData(STORAGE_KEYS.outlets, outlets)
+  return newOutlet
+}
+
+export async function updateOutlet(id: string, updates: Partial<Outlet>): Promise<Outlet | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('outlets')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (updateOutlet):", error)
+      return null
+    }
+    return data
+  }
+  
+  const outlets = await getOutlets()
+  const index = outlets.findIndex(o => o.id === id)
+  if (index === -1) return null
+  outlets[index] = { ...outlets[index], ...updates }
+  setStoredData(STORAGE_KEYS.outlets, outlets)
+  return outlets[index]
+}
+
 // ========== OVERTIME REQUESTS ==========
 
 export async function getOvertimeRequests(): Promise<OvertimeRequest[]> {
@@ -3205,15 +3349,24 @@ export async function getOnShiftEmployees(): Promise<Employee[]> {
   yesterdayDate.setDate(yesterdayDate.getDate() - 1)
   const yesterday = getLocalYYYYMMDD(yesterdayDate)
   
-  // Fetch logs from both days to handle shifts that cross midnight
-  const [todayLogs, yesterdayLogs, employees] = await Promise.all([
+  // Fetch logs, shifts, and OT from both days to handle shifts that cross midnight and OT rules
+  const [todayLogs, yesterdayLogs, todayShifts, yesterdayShifts, todayOT, yesterdayOT, employees] = await Promise.all([
     getAttendanceLogsByDate(today),
     getAttendanceLogsByDate(yesterday),
+    getShiftAssignmentsInRange(today, today),
+    getShiftAssignmentsInRange(yesterday, yesterday),
+    getOvertimeRequestsInRange(today, today),
+    getOvertimeRequestsInRange(yesterday, yesterday),
     getActiveEmployees()
   ])
   
   const allLogs = [...yesterdayLogs, ...todayLogs]
+  const allShifts = [...yesterdayShifts, ...todayShifts]
+  const allOT = [...yesterdayOT, ...todayOT]
+  const otMap = new Map(allOT.map(r => [r.attendance_log_id, r]))
+  
   const clockedIn = new Set<string>()
+  const lastInLogs = new Map<string, AttendanceLog>()
   
   // Sort logs chronologically and process
   const sortedLogs = allLogs.sort((a, b) => {
@@ -3229,10 +3382,34 @@ export async function getOnShiftEmployees(): Promise<Employee[]> {
     const action = log.action || log.type
     if (action === "clock-in") {
       clockedIn.add(log.employee_id)
+      lastInLogs.set(log.employee_id, log)
     } else {
       clockedIn.delete(log.employee_id)
+      lastInLogs.delete(log.employee_id)
     }
   })
+
+  // Final validation: check for auto-tap-out (8-hour limit or shift end)
+  for (const empId of clockedIn) {
+    const lastInLog = lastInLogs.get(empId)
+    if (!lastInLog) continue
+
+    const empShift = allShifts.find(s => s.employee_id === empId && s.date === lastInLog.date)
+    const otReq = otMap.get(lastInLog.id)
+    
+    // Explicitly hide employees from "On Shift" if they don't have a shift 
+    // AND their overtime request is not yet approved.
+    if (!empShift && otReq?.status !== 'approved') {
+      clockedIn.delete(empId)
+      continue
+    }
+
+    // Reuse the regulation logic. If it determines an auto-clock-out, remove from list.
+    const session = calculateRegulatedSession(lastInLog, null, empShift, otReq?.status)
+    if (session.isAutoClockOut) {
+      clockedIn.delete(empId)
+    }
+  }
   
   return employees.filter(emp => clockedIn.has(emp.id))
 }
