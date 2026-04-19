@@ -8,6 +8,7 @@ import {
   getSalesLogs,
   getShiftAssignments,
   getOvertimeRequests,
+  getOutlets,
   updateAttendanceLogStatus,
   subscribeToInventoryTransactions,
   subscribeToAttendanceLogs,
@@ -20,6 +21,7 @@ import {
   type SalesLog,
   type ShiftAssignment,
   type OvertimeRequest,
+  type Outlet,
   type DisplayUnit
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -74,6 +76,7 @@ export default function LogsPage() {
   const [salesLogs, setSalesLogs] = useState<SalesLog[]>([])
   const [shiftAssignments, setShiftAssignments] = useState<ShiftAssignment[]>([])
   const [overtimeRequests, setOvertimeRequests] = useState<OvertimeRequest[]>([])
+  const [outlets, setOutlets] = useState<Outlet[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedType, setSelectedType] = useState<"all" | "in" | "out" | "waste" | "opname">("all")
   
@@ -92,13 +95,14 @@ export default function LogsPage() {
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
-      const [stockData, attendanceData, systemData, salesData, shiftData, otData] = await Promise.all([
+      const [stockData, attendanceData, systemData, salesData, shiftData, otData, outletData] = await Promise.all([
         getStockLogs(),
         getAttendanceLogs(),
         getSystemLogs(),
         getSalesLogs(),
         getShiftAssignments(),
-        getOvertimeRequests()
+        getOvertimeRequests(),
+        getOutlets()
       ])
       setStockLogs(stockData)
       setAttendanceLogs(attendanceData)
@@ -106,6 +110,7 @@ export default function LogsPage() {
       setSalesLogs(salesData)
       setShiftAssignments(shiftData)
       setOvertimeRequests(otData)
+      setOutlets(outletData)
       setIsLoading(false)
     }
     fetchData()
@@ -711,7 +716,7 @@ export default function LogsPage() {
                                 {log.outlet_id && (
                                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                                     <MapPin className="w-2.5 h-2.5" />
-                                    Loc ID: {log.outlet_id.substring(0,8)}
+                                    {outlets.find(o => o.id === log.outlet_id)?.name || `Loc: ${log.outlet_id.substring(0,8)}`}
                                   </span>
                                 )}
                               </div>

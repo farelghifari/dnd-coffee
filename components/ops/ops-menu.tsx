@@ -16,7 +16,7 @@ import {
 import { NFCModal } from "./nfc-modal"
 import { StockActionModal } from "./stock-action-modal"
 import { StockWidgets } from "./stock-widgets"
-import { cn } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import {
   getInventory,
   addAttendanceLog,
@@ -109,7 +109,7 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     
     if (selectedAction === "clock-in" || selectedAction === "clock-out") {
       // Check if employee has a shift today for clock-in
-      const today = new Date().toISOString().split("T")[0]
+      const today = getLocalYYYYMMDD()
       const hasShift = await hasShiftOnDate(employeeId, today)
 
       if (selectedAction === "clock-in") {

@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { getOvertimeRequests, getLowStockItems, getInventory, type OvertimeRequest } from "@/lib/api/supabase-service"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 
 export function NotificationBell() {
   const [pendingOvertimes, setPendingOvertimes] = useState<OvertimeRequest[]>([])
@@ -106,12 +107,10 @@ export function NotificationBell() {
             ) : (
               <div className="flex flex-col">
                 {pendingOvertimes.length > 0 && (
-                  <button 
-                    onClick={() => {
-                      setIsOpen(false)
-                      router.push('/admin/attendance-report?tab=overtime')
-                    }}
-                    className="p-4 text-left hover:bg-muted/50 border-b border-border transition-colors group"
+                  <Link 
+                    href="/admin/overtime"
+                    onClick={() => setIsOpen(false)}
+                    className="p-4 text-left hover:bg-muted/50 border-b border-border transition-colors group block"
                   >
                     <div className="flex justify-between items-start mb-1">
                       <span className="font-medium text-sm text-foreground group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">Pending Overtime Request</span>
@@ -120,16 +119,14 @@ export function NotificationBell() {
                     <p className="text-xs text-muted-foreground">
                       You have {pendingOvertimes.length} overtime request(s) awaiting your approval.
                     </p>
-                  </button>
+                  </Link>
                 )}
                 
                 {lowStockCount > 0 && (
-                  <button 
-                    onClick={() => {
-                      setIsOpen(false)
-                      router.push('/admin/inventory')
-                    }}
-                    className="p-4 text-left hover:bg-muted/50 transition-colors group"
+                  <Link 
+                    href="/admin/inventory"
+                    onClick={() => setIsOpen(false)}
+                    className="p-4 text-left hover:bg-muted/50 transition-colors group block"
                   >
                     <div className="flex justify-between items-start mb-1">
                       <span className="font-medium text-sm text-foreground group-hover:text-destructive transition-colors">Low Inventory Stock</span>
@@ -138,7 +135,7 @@ export function NotificationBell() {
                     <p className="text-xs text-muted-foreground">
                       {lowStockCount} items have reached their minimum stock threshold.
                     </p>
-                  </button>
+                  </Link>
                 )}
               </div>
             )}

@@ -1945,7 +1945,7 @@ export async function getAttendanceLogs(): Promise<AttendanceLog[]> {
     id: log.id,
     employee_id: 'employee_id' in log ? log.employee_id : (log as { employeeId: string }).employeeId,
     employee_name: 'employee_name' in log ? log.employee_name : (log as { employeeName: string }).employeeName,
-    date: log.timestamp?.split('T')[0] || new Date().toISOString().split('T')[0],
+    date: log.timestamp?.split('T')[0] || getLocalYYYYMMDD(),
     time: log.timestamp?.split('T')[1]?.substring(0, 8) || '00:00:00',
     action: log.type,
     status: 'present',
@@ -2025,7 +2025,7 @@ export async function addAttendanceLog(log: {
   is_ops_device?: boolean;
 }): Promise<AttendanceLog | null> {
   const now = new Date()
-  const date = log.manual_date || now.toISOString().split('T')[0]
+  const date = log.manual_date || getLocalYYYYMMDD(now)
   const time = log.manual_time || now.toTimeString().split(' ')[0]
   
   if (isSupabaseConfigured()) {
@@ -2177,6 +2177,12 @@ export function calculateRegulatedSession(
   const clockIn = clockInLog.timestamp
   let clockOut = clockOutLog?.timestamp || null
   
+  // Robust fallback: if otStatus is none but log was explicitly handled, use log status
+  let effectiveOtStatus = otStatus
+  if (effectiveOtStatus === 'none' && (clockInLog.status === 'approved' || clockInLog.status === 'rejected')) {
+    effectiveOtStatus = clockInLog.status
+  }
+  
   const cIn = new Date(clockIn)
   let cOut = clockOut ? new Date(clockOut) : new Date()
   let isAutoClockOut = false
@@ -2253,7 +2259,7 @@ export function calculateRegulatedSession(
       isAutoClockOut = true
       // Auto tap-out means no overtime counted from this session
       otMins = 0
-    } else if (otStatus === 'approved') {
+    } else if (effectiveOtStatus === 'approved') {
       // Rule 4: Only approved OT sessions count
       // This session is flagged as approved OT (usually separate from reg shift)
       // Any time outside the regular shift bounds in this session is OT
@@ -2262,7 +2268,7 @@ export function calculateRegulatedSession(
     }
   } else {
     // No shift scheduled - session only counts if it's an approved OT
-    if (otStatus === 'approved') {
+    if (effectiveOtStatus === 'approved') {
       otMins = totalMins
     }
   }
@@ -2277,7 +2283,7 @@ export function calculateRegulatedSession(
     lateMinutes,
     isPenalty,
     isAutoClockOut,
-    otStatus,
+    otStatus: effectiveOtStatus,
     method: clockInLog?.method || clockOutLog?.method,
     deviceInfo: clockInLog?.device_info || clockOutLog?.device_info,
     ipAddress: clockInLog?.ip_address || clockOutLog?.ip_address,
@@ -2299,8 +2305,9 @@ export async function getAttendanceLogsInRange(startDate: string, endDate: strin
     if (error) return []
     return (data || []).map(log => ({
       ...log,
+      employee_id: log.employee_id,
       employee_name: log.employee_name || 'Unknown',
-      type: log.action || log.type,
+      type: log.action || log.type || 'clock-in', // Default to clock-in if missing
       timestamp: `${log.date}T${log.time}`
     }))
   }
@@ -2412,15 +2419,22 @@ export async function getAttendanceReportData(startDate: string, endDate: string
         )
 
         for (const log of sortedLogs) {
-          const action = log.action || log.type
-          if (action === 'clock-in') {
+          const action = (log.action || log.type || '').toLowerCase()
+          
+          if (action.includes('in')) {
+            // If there's an existing in-log, push it as active before starting new
+            if (currentInLog) {
+              const otReq = otMap.get(currentInLog.id)
+              // FOOLPROOF: If log status is rejected, prioritize that over the OT request status
+              const os = currentInLog.status === 'rejected' ? 'rejected' : (otReq?.status || currentInLog.status || 'none')
+              dailySessions.push(calculateRegulatedSession(currentInLog, null, empDayShift, os))
+            }
             currentInLog = log
-          } else if (action === 'clock-out' && currentInLog) {
-            // Rule 4: Check if this session is an approved Overtime session
-            const otReq = otMap.get(currentInLog.id)
-            const otStatus = otReq?.status || 'none'
-
-            const session = calculateRegulatedSession(currentInLog, log, empDayShift, otStatus)
+          } else if (action.includes('out')) {
+            const otReq = currentInLog ? otMap.get(currentInLog.id) : null
+            const os = otReq?.status || (currentInLog?.status) || 'none'
+            
+            const session = calculateRegulatedSession(currentInLog || log, currentInLog ? log : null, empDayShift, os)
             dailySessions.push(session)
             
             if (session.isLate) dayIsLate = true
@@ -2430,12 +2444,16 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             if (!rowOutletId) rowOutletId = session.outletId
             
             currentInLog = null
+          } else {
+            // Fallback for weird actions: just push it as a standalone session so it's not lost
+            dailySessions.push(calculateRegulatedSession(log, null, empDayShift, log.status || 'none'))
           }
         }
 
         if (currentInLog) {
           const otReq = otMap.get(currentInLog.id)
-          const otStatus = otReq?.status || 'none'
+          // FOOLPROOF: Priority on log status if rejected
+          const otStatus = currentInLog.status === 'rejected' ? 'rejected' : (otReq?.status || currentInLog.status || 'none')
           const session = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus)
           dailySessions.push(session)
           
@@ -2447,28 +2465,24 @@ export async function getAttendanceReportData(startDate: string, endDate: string
         }
 
         if (dailySessions.length > 0) {
-          let regularMinutes = dailySessions.reduce((sum, s) => sum + s.regularMinutes, 0)
-          // Rule 1: Max 8 hours per day
-          regularMinutes = Math.min(regularMinutes, 480)
-          
-          const overtimeMinutes = dailySessions.reduce((sum, s) => sum + s.overtimeMinutes, 0)
-          const lateMinutes = dailySessions.reduce((max, s) => Math.max(max, s.lateMinutes || 0), 0)
-
-          report.push({
-            employee_id: emp.id,
-            employee_name: emp.name,
-            date: dateStr,
-            regularMinutes,
-            overtimeMinutes,
-            isLate: dayIsLate,
-            isPenalty: dayIsPenalty,
-            lateMinutes,
-            isAbsent: false,
-            sessions: dailySessions,
-            method: rowMethod,
-            deviceInfo: rowDeviceInfo,
-            outletId: rowOutletId
-          })
+          // Push each session as an individual row for full transparency
+          for (const session of dailySessions) {
+            report.push({
+              employee_id: emp.id,
+              employee_name: emp.name,
+              date: dateStr,
+              regularMinutes: session.regularMinutes,
+              overtimeMinutes: session.overtimeMinutes,
+              isLate: session.isLate || false,
+              isPenalty: session.isPenalty || false,
+              lateMinutes: session.lateMinutes || 0,
+              isAbsent: false,
+              sessions: [session], // Each row represents exactly one session
+              method: session.method,
+              deviceInfo: session.deviceInfo,
+              outletId: session.outletId
+            })
+          }
         }
       } else if (empDayShift) {
         // Rule 7: Absentee tracking
@@ -2507,8 +2521,8 @@ export async function getAttendanceReportData(startDate: string, endDate: string
 // New function for attendance statistics (Dashboard)
 export async function getAttendanceStats(employeeId?: string) {
   const now = new Date()
-  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+  const firstDay = getLocalYYYYMMDD(new Date(now.getFullYear(), now.getMonth(), 1))
+  const lastDay = getLocalYYYYMMDD(new Date(now.getFullYear(), now.getMonth() + 1, 0))
   
   const reportData = await getAttendanceReportData(firstDay, lastDay)
   
@@ -3506,7 +3520,7 @@ export async function updateShiftConfig(id: string, updates: Partial<Omit<ShiftC
     // CASCADE UPDATE: If start_time or end_time changed, update future shifts
     if (updates.start_time || updates.end_time) {
       console.log("[v0] Cascading shift config update to future shifts...")
-      const today = new Date().toISOString().split('T')[0]
+      const today = getLocalYYYYMMDD()
       
       const shiftUpdates: Record<string, string> = {}
       if (updates.start_time) shiftUpdates.start_time = updates.start_time
@@ -3766,7 +3780,7 @@ export async function getSalesLogsGroupedByDate(): Promise<SalesLogGrouped[]> {
   const grouped: Record<string, SalesLog[]> = {}
   
   for (const log of logs) {
-    const date = new Date(log.created_at).toISOString().split('T')[0]
+    const date = getLocalYYYYMMDD(new Date(log.created_at))
     if (!grouped[date]) {
       grouped[date] = []
     }
@@ -3844,7 +3858,7 @@ export async function openBatch(batchId: string): Promise<boolean> {
 // Generate batch number: CATEGORY-YYYYMMDD-HHMMSS
 function generateBatchNumber(category: string): string {
   const now = new Date()
-  const date = now.toISOString().split('T')[0].replace(/-/g, '')
+  const date = getLocalYYYYMMDD(now).replace(/-/g, '')
   const time = now.toTimeString().split(' ')[0].replace(/:/g, '')
   return `${category.toUpperCase()}-${date}-${time}`
 }
@@ -4491,7 +4505,7 @@ async function calculateAutoTarget(month: string): Promise<MonthlyTarget | null>
 export async function getFinancialSummary(month: string): Promise<FinancialSummary> {
   const [year, monthNum] = month.split('-')
   const startDate = `${month}-01T00:00:00.000Z`
-  const endDate = new Date(parseInt(year), parseInt(monthNum), 0).toISOString().split('T')[0] + 'T23:59:59.999Z'
+  const endDate = getLocalYYYYMMDD(new Date(parseInt(year), parseInt(monthNum), 0)) + 'T23:59:59.999Z'
 
   if (isSupabaseConfigured()) {
     // 1. Revenue & COGS from sales_logs

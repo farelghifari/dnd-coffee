@@ -81,43 +81,43 @@ export default function EmployeeDashboard() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!user?.employeeId) {
-        setIsLoading(false)
-        return
-      }
-
-      setIsLoading(true)
-      
-      const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData, otData, outletsData] = await Promise.all([
-        getEmployeeById(user.employeeId),
-        getAttendanceByEmployee(user.employeeId),
-        getShiftsByEmployee(user.employeeId),
-        getInventory(),
-        getOnShiftEmployees(),
-        getShiftConfigs(),
-        getAttendanceStats(user.employeeId),
-        getEmployeePayrolls(user.employeeId),
-        getOvertimeRequests(),
-        getOutlets()
-      ])
-
-
-      setEmployee(employeeData)
-      setMyAttendance(attendanceData)
-      setMyShifts(shiftsData)
-      setInventory(inventoryData)
-      setOnShift(onShiftData)
-      setShiftConfigs(configsData)
-      setPerformanceStats(statsData as any)
-      setMyPayrolls(payrollData)
-      setOvertimeRequests(otData)
-      setOutlets(outletsData)
+  const fetchData = async () => {
+    if (!user?.employeeId) {
       setIsLoading(false)
-
+      return
     }
 
+    setIsLoading(true)
+    
+    const [employeeData, attendanceData, shiftsData, inventoryData, onShiftData, configsData, statsData, payrollData, otData, outletsData] = await Promise.all([
+      getEmployeeById(user.employeeId),
+      getAttendanceByEmployee(user.employeeId),
+      getShiftsByEmployee(user.employeeId),
+      getInventory(),
+      getOnShiftEmployees(),
+      getShiftConfigs(),
+      getAttendanceStats(user.employeeId),
+      getEmployeePayrolls(user.employeeId),
+      getOvertimeRequests(),
+      getOutlets()
+    ])
+
+
+    setEmployee(employeeData)
+    setMyAttendance(attendanceData)
+    setMyShifts(shiftsData)
+    setInventory(inventoryData)
+    setOnShift(onShiftData)
+    setShiftConfigs(configsData)
+    setPerformanceStats(statsData as any)
+    setMyPayrolls(payrollData)
+    setOvertimeRequests(otData)
+    setOutlets(outletsData)
+    setIsLoading(false)
+
+  }
+
+  useEffect(() => {
     fetchData()
   }, [user?.employeeId])
 
@@ -170,13 +170,19 @@ export default function EmployeeDashboard() {
     return () => clearInterval(interval)
   }, [outlets])
 
-  // Get today's attendance
+  // Get today's attendance (sorted newest first)
   const today = getLocalYYYYMMDD()
-  const todayAttendance = myAttendance.filter(log => log.timestamp.startsWith(today))
+  const todayAttendance = myAttendance
+    .filter(log => log.timestamp.startsWith(today))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   
-  // Check if currently clocked in
+  // Check if currently clocked in (Latest action must be clock-in AND NOT REJECTED)
+  const lastAttendance = todayAttendance[0]
   const clockedIn = todayAttendance.length > 0 && 
-    todayAttendance[0].type === "clock-in"
+    lastAttendance.type === "clock-in" &&
+    lastAttendance.status !== "rejected"
+  
+  const lastWasRejected = todayAttendance.length > 0 && lastAttendance.status === "rejected"
 
   // Get low stock items for alerts
   const lowStockItems = getLowStockItems(inventory)
@@ -255,18 +261,18 @@ export default function EmployeeDashboard() {
         is_ops_device: false
       })
 
-      if (type === "clock-in") {
-        const duration = await getDailyWorkDuration(user.employeeId, today)
-        
-        if (hasShift) {
-          if (duration.isLate) {
-            toast.warning(`Clocked in successfully — LATE (> 15 mins)`)
+      if (attendanceLog) {
+        if (type === "clock-in") {
+          const duration = await getDailyWorkDuration(user.employeeId, today)
+          
+          if (hasShift) {
+            if (duration.isLate) {
+              toast.warning(`Clocked in successfully — LATE (> 15 mins)`)
+            } else {
+              toast.success(`Clocked in successfully — Punctual`)
+            }
           } else {
-            toast.success(`Clocked in successfully — Punctual`)
-          }
-        } else {
-          // No shift - create overtime request
-          if (attendanceLog) {
+            // No shift - create overtime request
             await addOvertimeRequest({
               employee_id: user.employeeId,
               employee_name: employee?.name || user.name || "Unknown",
@@ -275,9 +281,14 @@ export default function EmployeeDashboard() {
               clock_in_time: new Date().toISOString(),
               status: "pending"
             })
+            toast.warning("Clocked in (No shift scheduled — Overtime request submitted for approval)")
           }
-          toast.warning("Clocked in (No shift scheduled — Overtime request submitted for approval)")
+        } else {
+          toast.success("Clocked out successfully")
         }
+        
+        // Refresh data to update status across the dashboard
+        await fetchData()
       } else {
         toast.error("Failed to record attendance")
       }
