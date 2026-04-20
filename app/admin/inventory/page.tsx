@@ -358,13 +358,13 @@ export default function InventoryPage() {
       const dailyVal = (parseFloat(formData.dailyUsage) || 0) * multiplier
       const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
       
-      const resultItem = await upsertInventory({
+      await upsertInventory({
         name: formData.name,
         category: formData.category as any,
         unit: formData.unit,
         display_unit: formData.displayUnit,
         conversion_rate: multiplier,
-        stock: 0, // IMPORTANT: Let addBatch handle the initial stock to avoid doubling
+        stock: stockVal,
         min_stock: minVal,
         max_stock: maxVal,
         daily_usage: dailyVal,
@@ -372,21 +372,6 @@ export default function InventoryPage() {
         supplier_name: formData.supplierName,
         notes: formData.notes
       }, actorName)
-
-      // Automatically add the first batch if currentStock is provided
-      if (stockVal > 0 && resultItem?.id) {
-        await addBatch({
-          item_id: resultItem.id, 
-          quantity: stockVal,
-          unit: formData.unit as any,
-          unit_cost: normalizedCost,
-          supplier_name: formData.supplierName,
-          received_date: formData.receivedDate,
-          expired_date: formData.expiryDate,
-          notes: "Initial stock",
-          is_opened: true // First batch is always opened
-        }, actorName)
-      }
       
       setIsAddItemModalOpen(false)
       resetItemForm()
@@ -424,34 +409,6 @@ export default function InventoryPage() {
         supplier_name: formData.supplierName,
         notes: formData.notes
       }, actorName)
-
-      // Update primary batch dates if they exist, or create one if missing
-      try {
-        const itemBatches = await getBatchesByItem(formData.id)
-        if (itemBatches.length > 0) {
-          const primaryBatch = itemBatches[0]
-          await updateBatch(primaryBatch.id, {
-            supplier_name: formData.supplierName,
-            received_date: formData.receivedDate,
-            expired_date: formData.expiryDate
-          })
-        } else if (stockVal > 0) {
-          // SELF-HEALING: If no batch exists for this item, create one now
-          await addBatch({
-            item_id: formData.id,
-            quantity: stockVal,
-            unit: formData.unit as any,
-            unit_cost: normalizedCost,
-            supplier_name: formData.supplierName,
-            received_date: formData.receivedDate,
-            expired_date: formData.expiryDate,
-            notes: "Repaired from edit form",
-            is_opened: true
-          }, actorName)
-        }
-      } catch (e) {
-        console.error("Failed to sync batch info:", e)
-      }
       
       setIsEditItemModalOpen(false)
       resetItemForm()

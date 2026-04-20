@@ -1,5 +1,12 @@
--- 1. Update the sales FIFO function to prioritize "Opened" batches
--- This ensures that system always empties an open container before opening a new one.
+-- ==========================================================
+-- FINAL INVENTORY SYNC: WAREHOUSE -> BARISTA FLOOR MODEL
+-- ==========================================================
+
+-- 1. HARD RESET: Wipe all legacy batches to start clean
+-- This removes all RESTORE-, FIX-, and other cluttered data.
+TRUNCATE public.inventory_batches RESTART IDENTITY;
+
+-- 2. SALES LOGIC: Deducts from the OPENED container
 CREATE OR REPLACE FUNCTION public.process_menu_sales_fifo(
     p_menu_id UUID,
     p_quantity INT,
@@ -28,13 +35,14 @@ BEGIN
     ) LOOP
         v_total_needed := r_item.quantity * p_quantity;
 
+        -- Deduct from OPENED batches (The Floor stock)
         FOR v_current_batch IN (
             SELECT id, remaining_quantity 
             FROM public.inventory_batches 
             WHERE item_id = r_item.item_id 
               AND remaining_quantity > 0
-            -- ORDER: 1. Opened First, 2. FEFO (Expired First), 3. FIFO (Created First)
-            ORDER BY is_opened DESC, expired_date ASC NULLS LAST, created_at ASC
+              AND is_opened = true
+            ORDER BY expired_date ASC NULLS LAST, created_at ASC
         ) LOOP
             IF v_total_needed <= 0 THEN
                 EXIT;
@@ -54,11 +62,13 @@ BEGIN
             v_total_needed := v_total_needed - v_batch_deduct;
         END LOOP;
 
+        -- Update master stock (The Grand Total in building)
         UPDATE public.inventory_items
         SET stock = stock - (r_item.quantity * p_quantity),
             last_updated = NOW()
         WHERE id = r_item.item_id;
 
+        -- Record transaction
         IF (r_item.quantity * p_quantity) > 0 THEN
              INSERT INTO public.inventory_transactions (item_id, employee_id, type, quantity, actor_name, created_at)
              VALUES (r_item.item_id, p_actor_id, 'out', r_item.quantity * p_quantity, p_actor_name, NOW());
@@ -68,8 +78,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 2. REFACTOR Manual Stock Out to correctly deduct from batches
--- This ensures manual usage logs (waste, damage, etc) actually reduce the batch totals.
+-- 3. STOCK OUT LOGIC: "Opening a New Container"
 CREATE OR REPLACE FUNCTION public.stock_out_manual(
     p_item_id UUID,
     p_quantity NUMERIC,
@@ -78,13 +87,13 @@ CREATE OR REPLACE FUNCTION public.stock_out_manual(
     p_actor_id UUID DEFAULT NULL
 ) RETURNS VOID AS $$
 DECLARE
-    v_total_needed NUMERIC;
-    v_current_batch RECORD;
-    v_batch_deduct NUMERIC;
     v_old_batch RECORD;
+    v_item_name TEXT;
+    v_unit_cost NUMERIC;
+    v_supplier TEXT;
+    v_batch_number TEXT;
 BEGIN
-    -- 1. AUTO-WASTE: Check for any existing opened batch that still has stock
-    -- If we are opening a new batch manually, the old one must be discarded.
+    -- [STEP A] AUTO-WASTE: If another batch is still open, close it and record as waste
     FOR v_old_batch IN (
         SELECT id, remaining_quantity 
         FROM public.inventory_batches 
@@ -92,199 +101,93 @@ BEGIN
           AND is_opened = true 
           AND remaining_quantity > 0
     ) LOOP
-        -- Record the waste transaction
+        -- Record waste transaction
         INSERT INTO public.inventory_transactions (item_id, employee_id, type, quantity, actor_name, created_at)
-        VALUES (p_item_id, p_actor_id, 'waste', v_old_batch.remaining_quantity, p_actor_name, NOW());
+        VALUES (p_item_id, p_actor_id, 'waste', v_old_batch.remaining_quantity, p_actor_name || ' (Auto-Waste)', NOW());
 
-        -- Update master stock to subtract the waste
+        -- Deduct the wasted amount from Grand Total
         UPDATE public.inventory_items
         SET stock = stock - v_old_batch.remaining_quantity,
             last_updated = NOW()
         WHERE id = p_item_id;
 
-        -- Close the old batch
+        -- Close the batch
         UPDATE public.inventory_batches
-        SET remaining_quantity = 0,
-            is_opened = false,
-            updated_at = NOW()
+        SET remaining_quantity = 0, is_opened = false, updated_at = NOW()
         WHERE id = v_old_batch.id;
     END LOOP;
 
-    -- 2. PROCESS NEW STOCK OUT
-    v_total_needed := p_quantity;
+    -- [STEP B] CREATE THE NEW BATCH (Barista Area)
+    SELECT name, unit_cost, supplier_name INTO v_item_name, v_unit_cost, v_supplier 
+    FROM public.inventory_items WHERE id = p_item_id;
 
-    -- Update batches using FEFO/FIFO logic (excluding the one we just wasted)
-    FOR v_current_batch IN (
-        SELECT id, remaining_quantity 
-        FROM public.inventory_batches 
-        WHERE item_id = p_item_id 
-          AND remaining_quantity > 0
-          AND is_opened = false -- Prioritize the NEXT sealed one
-        ORDER BY expired_date ASC NULLS LAST, created_at ASC
-    ) LOOP
-        IF v_total_needed <= 0 THEN
-            EXIT;
-        END IF;
+    v_batch_number := UPPER(LEFT(v_item_name, 3)) || '-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 1000)::TEXT, 3, '0');
 
-        IF v_current_batch.remaining_quantity >= v_total_needed THEN
-            v_batch_deduct := v_total_needed;
-        ELSE
-            v_batch_deduct := v_current_batch.remaining_quantity;
-        END IF;
+    INSERT INTO public.inventory_batches (
+        item_id,
+        batch_number,
+        quantity,
+        remaining_quantity,
+        cost_per_unit,
+        supplier_name,
+        received_date,
+        is_opened,
+        opened_at,
+        created_at
+    )
+    VALUES (
+        p_item_id,
+        v_batch_number,
+        p_quantity,
+        p_quantity,
+        COALESCE(v_unit_cost, 0),
+        v_supplier,
+        CURRENT_DATE,
+        TRUE, 
+        NOW(),
+        NOW()
+    );
 
-        UPDATE public.inventory_batches
-        SET remaining_quantity = remaining_quantity - v_batch_deduct,
-            is_opened = true, -- Mark the new batch as opened
-            updated_at = NOW()
-        WHERE id = v_current_batch.id;
-
-        v_total_needed := v_total_needed - v_batch_deduct;
-    END LOOP;
-
-    -- Update master stock for the actual usage
-    UPDATE public.inventory_items
-    SET stock = stock - p_quantity,
-        last_updated = NOW()
-    WHERE id = p_item_id;
-
-    -- Record transaction for the actual stock out
+    -- [STEP C] LOG THE EVENT
     INSERT INTO public.inventory_transactions (item_id, employee_id, type, quantity, actor_name, created_at)
-    VALUES (p_item_id, p_actor_id, 'out', p_quantity, p_actor_name, NOW());
+    VALUES (p_item_id, p_actor_id, 'out', 0, p_actor_name || ' (Opened Container)', NOW());
 END;
 $$ LANGUAGE plpgsql;
 
--- 3. BULK version of the FIFO Sales logic
--- This matches the frontend bulkSellMenu function
-CREATE OR REPLACE FUNCTION public.bulk_sell_menu_fifo(
-    p_menu_ids UUID[],
-    p_quantities INT[],
-    p_actor_name TEXT DEFAULT 'System',
-    p_actor_id UUID DEFAULT NULL
-) RETURNS VOID AS $$
-DECLARE
-    i INT;
-BEGIN
-    FOR i IN 1..array_length(p_menu_ids, 1) LOOP
-        PERFORM public.process_menu_sales_fifo(
-            p_menu_ids[i],
-            p_quantities[i],
-            0, -- Price handled by sales_logs in the individual call
-            p_actor_name,
-            p_actor_id
-        );
-    END LOOP;
-END;
-$$ LANGUAGE plpgsql;
+-- 4. TARGETED RESTORE: Only create batches for the 4 items user confirmed as stocked out
+-- Full Cream Milk Diamond = 2 kotak, the 3 beans = 1 batch each
+-- IMPORTANT: Quantities must be stored in BASE UNITS (g, ml, pcs)
+-- so we multiply display quantity by conversion_rate
 
--- 4. STOCK OPNAME ADJUSTMENT Logic
--- This ensures that when an audit is performed, batches are synchronized.
-CREATE OR REPLACE FUNCTION public.adjust_stock_from_opname(
-    p_item_id UUID,
-    p_difference NUMERIC,
-    p_actor_name TEXT DEFAULT 'System',
-    p_actor_id UUID DEFAULT NULL
-) RETURNS VOID AS $$
-DECLARE
-    v_remaining_diff NUMERIC;
-    v_current_batch RECORD;
-    v_batch_adj NUMERIC;
-    v_opened_batch_id UUID;
-BEGIN
-    v_remaining_diff := p_difference;
+-- First: clean up the wrong data from previous run
+DELETE FROM public.inventory_batches;
 
-    IF v_remaining_diff < 0 THEN
-        -- LOSS (Waste): Deduct from batches, prioritizing Opened then FEFO
-        v_remaining_diff := ABS(v_remaining_diff);
-        
-        FOR v_current_batch IN (
-            SELECT id, remaining_quantity 
-            FROM public.inventory_batches 
-            WHERE item_id = p_item_id 
-              AND remaining_quantity > 0
-            ORDER BY is_opened DESC, expired_date ASC NULLS LAST, created_at ASC
-        ) LOOP
-            IF v_remaining_diff <= 0 THEN EXIT; END IF;
-
-            IF v_current_batch.remaining_quantity >= v_remaining_diff THEN
-                v_batch_adj := v_remaining_diff;
-            ELSE
-                v_batch_adj := v_current_batch.remaining_quantity;
-            END IF;
-
-            UPDATE public.inventory_batches
-            SET remaining_quantity = remaining_quantity - v_batch_adj,
-                updated_at = NOW()
-            WHERE id = v_current_batch.id;
-
-            v_remaining_diff := v_remaining_diff - v_batch_adj;
-        END LOOP;
-
-    ELSIF v_remaining_diff > 0 THEN
-        -- GAIN (Found Stock): Add to the currently opened batch, or the newest one
-        SELECT id INTO v_opened_batch_id 
-        FROM public.inventory_batches 
-        WHERE item_id = p_item_id AND is_opened = true
-        LIMIT 1;
-
-        IF v_opened_batch_id IS NOT NULL THEN
-            UPDATE public.inventory_batches
-            SET remaining_quantity = remaining_quantity + v_remaining_diff,
-                updated_at = NOW()
-            WHERE id = v_opened_batch_id;
-        ELSE
-            -- No open batch? Add to the newest batch
-            UPDATE public.inventory_batches
-            SET remaining_quantity = remaining_quantity + v_remaining_diff,
-                updated_at = NOW()
-            WHERE id = (
-                SELECT id FROM public.inventory_batches 
-                WHERE item_id = p_item_id 
-                ORDER BY created_at DESC LIMIT 1
-            );
-        END IF;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
--- 5. SELF-HEALING: Repair items missing batches
--- This ensures that your 24 items in inventory are matched in Batch Tracking.
-DO $$
-DECLARE
-    r_missing RECORD;
-    v_batch_number TEXT;
-BEGIN
-    FOR r_missing IN (
-        SELECT i.id, i.name, i.category, i.stock, i.unit_cost, i.supplier_name
-        FROM public.inventory_items i
-        LEFT JOIN public.inventory_batches b ON i.id = b.item_id
-        WHERE b.id IS NULL AND i.stock > 0
-    ) LOOP
-        -- Generate batch number: AUTO-FIX-YYYYMMDD-SEQ
-        v_batch_number := 'FIX-' || UPPER(LEFT(r_missing.name, 3)) || '-' || TO_CHAR(NOW(), 'YYYYMMDD');
-
-        INSERT INTO public.inventory_batches (
-            item_id,
-            batch_number,
-            quantity,
-            remaining_quantity,
-            cost_per_unit,
-            supplier_name,
-            received_date,
-            is_opened,
-            opened_at,
-            created_at
-        )
-        VALUES (
-            r_missing.id,
-            v_batch_number,
-            r_missing.stock,
-            r_missing.stock,
-            r_missing.unit_cost,
-            r_missing.supplier_name,
-            CURRENT_DATE,
-            TRUE, -- Since it's the only batch, mark it as opened
-            NOW(),
-            NOW()
-        );
-    END LOOP;
-END $$;
+INSERT INTO public.inventory_batches (
+    item_id, batch_number, quantity, remaining_quantity, 
+    cost_per_unit, supplier_name, received_date, 
+    is_opened, opened_at, created_at
+)
+SELECT 
+    i.id,
+    UPPER(LEFT(i.name, 3)) || '-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || LPAD(FLOOR(RANDOM() * 1000)::TEXT, 3, '0'),
+    CASE 
+        WHEN i.name ILIKE '%Milk Diamond%' THEN 2 * COALESCE(i.conversion_rate, 1)
+        ELSE 1 * COALESCE(i.conversion_rate, 1)
+    END,
+    CASE 
+        WHEN i.name ILIKE '%Milk Diamond%' THEN 2 * COALESCE(i.conversion_rate, 1)
+        ELSE 1 * COALESCE(i.conversion_rate, 1)
+    END,
+    COALESCE(i.unit_cost, 0),
+    i.supplier_name,
+    CURRENT_DATE,
+    TRUE,
+    NOW(),
+    NOW()
+FROM public.inventory_items i
+WHERE (
+    i.name ILIKE '%Full Cream Milk Diamond%'
+    OR i.name ILIKE '%Let Me Roast 70A:30R%'
+    OR i.name ILIKE '%Dav Coffee 70A:30R%'
+    OR i.name ILIKE '%Dav Coffee 50:50%'
+);

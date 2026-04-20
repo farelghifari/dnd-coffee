@@ -67,6 +67,9 @@ import {
   openBatch,
   stockOutManual,
   toBaseUnit,
+  fromBaseUnit,
+  getDefaultDisplayUnit,
+  getConversionRate,
   type DisplayUnit,
   type InventoryItem
 } from "@/lib/api/supabase-service"
@@ -124,6 +127,13 @@ export default function BatchesPage() {
 
         const item = fetchedInventory.find((i: any) => i.id === b.item_id)
 
+        // Get display unit for this item
+        const displayUnit = (item?.display_unit || getDefaultDisplayUnit(item?.unit || 'pcs')) as DisplayUnit
+        let convRate = item?.conversion_rate || 1
+        if (convRate === 1 && displayUnit.toLowerCase() !== (item?.unit || 'pcs').toLowerCase()) {
+          convRate = getConversionRate(displayUnit, item?.unit || 'pcs')
+        }
+
         return {
           id: b.id,
           batchNumber: b.batch_number,
@@ -141,7 +151,9 @@ export default function BatchesPage() {
           is_opened: !!b.is_opened,
           opened_at: b.opened_at,
           createdAt: b.created_at,
-          updatedAt: b.created_at
+          updatedAt: b.created_at,
+          displayUnit: displayUnit,
+          conversionRate: convRate
         }
       })
       
@@ -538,7 +550,13 @@ export default function BatchesPage() {
                         <TableCell className="text-muted-foreground">{batch.supplier}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex flex-col items-end gap-1">
-                            <span>{batch.currentQuantity.toLocaleString()} / {batch.initialQuantity.toLocaleString()}</span>
+                            {(() => {
+                              const conv = (batch as any).conversionRate || 1
+                              const unit = (batch as any).displayUnit || 'pcs'
+                              const current = parseFloat((batch.currentQuantity / conv).toFixed(2))
+                              const initial = parseFloat((batch.initialQuantity / conv).toFixed(2))
+                              return <span>{current} / {initial} <span className="text-xs text-muted-foreground">{unit}</span></span>
+                            })()}
                             <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
                               <div 
                                 className="h-full bg-primary rounded-full"
