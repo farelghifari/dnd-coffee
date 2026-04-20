@@ -599,6 +599,8 @@ export async function updateEmployee(id: string, updates: Partial<Employee>): Pr
     if (updates.contract_pdf_url !== undefined) dbUpdates.contract_pdf_url = updates.contract_pdf_url
     if (updates.contract_start_date !== undefined) dbUpdates.contract_start_date = updates.contract_start_date
     if (updates.contract_end_date !== undefined) dbUpdates.contract_end_date = updates.contract_end_date
+    if (updates.registered_device !== undefined) dbUpdates.registered_device = updates.registered_device
+    if (updates.last_device_id !== undefined) dbUpdates.last_device_id = updates.last_device_id
     
     console.log("NEW ROLE:", updates.role)
     console.log("EXPIRES:", updates.super_admin_expires_at)
@@ -2078,11 +2080,10 @@ export async function addAttendanceLog(log: {
       .single()
     
     console.log("DATA (addAttendanceLog):", data)
-    console.log("ERROR (addAttendanceLog):", error)
-    
     if (error) {
       return null
     }
+
     return data ? {
       ...data,
       type: data.action,

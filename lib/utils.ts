@@ -71,3 +71,19 @@ export function isShiftLocked(dateStr: string, startTime: string) {
     return false;
   }
 }
+/**
+ * Returns a simple fingerprint for the current browser/device
+ */
+export function getDeviceFingerprint() {
+  if (typeof window === 'undefined') return 'server';
+  
+  const ua = window.navigator.userAgent;
+  const platform = (window.navigator as any).platform || 'unknown';
+  
+  // Create a simple readable fingerprint
+  // Format: Platform | Browser (truncated)
+  const browserMatch = ua.match(/(chrome|safari|firefox|edge|opera)/i);
+  const browserName = browserMatch ? browserMatch[0] : 'Browser';
+  
+  return `${platform} | ${browserName}`;
+}

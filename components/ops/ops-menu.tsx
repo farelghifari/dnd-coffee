@@ -17,7 +17,7 @@ import { NFCModal } from "./nfc-modal"
 import { StockActionModal } from "./stock-action-modal"
 import { StockWidgets } from "./stock-widgets"
 import { Button } from "@/components/ui/button"
-import { cn, getLocalYYYYMMDD } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD, getDeviceFingerprint } from "@/lib/utils"
 import {
   getInventory,
   addAttendanceLog,
@@ -131,7 +131,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
             employee_name: employeeName,
             type: selectedAction,
             method: 'nfc',
-            is_ops_device: true
+            is_ops_device: true,
+            device_info: getDeviceFingerprint()
           })
           
           setShowSuccessMessage(`${employeeName} clocked in for SCHEDULED overtime.`)
@@ -170,7 +171,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
               employee_name: employeeName,
               type: selectedAction,
               method: 'nfc',
-              is_ops_device: true
+              is_ops_device: true,
+              device_info: getDeviceFingerprint()
             })
             
             if (attendanceLog) {
@@ -201,7 +203,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           employee_name: employeeName,
           type: selectedAction,
           method: 'nfc',
-          is_ops_device: true
+          is_ops_device: true,
+          device_info: getDeviceFingerprint()
         })
         
         const duration = await getDailyWorkDuration(employeeId, today)
@@ -234,7 +237,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           employee_name: employeeName,
           type: selectedAction,
           method: 'nfc',
-          is_ops_device: true
+          is_ops_device: true,
+          device_info: getDeviceFingerprint()
         })
         
         // Calculate regulated duration
@@ -329,7 +333,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
       employee_name: employeeName,
       type: "clock-in",
       method: 'nfc',
-      is_ops_device: true
+      is_ops_device: true,
+      device_info: getDeviceFingerprint()
     })
     
     if (attendanceLog) {
