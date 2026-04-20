@@ -1383,28 +1383,19 @@ export async function stockOutManual(itemId: string, quantity: number, reason?: 
   const item = await getInventoryItem(itemId)
   
   if (isSupabaseConfigured()) {
-    // Call RPC: stock_out_manual
     const { error } = await supabase.rpc('stock_out_manual', {
       p_item_id: itemId,
       p_quantity: quantity,
-      p_reason: reason || 'manual'
+      p_reason: reason || 'manual',
+      p_actor_name: actorName,
+      p_actor_id: getCurrentUser()?.id || null
     })
     
     if (error) {
       console.log("ERROR (stockOutManual RPC):", error)
-      // Fallback to regular stock_out if manual doesn't exist
-      const success = await stockOut(itemId, quantity)
-      if (success && item) {
-        await logActivity(
-          'inventory_change', 
-          actorName, 
-          item.name, 
-          `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
-        )
-      }
-      return success
+      return false
     }
-    
+
     if (item) {
       await logActivity(
         'inventory_change', 
@@ -3903,8 +3894,7 @@ export interface BulkSaleItem {
 
 export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
   if (isSupabaseConfigured()) {
-    // Try new FIFO RPC first (process_menu_sales_fifo)
-    const { error: fifoError } = await supabase.rpc('process_menu_sales_fifo', {
+    const { error: fifoError } = await supabase.rpc('bulk_sell_menu_fifo', {
       p_menu_ids: items.map(i => i.menu_id),
       p_quantities: items.map(i => i.quantity)
     })
@@ -4480,14 +4470,21 @@ export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'cre
       return null
     }
 
-    // 2. Update Inventory Item Stock to match Actual Stock
-    const { error: updateError } = await supabase
-      .from('inventory_items')
-      .update({ stock: data.actual_stock })
-      .eq('id', data.item_id)
+    // 2. Update Inventory Batches and Master Stock via RPC
+    const { error: adjustError } = await supabase.rpc('adjust_stock_from_opname', {
+      p_item_id: data.item_id,
+      p_difference: data.difference,
+      p_actor_name: data.actor_name
+    })
 
-    if (updateError) {
-      console.error("ERROR (updating stock on opname):", updateError)
+    if (adjustError) {
+      console.error("ERROR (adjusting batches via opname):", adjustError)
+      
+      // Fallback: Just update master stock if RPC fails
+      await supabase
+        .from('inventory_items')
+        .update({ stock: data.actual_stock })
+        .eq('id', data.item_id)
     }
 
     // 3. Log as Waste in transactions if difference is negative (or just log the adjustment)

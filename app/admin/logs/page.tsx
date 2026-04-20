@@ -168,13 +168,13 @@ export default function LogsPage() {
   const filteredStockLogs = useMemo(() => {
     return stockLogs.filter((log) => {
       const logDate = new Date(log.timestamp)
-      const dateStart = startOfDay(selectedDate)
-      const dateEnd = endOfDay(selectedDate)
+      const dateStr = format(selectedDate, 'yyyy-MM-dd')
+      const logDateStr = format(logDate, 'yyyy-MM-dd')
       
       const matchesSearch = (log.item_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.employee_name || "").toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesType = selectedType === "all" || log.type === selectedType
-      const matchesDate = logDate >= dateStart && logDate <= dateEnd
+      const matchesType = selectedType === "all" || (log.type || "").toLowerCase() === selectedType.toLowerCase()
+      const matchesDate = logDateStr === dateStr
       
       return matchesSearch && matchesType && matchesDate
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
@@ -370,10 +370,10 @@ export default function LogsPage() {
   const filteredSalesLogs = useMemo(() => {
     return salesLogs.filter((log) => {
       const logDate = new Date(log.created_at)
-      const dateStart = startOfDay(selectedDate)
-      const dateEnd = endOfDay(selectedDate)
+      const dateStr = format(selectedDate, 'yyyy-MM-dd')
+      const logDateStr = format(logDate, 'yyyy-MM-dd')
       
-      const matchesDate = logDate >= dateStart && logDate <= dateEnd
+      const matchesDate = logDateStr === dateStr
       const matchesSearch = (log.menu_name || "").toLowerCase().includes(searchQuery.toLowerCase())
       
       return matchesDate && matchesSearch
@@ -391,10 +391,10 @@ export default function LogsPage() {
   const filteredSystemLogs = useMemo(() => {
     return systemLogs.filter((log) => {
       const logDate = new Date(log.timestamp)
-      const dateStart = startOfDay(selectedDate)
-      const dateEnd = endOfDay(selectedDate)
+      const dateStr = format(selectedDate, 'yyyy-MM-dd')
+      const logDateStr = format(logDate, 'yyyy-MM-dd')
       
-      const matchesDate = logDate >= dateStart && logDate <= dateEnd
+      const matchesDate = logDateStr === dateStr
       const matchesSearch = (log.actor || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.target || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (log.details || "").toLowerCase().includes(searchQuery.toLowerCase())
