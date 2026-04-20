@@ -310,7 +310,7 @@ export default function AttendanceReportPage() {
             <div className="lg:col-span-3">
               <Button 
                 className="w-full rounded-sm gap-2 bg-foreground text-background hover:bg-foreground/90"
-                onClick={refreshReport}
+                onClick={() => refreshReport()}
                 disabled={isLoading}
               >
                 {isLoading ? "Loading..." : "Generate Report"}
@@ -391,7 +391,7 @@ export default function AttendanceReportPage() {
                 </tr>
               ) : (
                 filteredReport.map((row, idx) => {
-                  const shift = getAssignedShift(row.employee_id, row.date)
+                  const shift = row.shift // Use the matched shift from the backend
                   const totalMinutes = row.regularMinutes + row.overtimeMinutes
                   
                   return (
@@ -432,8 +432,8 @@ export default function AttendanceReportPage() {
                                 onClick={() => {
                                   setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
                                   setResolveTimes({ 
-                                    clockIn: shift?.start_time?.substring(0,5) || "08:00", 
-                                    clockOut: shift?.end_time?.substring(0,5) || "17:00" 
+                                    clockIn: row.shift?.start_time?.substring(0,5) || "08:00", 
+                                    clockOut: row.shift?.end_time?.substring(0,5) || "17:00" 
                                   })
                                   setResolveModalOpen(true)
                                 }}

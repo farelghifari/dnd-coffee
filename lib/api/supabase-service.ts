@@ -9,7 +9,7 @@ import {
   overtimeRequests as mockOvertimeRequests,
   shiftConfigs as mockShiftConfigs
 } from '@/lib/data'
-import { getLocalYYYYMMDD } from '@/lib/utils'
+import { getLocalYYYYMMDD, isShiftLocked, isPastDate } from '@/lib/utils'
 
 // Storage keys for localStorage fallback
 const STORAGE_KEYS = {
@@ -2321,6 +2321,7 @@ export function calculateRegulatedSession(
     isPenalty,
     isAutoClockOut,
     otStatus: effectiveOtStatus,
+    shift: shift, // Return the matched shift object
     method: clockInLog?.method || clockOutLog?.method,
     deviceInfo: clockInLog?.device_info || clockOutLog?.device_info,
     ipAddress: clockInLog?.ip_address || clockOutLog?.ip_address,
@@ -2401,10 +2402,11 @@ export async function getAttendanceReportData(startDate: string, endDate: string
   }
   
   // Group shifts by employee_id and date
-  const shiftsMap = new Map<string, ShiftAssignment>()
+  const shiftsMap = new Map<string, ShiftAssignment[]>()
   for (const shift of allShifts) {
     const key = `${shift.employee_id}_${shift.date}`
-    shiftsMap.set(key, shift)
+    if (!shiftsMap.has(key)) shiftsMap.set(key, [])
+    shiftsMap.get(key)!.push(shift)
   }
 
   // Group OT Requests by employee_id and date for broader lookup
@@ -2439,74 +2441,91 @@ export async function getAttendanceReportData(startDate: string, endDate: string
     for (const emp of employees) {
       const key = `${emp.id}_${dateStr}`
       const empDayLogs = logsMap.get(key) || []
-      const empDayShift = shiftsMap.get(key)
+      const empDayShifts = shiftsMap.get(key) || []
       
+      const claimedShiftIds = new Set<string>()
+
       if (empDayLogs.length > 0) {
         // Calculate duration logic fully in-memory
         const dailySessions: any[] = []
         let currentInLog: AttendanceLog | null = null
-        let dayIsLate = false
-        let dayIsPenalty = false
-        let rowMethod: string | undefined
-        let rowDeviceInfo: string | undefined
-        let rowOutletId: string | undefined
 
         const sortedLogs = [...empDayLogs].sort((a, b) => 
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         )
+
+        const processSession = (inLog: AttendanceLog, outLog: AttendanceLog | null) => {
+          // Find best matching shift for this session
+          const iDate = new Date(inLog.timestamp)
+          let bestShift: ShiftAssignment | undefined
+          let minDiff = Infinity
+
+          for (const s of empDayShifts) {
+            // Robust matching: Create a shift date in the same context as the clock-in log
+            const sStart = new Date(iDate)
+            const [h, m] = s.start_time.split(':').map(Number)
+            sStart.setHours(h, m, 0, 0)
+            
+            let diff = Math.abs(iDate.getTime() - sStart.getTime())
+            
+            // Handle shifts that might be across midnight (distance to previous/next day's same-time shift)
+            if (diff > 12 * 60 * 60 * 1000) {
+              const diffPrev = Math.abs(iDate.getTime() - (sStart.getTime() - 24 * 60 * 60 * 1000))
+              const diffNext = Math.abs(iDate.getTime() - (sStart.getTime() + 24 * 60 * 60 * 1000))
+              if (diffPrev < diff) diff = diffPrev
+              if (diffNext < diff) diff = diffNext
+            }
+
+            if (diff < minDiff) {
+              minDiff = diff
+              bestShift = s
+            }
+          }
+
+          // Only "claim" the shift if the match is within a reasonable window (e.g. 12 hours)
+          // or if it's the only shift available
+          if (bestShift && (minDiff < 12 * 60 * 60 * 1000 || empDayShifts.length === 1)) {
+            claimedShiftIds.add(bestShift.id)
+          } else {
+            bestShift = undefined // Treat as unscheduled
+          }
+
+          const dayOts = otMap.get(key) || []
+          const specificOt = dayOts.find(o => o.attendance_log_id === inLog.id)
+          const os = inLog.status === 'rejected' ? 'rejected' : (specificOt?.status || inLog.status || 'none')
+          
+          return calculateRegulatedSession(
+            inLog, 
+            outLog, 
+            bestShift, 
+            os, 
+            specificOt?.approved_overtime_minutes, 
+            dayOts
+          )
+        }
 
         for (const log of sortedLogs) {
           const action = (log.action || log.type || '').toLowerCase()
           
           if (action.includes('in')) {
             if (currentInLog) {
-              const dayOts = otMap.get(key) || []
-              // Find if this specific log is linked to an OT request
-              const specificOt = dayOts.find(o => o.attendance_log_id === currentInLog!.id)
-              const os = currentInLog.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog.status || 'none')
-              dailySessions.push(calculateRegulatedSession(currentInLog, null, empDayShift, os, specificOt?.approved_overtime_minutes, dayOts))
+              dailySessions.push(processSession(currentInLog, null))
             }
             currentInLog = log
           } else if (action.includes('out')) {
-            const dayOts = otMap.get(key) || []
-            const specificOt = currentInLog ? dayOts.find(o => o.attendance_log_id === currentInLog!.id) : null
-            const os = currentInLog?.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog?.status || 'none')
-            
-            const session = calculateRegulatedSession(currentInLog || log, currentInLog ? log : null, empDayShift, os, specificOt?.approved_overtime_minutes, dayOts)
-            dailySessions.push(session)
-            
-            if (session.isLate) dayIsLate = true
-            if (session.isPenalty) dayIsPenalty = true
-            if (!rowMethod) rowMethod = session.method
-            if (!rowDeviceInfo) rowDeviceInfo = session.deviceInfo
-            if (!rowOutletId) rowOutletId = session.outletId
-            
+            dailySessions.push(processSession(currentInLog || log, currentInLog ? log : null))
             currentInLog = null
           } else {
-            const dayOts = otMap.get(key) || []
-            const specificOt = dayOts.find(o => o.attendance_log_id === log.id)
-            dailySessions.push(calculateRegulatedSession(log, null, empDayShift, log.status || specificOt?.status || 'none', specificOt?.approved_overtime_minutes, dayOts))
+            dailySessions.push(processSession(log, null))
           }
         }
 
         if (currentInLog) {
-          const dayOts = otMap.get(key) || []
-          const specificOt = dayOts.find(o => o.attendance_log_id === currentInLog!.id)
-          const otStatus = currentInLog.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog.status || 'none')
-          const session = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus, specificOt?.approved_overtime_minutes, dayOts)
-          dailySessions.push(session)
-          
-          if (session.isLate) dayIsLate = true
-          if (session.isPenalty) dayIsPenalty = true
-          if (!rowMethod) rowMethod = session.method
-          if (!rowDeviceInfo) rowDeviceInfo = session.deviceInfo
-          if (!rowOutletId) rowOutletId = session.outletId
+          dailySessions.push(processSession(currentInLog, null))
         }
 
         // UNIFY SESSIONS: Merge contiguous/overlapping sessions into single rows
-        const mergedReportRows: any[] = []
         if (dailySessions.length > 0) {
-          // Sort daily sessions by clock-in time to ensure order for merging
           const sortedSessions = [...dailySessions].sort((a, b) => new Date(a.clockIn).getTime() - new Date(b.clockIn).getTime())
           
           let currentGroup = sortedSessions[0]
@@ -2516,12 +2535,9 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             const nextOne = sortedSessions[i]
             const currentEnd = new Date(currentGroup.clockOut || new Date())
             const nextStart = new Date(nextOne.clockIn)
-            
-            // If the next session starts within 15 minutes of the current one ending, merge them
             const gapMins = (nextStart.getTime() - currentEnd.getTime()) / 60000
             
             if (gapMins <= 15) {
-              // Merge them
               currentGroup = {
                 ...currentGroup,
                 clockOut: nextOne.clockOut || currentGroup.clockOut,
@@ -2532,7 +2548,6 @@ export async function getAttendanceReportData(startDate: string, endDate: string
                 lateMinutes: Math.max(currentGroup.lateMinutes || 0, nextOne.lateMinutes || 0),
                 isPenalty: currentGroup.isPenalty || nextOne.isPenalty,
                 isAutoClockOut: currentGroup.isAutoClockOut || nextOne.isAutoClockOut,
-                // Combine child sessions for drilling down if needed
                 childSessions: [...(currentGroup.childSessions || [currentGroup]), nextOne]
               }
             } else {
@@ -2554,43 +2569,44 @@ export async function getAttendanceReportData(startDate: string, endDate: string
               lateMinutes: session.lateMinutes || 0,
               isAbsent: false,
               sessions: session.childSessions || [session],
+              shift: session.shift, // Include the matched shift
               method: session.method,
               deviceInfo: session.deviceInfo,
               outletId: session.outletId
             })
           }
         }
-      } else if (empDayShift) {
-        // Rule 7: Absentee tracking
-        // They have a shift but no logs. If the shift's end time has already passed, they are absent.
-        const endTimeStr = empDayShift.end_time || '23:59'
-        const shiftEndObj = new Date(`${dateStr}T${endTimeStr}`)
-        
-        // Handle overnight shifts (e.g. 20:00 to 02:00) by adding 1 day to the end date
-        if (empDayShift.start_time && endTimeStr < empDayShift.start_time) {
-          shiftEndObj.setDate(shiftEndObj.getDate() + 1)
-        }
-        
-        const isConfirmedAbsent = new Date() > shiftEndObj
-        
-        if (isConfirmedAbsent) {
-          report.push({
-            employee_id: emp.id,
-            employee_name: emp.name,
-            date: dateStr,
-            regularMinutes: 0,
-            overtimeMinutes: 0,
-            isLate: false,
-            isPenalty: false,
-            lateMinutes: 0,
-            isAbsent: true,
-            sessions: []
-          })
+      }
+
+      // Check for unclaimed shifts (Absences)
+      for (const shift of empDayShifts) {
+        if (!claimedShiftIds.has(shift.id)) {
+          const endTimeStr = shift.end_time || '23:59'
+          const shiftEndObj = new Date(`${dateStr}T${endTimeStr}`)
+          if (shift.start_time && endTimeStr < shift.start_time) {
+            shiftEndObj.setDate(shiftEndObj.getDate() + 1)
+          }
+          
+          if (new Date() > shiftEndObj) {
+            report.push({
+              employee_id: emp.id,
+              employee_name: emp.name,
+              date: dateStr,
+              regularMinutes: 0,
+              overtimeMinutes: 0,
+              isLate: false,
+              isPenalty: false,
+              lateMinutes: 0,
+              isAbsent: true,
+              shift: shift, // Include the shift for absence display
+              sessions: []
+            })
+          }
         }
       }
     }
   }
-  
+
   return report
 }
 
@@ -2603,11 +2619,11 @@ export async function getAttendanceStats(employeeId?: string) {
   const reportData = await getAttendanceReportData(firstDay, lastDay)
   
   if (employeeId) {
-    const empData = reportData.filter(r => r.employee_id === employeeId)
-    const totalRegHours = empData.reduce((sum, r) => sum + r.regularMinutes / 60, 0)
-    const totalOTHours = empData.reduce((sum, r) => sum + r.overtimeMinutes / 60, 0)
-    const lateCount = empData.filter(r => r.isLate).length
-    const penaltyCount = empData.filter(r => r.isPenalty).length
+    const empData = reportData.filter((r: any) => r.employee_id === employeeId)
+    const totalRegHours = empData.reduce((sum: number, r: any) => sum + r.regularMinutes / 60, 0)
+    const totalOTHours = empData.reduce((sum: number, r: any) => sum + r.overtimeMinutes / 60, 0)
+    const lateCount = empData.filter((r: any) => r.isLate).length
+    const penaltyCount = empData.filter((r: any) => r.isPenalty).length
     
     return { 
       totalHours: totalRegHours + totalOTHours, 
@@ -2929,17 +2945,15 @@ export async function addShiftAssignment(assignment: {
   shift_name?: string;
   day_of_week?: number;
 }): Promise<ShiftAssignment | null> {
-  console.log("[v0] addShiftAssignment (UPSERT) called with:", assignment)
+  console.log("[v0] addShiftAssignment (INSERT) called with:", assignment)
+  
+  // IMMUTABILITY: Prevent adding shifts for previous days
+  if (isPastDate(assignment.date)) {
+    console.error("Cannot add shift for a past date")
+    return null
+  }
   
   if (isSupabaseConfigured()) {
-    // Check if a shift already exists for this employee on this date
-    const { data: existing } = await supabase
-      .from('shifts')
-      .select('id')
-      .eq('employee_id', assignment.employee_id)
-      .eq('date', assignment.date)
-      .maybeSingle()
-
     const shiftData: any = {
       employee_id: assignment.employee_id,
       date: assignment.date,
@@ -2948,62 +2962,45 @@ export async function addShiftAssignment(assignment: {
       shift_config_id: assignment.shift_config_id || null
     }
 
-    if (existing) {
-      console.log("[v0] Updating existing shift:", existing.id)
-      const { data, error } = await supabase
-        .from('shifts')
-        .update(shiftData)
-        .eq('id', existing.id)
-        .select('*, employees(name)')
-        .single()
-      
-      if (error) {
-        console.error("Shift update error:", error.message)
-        return null
-      }
-      return {
-        ...data,
-        employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
-      } as ShiftAssignment
-    } else {
-      console.log("[v0] Inserting new shift")
-      const { data, error } = await supabase
-        .from('shifts')
-        .insert([shiftData])
-        .select('*, employees(name)')
-        .single()
-      
-      if (error) {
-        console.error("Shift insert error:", error.message)
-        return null
-      }
-      return {
-        ...data,
-        employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
-      } as ShiftAssignment
+    console.log("[v0] Inserting new shift")
+    const { data, error } = await supabase
+      .from('shifts')
+      .insert([shiftData])
+      .select('*, employees(name)')
+      .single()
+    
+    if (error) {
+      console.error("Shift insert error:", error.message)
+      return null
     }
+    return {
+      ...data,
+      employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
+    } as ShiftAssignment
   }
   
-  // Fallback for localStorage
+  // Fallback...
+  
+  // Fallback for localStorage - ALWAYS INSERT, NO OVERWRITE
   const shifts = await getShiftAssignments()
-  const existingIdx = shifts.findIndex(s => s.employee_id === assignment.employee_id && s.date === assignment.date)
   
-  if (existingIdx >= 0) {
-    shifts[existingIdx] = { ...shifts[existingIdx], ...assignment }
-    setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
-    return shifts[existingIdx]
-  } else {
-    const newShift: ShiftAssignment = {
-      ...assignment,
-      id: generateId('shift')
-    }
-    shifts.push(newShift)
-    setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
-    return newShift
+  const newShift: ShiftAssignment = {
+    ...assignment,
+    id: generateId('shift')
   }
+  shifts.push(newShift)
+  setStoredData(STORAGE_KEYS.shiftAssignments, shifts)
+  return newShift
 }
 
 export async function deleteShiftAssignment(id: string): Promise<boolean> {
+  // IMMUTABILITY: Prevent deleting past shifts
+  const existingShift = await getShiftAssignmentById(id)
+  if (existingShift && isShiftLocked(existingShift.date, existingShift.start_time)) {
+    console.error("Cannot delete a shift that has already started or passed")
+    return false
+  }
+
   if (isSupabaseConfigured()) {
     const { error } = await supabase
       .from('shifts')
@@ -3041,6 +3038,13 @@ export async function getShiftAssignmentById(id: string): Promise<ShiftAssignmen
 }
 
 export async function updateShiftAssignment(id: string, updates: Partial<ShiftAssignment>): Promise<ShiftAssignment | null> {
+  // IMMUTABILITY: Prevent updating past shifts
+  const existingShift = await getShiftAssignmentById(id)
+  if (existingShift && isShiftLocked(existingShift.date, existingShift.start_time)) {
+    console.error("Cannot update a shift that has already started or passed")
+    return null
+  }
+
   if (isSupabaseConfigured()) {
     // Only include valid database columns
     const updateData: any = {}

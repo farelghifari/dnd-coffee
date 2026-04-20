@@ -54,9 +54,10 @@ import {
   GripVertical,
   X,
   Plus,
-  Clock
+  Clock,
+  Lock
 } from "lucide-react"
-import { cn, getLocalYYYYMMDD } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD, isShiftLocked, isPastDate } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -248,40 +249,6 @@ export default function SchedulingPage() {
       startTime = customStartTime
       endTime = customEndTime
     }
-
-    // Validate for full-time employees - max 2 shifts per day
-    // REMOVED: Full-time employees can now have unlimited shifts
-    /*
-    if (employee.employment_type === "full-time") {
-      const existingShiftsByEmployee = shiftAssignments.filter(
-        s => s.employee_id === selectedEmployeeId && s.date === selectedCell.date
-      )
-      if (existingShiftsByEmployee.length >= 2) {
-        setAlertModal({
-          open: true,
-          title: "Shift Limit Reached",
-          description: "Full-time employees can only have a maximum of 2 shifts per day."
-        })
-        return
-      }
-    }
-    */
-
-    // GENERAL LIMIT: Maximum 5 assignments per day
-    // REMOVED: Assignments are now unlimited per day
-    /*
-    const allExistingShiftsForDate = shiftAssignments.filter(
-      s => s.date === selectedCell.date
-    )
-    if (!editingShift && allExistingShiftsForDate.length >= 5) {
-      setAlertModal({
-        open: true,
-        title: "Assignment Limit Reached",
-        description: "A maximum of 5 assignments is allowed per day."
-      })
-      return
-    }
-    */
 
     if (editingShift) {
       console.log("[v0] Updating shift assignment:", {
@@ -530,7 +497,9 @@ export default function SchedulingPage() {
             <div className="grid grid-cols-7 auto-rows-fr flex-1 overflow-y-auto">
               {weekDates.map(({ date, dateStr, dayOfWeek, isCurrentMonth }) => {
                 const isWeekendDay = isWeekend(date)
-                const isTodayDate = isToday(dateStr)
+                const isTodayDate = getLocalYYYYMMDD() === dateStr
+                const isPast = isPastDate(dateStr)
+
                 return (
                 <div
                   key={dateStr}
@@ -539,7 +508,7 @@ export default function SchedulingPage() {
                     !isCurrentMonth && "bg-muted/30 opacity-50",
                     isTodayDate && "bg-foreground/5",
                     isWeekendDay && !isTodayDate && isCurrentMonth && "bg-orange-50/50 dark:bg-orange-950/10",
-                    isPast(dateStr) && "bg-muted/10 grayscale-[0.2]"
+                    isPast && "bg-muted/10 grayscale-[0.2]"
                   )}
                 >
                   <div className="p-1 flex justify-end">
@@ -555,30 +524,37 @@ export default function SchedulingPage() {
                   <div
                     className={cn(
                       "flex-1 p-1 space-y-1 overflow-y-auto",
-                      canEdit && !isPast(dateStr) && "cursor-pointer"
+                      canEdit && !isPast && "cursor-pointer"
                     )}
-                    onDragOver={canEdit && !isPast(dateStr) ? handleDragOver : undefined}
-                    onDrop={canEdit && !isPast(dateStr) ? () => handleDrop(dateStr, dayOfWeek) : undefined}
-                    onClick={canEdit && !isPast(dateStr) ? () => handleCellClick(dateStr, dayOfWeek) : undefined}
+                    onDragOver={canEdit && !isPast ? handleDragOver : undefined}
+                    onDrop={canEdit && !isPast ? () => handleDrop(dateStr, dayOfWeek) : undefined}
+                    onClick={canEdit && !isPastDate(dateStr) ? () => handleCellClick(dateStr, dayOfWeek) : undefined}
                   >
                     {getShiftsForDate(dateStr).map((shift) => {
                       const slotInfo = getTimeSlotInfo(shift)
+                      const isLocked = isShiftLocked(shift.date, shift.start_time)
+                      
                       return (
                         <div
                           key={shift.id}
                           className={cn(
                             "px-1.5 py-1 rounded-sm border relative group shrink-0",
-                            slotInfo.color,
-                            canEdit && !isPast(dateStr) && "cursor-pointer hover:brightness-95",
-                            isPast(dateStr) && "opacity-70 cursor-default"
+                            isLocked ? "bg-muted/30 border-muted-foreground/20 grayscale" : slotInfo.color,
+                            canEdit && !isLocked && !isPastDate(dateStr) && "cursor-pointer hover:brightness-95",
+                            (isLocked || isPastDate(dateStr)) && "cursor-default"
                           )}
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (canEdit && !isPast(dateStr)) handleEditShiftClick(shift)
+                            if (isLocked) return
+                            if (canEdit && !isPastDate(dateStr)) handleEditShiftClick(shift)
                           }}
-                          title={`${shift.start_time.substring(0,5)} - ${shift.end_time.substring(0,5)} | ${shift.employee_name}`}
+                          title={`${shift.start_time.substring(0,5)} - ${shift.end_time.substring(0,5)} | ${shift.employee_name}${isLocked ? " (Locked)" : ""}`}
                         >
-                          {canEdit && !isPast(dateStr) && (
+                          {isLocked && (
+                            <Lock className="w-2.5 h-2.5 absolute top-1 right-1 text-muted-foreground" />
+                          )}
+                          
+                          {canEdit && !isLocked && !isPastDate(dateStr) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRemoveShift(shift.id); }}
                               className="absolute -top-1 -right-1 w-4 h-4 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
@@ -586,7 +562,9 @@ export default function SchedulingPage() {
                               <X className="w-3 h-3" />
                             </button>
                           )}
-                          <p className="font-semibold text-[10px] truncate leading-tight">{shift.employee_name || "Unknown"}</p>
+                          <p className={cn("font-semibold text-[10px] truncate leading-tight", isLocked && "text-muted-foreground")}>
+                            {shift.employee_name || "Unknown"}
+                          </p>
                           <p className="text-[9px] opacity-80 mt-0.5 truncate leading-none">
                             {shift.start_time.substring(0,5)}-{shift.end_time.substring(0,5)}
                           </p>
@@ -643,7 +621,7 @@ export default function SchedulingPage() {
 
       {/* Add Shift Dialog */}
       <Dialog open={isAddShiftOpen} onOpenChange={setIsAddShiftOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-sm">
+        <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto rounded-sm">
           <DialogHeader>
             <DialogTitle>{editingShift ? "Edit Shift" : "Add Shift"}</DialogTitle>
             <DialogDescription>
@@ -674,10 +652,9 @@ export default function SchedulingPage() {
               <div className="text-xs text-muted-foreground p-2 bg-muted/50 rounded-sm">
                 {(() => {
                   const emp = employees.find(e => e.id === selectedEmployeeId)
-                  if (emp?.employment_type === "full-time") {
-                    return "Full-time employees can only select predefined shifts (max 2 per day)"
-                  }
-                  return "Part-time employees can use predefined shifts or set custom times"
+                  return emp?.employment_type === "full-time" 
+                    ? "Full-time employee: Can use predefined shifts or set custom times"
+                    : "Part-time employee: Can use predefined shifts or set custom times"
                 })()}
               </div>
             )}
@@ -689,24 +666,13 @@ export default function SchedulingPage() {
                 value={shiftType} 
                 onValueChange={(val) => setShiftType(val as "predefined" | "custom")}
                 className="flex gap-4"
-                disabled={(() => {
-                  const emp = employees.find(e => e.id === selectedEmployeeId)
-                  return emp?.employment_type === "full-time"
-                })()}
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="predefined" id="predefined" />
                   <Label htmlFor="predefined" className="cursor-pointer">Predefined Shift</Label>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <RadioGroupItem 
-                    value="custom" 
-                    id="custom" 
-                    disabled={(() => {
-                      const emp = employees.find(e => e.id === selectedEmployeeId)
-                      return emp?.employment_type === "full-time"
-                    })()}
-                  />
+                  <RadioGroupItem value="custom" id="custom" />
                   <Label htmlFor="custom" className="cursor-pointer">Custom Time</Label>
                 </div>
               </RadioGroup>
