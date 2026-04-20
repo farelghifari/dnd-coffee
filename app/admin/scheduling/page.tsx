@@ -250,6 +250,8 @@ export default function SchedulingPage() {
     }
 
     // Validate for full-time employees - max 2 shifts per day
+    // REMOVED: Full-time employees can now have unlimited shifts
+    /*
     if (employee.employment_type === "full-time") {
       const existingShiftsByEmployee = shiftAssignments.filter(
         s => s.employee_id === selectedEmployeeId && s.date === selectedCell.date
@@ -263,8 +265,11 @@ export default function SchedulingPage() {
         return
       }
     }
+    */
 
     // GENERAL LIMIT: Maximum 5 assignments per day
+    // REMOVED: Assignments are now unlimited per day
+    /*
     const allExistingShiftsForDate = shiftAssignments.filter(
       s => s.date === selectedCell.date
     )
@@ -276,6 +281,7 @@ export default function SchedulingPage() {
       })
       return
     }
+    */
 
     if (editingShift) {
       console.log("[v0] Updating shift assignment:", {

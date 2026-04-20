@@ -16,15 +16,19 @@ import {
 import { NFCModal } from "./nfc-modal"
 import { StockActionModal } from "./stock-action-modal"
 import { StockWidgets } from "./stock-widgets"
+import { Button } from "@/components/ui/button"
 import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import {
   getInventory,
   addAttendanceLog,
   addStockLog,
+  getShiftOnDate,
+  getScheduledOvertime,
   hasShiftOnDate,
   addOvertimeRequest,
   getDailyWorkDuration,
-  type InventoryItem
+  type InventoryItem,
+  type OvertimeRequest
 } from "@/lib/api/supabase-service"
 
 interface OpsMenuProps {
@@ -54,6 +58,9 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
   const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null)
   const [currentEmployeeName, setCurrentEmployeeName] = useState<string | null>(null)
   const [showStockModal, setShowStockModal] = useState(false)
+  const [showOTPrompt, setShowOTPrompt] = useState(false)
+  const [otPromptMessage, setOTPromptMessage] = useState("")
+  const [pendingOTData, setPendingOTData] = useState<{ employeeId: string; employeeName: string; today: string } | null>(null)
   const [pendingStockAction, setPendingStockAction] = useState<"stock-in" | "stock-out" | "waste" | "opname" | null>(null)
 
   // Load inventory on mount
@@ -110,10 +117,85 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     if (selectedAction === "clock-in" || selectedAction === "clock-out") {
       // Check if employee has a shift today for clock-in
       const today = getLocalYYYYMMDD()
-      const hasShift = await hasShiftOnDate(employeeId, today)
+      const todayShift = await getShiftOnDate(employeeId, today)
+      const hasShift = !!todayShift
 
       if (selectedAction === "clock-in") {
-        // Add attendance log
+        // 1. Check for scheduled overtime first
+        const scheduledOT = await getScheduledOvertime(employeeId, today)
+        
+        if (scheduledOT) {
+          // Pre-approved! Just clock in
+          const attendanceLog = await addAttendanceLog({
+            employee_id: employeeId,
+            employee_name: employeeName,
+            type: selectedAction,
+            method: 'nfc',
+            is_ops_device: true
+          })
+          
+          setShowSuccessMessage(`${employeeName} clocked in for SCHEDULED overtime.`)
+          setSelectedAction(null)
+          setTimeout(() => {
+            setShowSuccessMessage(null)
+            setCurrentEmployeeId(null)
+            setCurrentEmployeeName(null)
+          }, 4000)
+          return
+        }
+
+        // 2. Check regular shift rules
+        if (todayShift) {
+          const shiftStart = new Date(`${todayShift.date}T${todayShift.start_time}`)
+          const shiftEnd = new Date(`${todayShift.date}T${todayShift.end_time}`)
+          if (todayShift.end_time < todayShift.start_time) shiftEnd.setDate(shiftEnd.getDate() + 1)
+          
+          const now = new Date()
+          const earlyMins = Math.round((shiftStart.getTime() - now.getTime()) / 60000)
+          
+          // Rule 1: Too early - show interactive prompt
+          if (earlyMins > 45) {
+            const earliestTime = new Date(shiftStart.getTime() - 45 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+            setOTPromptMessage(`Clock-in too early. ${employeeName} can only clock in from ${earliestTime} (45 mins before shift). Do you want to request overtime instead?`)
+            setPendingOTData({ employeeId, employeeName, today })
+            setShowOTPrompt(true)
+            setSelectedAction(null)
+            return
+          }
+
+          // Rule 3: Post-shift - auto-request OT
+          if (now > shiftEnd) {
+             const attendanceLog = await addAttendanceLog({
+              employee_id: employeeId,
+              employee_name: employeeName,
+              type: selectedAction,
+              method: 'nfc',
+              is_ops_device: true
+            })
+            
+            if (attendanceLog) {
+              await addOvertimeRequest({
+                employee_id: employeeId,
+                employee_name: employeeName,
+                attendance_log_id: attendanceLog.id,
+                request_date: today,
+                clock_in_time: new Date().toISOString(),
+                status: "pending"
+              })
+            }
+            
+            setShowWarningMessage(`${employeeName} clocked in (Post-shift work — Overtime request submitted automatically)`)
+            setSelectedAction(null)
+            setTimeout(() => {
+              setShowWarningMessage(null)
+              setCurrentEmployeeId(null)
+              setCurrentEmployeeName(null)
+            }, 4000)
+            return
+          }
+        }
+
+        // 3. Normal Clock-in Flow (Regular or No-shift OT)
         const attendanceLog = await addAttendanceLog({
           employee_id: employeeId,
           employee_name: employeeName,
@@ -122,7 +204,6 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           is_ops_device: true
         })
         
-        // Calculate current status (lateness etc)
         const duration = await getDailyWorkDuration(employeeId, today)
         
         if (hasShift) {
@@ -239,6 +320,39 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     }, 3000)
   }
 
+  const handleApplyOvertime = async () => {
+    if (!pendingOTData) return
+    const { employeeId, employeeName, today } = pendingOTData
+    
+    const attendanceLog = await addAttendanceLog({
+      employee_id: employeeId,
+      employee_name: employeeName,
+      type: "clock-in",
+      method: 'nfc',
+      is_ops_device: true
+    })
+    
+    if (attendanceLog) {
+      await addOvertimeRequest({
+        employee_id: employeeId,
+        employee_name: employeeName,
+        attendance_log_id: attendanceLog.id,
+        request_date: today,
+        clock_in_time: new Date().toISOString(),
+        status: "pending"
+      })
+    }
+    
+    setShowOTPrompt(false)
+    setPendingOTData(null)
+    setShowWarningMessage(`${employeeName} — Overtime request submitted for early clock-in`)
+    setTimeout(() => {
+      setShowWarningMessage(null)
+      setCurrentEmployeeId(null)
+      setCurrentEmployeeName(null)
+    }, 4000)
+  }
+
   const getActionTitle = (action: ActionType): string => {
     const titles: Record<string, string> = {
       "clock-in": "Clock In",
@@ -306,6 +420,39 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           <div className="bg-[var(--status-critical)] text-background px-12 py-8 rounded-sm flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-200">
             <AlertTriangle className="w-12 h-12" />
             <span className="text-xl font-medium text-center max-w-xs">{showErrorMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Overtime Prompt Message */}
+      {showOTPrompt && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background border border-border max-w-md w-full p-8 rounded-sm shadow-2xl flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-200">
+            <span className="text-xl font-bold text-center">Overtime Required</span>
+            <div className="text-center flex flex-col gap-2">
+              <p className="text-[var(--status-critical)] font-semibold">You are more than 45 minutes early for your shift.</p>
+              <p className="text-muted-foreground text-sm leading-relaxed">Regular clock-in is only permitted within 45 minutes of your scheduled start time. To clock in now, please submit an **Overtime Request** for admin approval.</p>
+            </div>
+            <div className="flex gap-4 w-full">
+              <Button 
+                variant="outline" 
+                className="flex-1 rounded-sm py-6 h-auto text-lg" 
+                onClick={() => {
+                  setShowOTPrompt(false)
+                  setPendingOTData(null)
+                  setCurrentEmployeeId(null)
+                  setCurrentEmployeeName(null)
+                }}
+              >
+                Wait for Shift
+              </Button>
+              <Button 
+                className="flex-1 rounded-sm py-6 h-auto text-lg bg-[var(--status-warning)] hover:bg-[var(--status-warning)]/90 text-background" 
+                onClick={handleApplyOvertime}
+              >
+                Request Overtime
+              </Button>
+            </div>
           </div>
         </div>
       )}

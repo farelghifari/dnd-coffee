@@ -191,6 +191,8 @@ export interface Employee {
   phone_number?: string | null
   avatar_url?: string | null
   contract_pdf_url?: string | null
+  registered_device?: string | null
+  last_device_id?: string | null
   contract_start_date?: string | null
   contract_end_date?: string | null
   // For local/fallback compatibility
@@ -280,6 +282,7 @@ export interface Outlet {
   longitude: number
   radius_meters: number
   is_active: boolean
+  image_url?: string | null
   created_at?: string
 }
 
@@ -356,7 +359,7 @@ export interface OvertimeRequest {
   id: string
   employee_id: string
   employee_name: string
-  attendance_log_id: string
+  attendance_log_id?: string | null
   request_date: string
   clock_in_time: string
   status: "pending" | "approved" | "rejected"
@@ -367,6 +370,8 @@ export interface OvertimeRequest {
   scheduled_end_time?: string
   actual_clock_out_time?: string
   overtime_minutes?: number
+  approved_overtime_minutes?: number
+  is_scheduled?: boolean
 }
 
 // System Activity Log - tracks all system changes
@@ -1625,7 +1630,8 @@ export async function getSalesLogs(): Promise<SalesLog[]> {
 
 export async function getSalesReport(): Promise<SalesReport[]> {
   if (isSupabaseConfigured()) {
-    const { data, error } = await supabase
+    // Try the direct join first
+    let { data, error } = await supabase
       .from('sales_logs')
       .select(`
         menu_id,
@@ -1634,28 +1640,50 @@ export async function getSalesReport(): Promise<SalesReport[]> {
         menu_items(name)
       `)
     
+    // If foreign key relation isn't mapped, fallback to manual join
     if (error) {
-      console.log("ERROR (getSalesReport):", error)
-      return []
+      console.log("Fallback fetching sales_logs due to:", error.message)
+      const { data: rawData, error: rawError } = await supabase
+        .from('sales_logs')
+        .select(`menu_id, quantity, total_price`)
+      
+      if (rawError) return []
+      
+      // Fetch names manually
+      const { data: menuItems } = await supabase.from('menu_items').select('id, name')
+      const nameMap = new Map((menuItems || []).map((m: any) => [m.id, m.name]))
+      
+      data = (rawData || []).map((row: any) => ({
+        ...row,
+        menu_items: { name: nameMap.get(row.menu_id) || 'Unknown' }
+      }))
     }
     
     // Aggregate by menu_id
     const reportMap = new Map<string, SalesReport>()
     
     for (const log of data || []) {
-      const menuId = log.menu_id
-      const menuName = (log.menu_items as unknown as { name: string })?.name || 'Unknown'
+      const menuId = log.menu_id || 'unknown-menu'
+      // Account for both array response or object response based on Supabase relation setup
+      const itemsData = log.menu_items
+      let menuName = 'Unknown'
+      
+      if (Array.isArray(itemsData) && itemsData.length > 0) {
+        menuName = itemsData[0].name
+      } else if (itemsData && typeof itemsData === 'object' && !Array.isArray(itemsData)) {
+        menuName = (itemsData as unknown as { name: string }).name
+      }
       
       if (reportMap.has(menuId)) {
         const existing = reportMap.get(menuId)!
-        existing.total_sold += log.quantity
-        existing.revenue += log.total_price
+        existing.total_sold += log.quantity || 0
+        existing.revenue += log.total_price || 0
       } else {
         reportMap.set(menuId, {
           menu_id: menuId,
           menu_name: menuName,
-          total_sold: log.quantity,
-          revenue: log.total_price
+          total_sold: log.quantity || 0,
+          revenue: log.total_price || 0
         })
       }
     }
@@ -2134,6 +2162,8 @@ export async function getDailyWorkDuration(employeeId: string, date: string): Pr
   const logs = await getAttendanceLogsByDate(date)
   const shifts = await getShiftsByEmployee(employeeId)
   const dayShift = shifts.find(s => s.date === date)
+  const otRequests = await getOvertimeRequestsByEmployee(employeeId)
+  const otMap = new Map(otRequests.map(r => [r.attendance_log_id, r]))
   
   const employeeLogs = logs
     .filter(l => l.employee_id === employeeId && l.status !== 'rejected')
@@ -2147,7 +2177,9 @@ export async function getDailyWorkDuration(employeeId: string, date: string): Pr
     if (action === 'clock-in') {
       currentInLog = log
     } else if (action === 'clock-out' && currentInLog) {
-      const sessionData = calculateRegulatedSession(currentInLog, log, dayShift)
+      const otReq = otMap.get(currentInLog.id)
+      const os = otReq?.status || currentInLog.status || 'none'
+      const sessionData = calculateRegulatedSession(currentInLog, log, dayShift, os, otReq?.approved_overtime_minutes)
       sessions.push(sessionData)
       currentInLog = null
     }
@@ -2155,7 +2187,9 @@ export async function getDailyWorkDuration(employeeId: string, date: string): Pr
 
   // If still clocked in (no clock-out yet), calculate running duration
   if (currentInLog) {
-    const sessionData = calculateRegulatedSession(currentInLog, null, dayShift)
+    const otReq = otMap.get(currentInLog.id)
+    const os = otReq?.status || currentInLog.status || 'none'
+    const sessionData = calculateRegulatedSession(currentInLog, null, dayShift, os, otReq?.approved_overtime_minutes)
     sessions.push(sessionData)
   }
 
@@ -2172,12 +2206,13 @@ export function calculateRegulatedSession(
   clockInLog: AttendanceLog, 
   clockOutLog: AttendanceLog | null, 
   shift?: ShiftAssignment,
-  otStatus: string = "none"
+  otStatus: string = "none",
+  approvedOtMins: number = 0,
+  allDayOts: OvertimeRequest[] = [] // New parameter for smarter splitting
 ) {
   const clockIn = clockInLog.timestamp
   let clockOut = clockOutLog?.timestamp || null
   
-  // Robust fallback: if otStatus is none but log was explicitly handled, use log status
   let effectiveOtStatus = otStatus
   if (effectiveOtStatus === 'none' && (clockInLog.status === 'approved' || clockInLog.status === 'rejected')) {
     effectiveOtStatus = clockInLog.status
@@ -2193,81 +2228,83 @@ export function calculateRegulatedSession(
   if (shift) {
     shiftStart = new Date(`${shift.date}T${shift.start_time}`)
     shiftEnd = new Date(`${shift.date}T${shift.end_time}`)
-    
-    // Handle overnight shifts (e.g. 18:00 to 00:00)
     if (shift.end_time <= shift.start_time) {
       shiftEnd.setDate(shiftEnd.getDate() + 1)
     }
   }
 
-  if (!clockOut) {
-    if (shift && shiftEnd) {
-      const graceEnd = new Date(shiftEnd.getTime() + 15 * 60000)
-      if (cOut > graceEnd) {
-        cOut = graceEnd
-        isAutoClockOut = true // Forgot to clock out
-        clockOut = cOut.toISOString()
-      }
-    } else {
-      const maxEnd = new Date(cIn.getTime() + 8 * 60 * 60000)
-      if (cOut > maxEnd) {
-        cOut = maxEnd
-        isAutoClockOut = true // Auto-end after 8h if no shift
-        clockOut = cOut.toISOString()
+  let maxEnd: Date | null = null
+  if (shift && shiftEnd) {
+    // Base max is shift end + 15m grace
+    maxEnd = new Date(shiftEnd.getTime() + 15 * 60000)
+    
+    // If there's also approved OT, extend maxEnd to cover the OT duration
+    // e.g., shift ends at 14:00, OT starts at 14:00 for 3 hours → maxEnd should be 17:00
+    if (effectiveOtStatus === 'approved' && approvedOtMins > 0) {
+      // For pre-shift OT: OT starts at clockIn, could end after shift starts
+      // For post-shift OT: OT starts at shift end, ends at shift end + approvedOtMins
+      const otEnd = new Date(Math.max(cIn.getTime(), shiftEnd.getTime()) + approvedOtMins * 60000)
+      if (otEnd > maxEnd) {
+        maxEnd = otEnd
       }
     }
+  } else if (effectiveOtStatus === 'approved' && approvedOtMins > 0) {
+    maxEnd = new Date(cIn.getTime() + approvedOtMins * 60000)
+  } else {
+    maxEnd = new Date(cIn.getTime() + 8 * 60 * 60000)
+  }
+
+  if (maxEnd && cOut > maxEnd) {
+    cOut = maxEnd
+    isAutoClockOut = true
+    clockOut = cOut.toISOString()
   }
   
-  // Total actual working minutes of the session
-  const totalMins = Math.round((cOut.getTime() - cIn.getTime()) / 60000)
+  const totalMins = Math.max(0, Math.round((cOut.getTime() - cIn.getTime()) / 60000))
   
   let regMins = 0
   let otMins = 0
   let isLate = false
   let lateMinutes = 0
-  let isPenalty = false // Late > 15m
+  let isPenalty = false
 
+  // 1. Calculate Regular Minutes (strictly within shift bounds)
   if (shift && shiftStart && shiftEnd) {
-    // Rule 1 & 3 & 5 logic
-    
-    // Rule 3: Early Tap-In (up to 1h early allowed, but calculation starts from shiftStart)
-    const oneHourBefore = new Date(shiftStart.getTime() - 60 * 60000)
-    const effectiveStartForReg = new Date(Math.max(cIn.getTime(), shiftStart.getTime()))
-    
-    // Rule 2: Lateness detection (> 15 mins = Penalty)
+    // Late detection
     const delay = Math.round((cIn.getTime() - shiftStart.getTime()) / 60000)
     if (delay > 0) {
       isLate = true
       lateMinutes = delay
-      if (delay > 15) {
-        isPenalty = true // Penalty flag
-      }
+      if (delay > 15) isPenalty = true
     }
-    
-    // Rule 5: Auto tap-out grace period (15m)
-    const graceEnd = new Date(shiftEnd.getTime() + 15 * 60000)
+
+    const effectiveStartForReg = new Date(Math.max(cIn.getTime(), shiftStart.getTime()))
     const effectiveEndForReg = new Date(Math.min(cOut.getTime(), shiftEnd.getTime()))
     
     if (effectiveEndForReg > effectiveStartForReg) {
       regMins = Math.round((effectiveEndForReg.getTime() - effectiveStartForReg.getTime()) / 60000)
-      // Rule 1: Max 8 hours (480 mins) regular per day
-      // Note: Since this is per session, we should cap it in the daily sum too, but let's cap here for safety
-      regMins = Math.min(regMins, 480) 
+      regMins = Math.min(regMins, 480)
     }
 
-    if (clockOutLog && cOut > graceEnd) {
-      isAutoClockOut = true
-      // Auto tap-out means no overtime counted from this session
-      otMins = 0
-    } else if (effectiveOtStatus === 'approved') {
-      // Rule 4: Only approved OT sessions count
-      // This session is flagged as approved OT (usually separate from reg shift)
-      // Any time outside the regular shift bounds in this session is OT
-      const nonRegMins = Math.max(0, totalMins - regMins)
-      otMins = nonRegMins
+    // 2. Calculate Overtime Minutes (Time outside shift bounds)
+    // Check if any approved overtime covers the pre-shift or post-shift periods
+    const preShiftStart = cIn
+    const preShiftEnd = new Date(Math.min(cOut.getTime(), shiftStart.getTime()))
+    if (preShiftEnd > preShiftStart) {
+      const preMins = Math.round((preShiftEnd.getTime() - preShiftStart.getTime()) / 60000)
+      // Only count as OT if this specific session is approved
+      if (effectiveOtStatus === 'approved') otMins += preMins
+    }
+
+    const postShiftStart = new Date(Math.max(cIn.getTime(), shiftEnd.getTime()))
+    const postShiftEnd = cOut
+    if (postShiftEnd > postShiftStart) {
+      const postMins = Math.round((postShiftEnd.getTime() - postShiftStart.getTime()) / 60000)
+      // Only count as OT if this specific session is approved
+      if (effectiveOtStatus === 'approved') otMins += postMins
     }
   } else {
-    // No shift scheduled - session only counts if it's an approved OT
+    // No shift - entire session is overtime ONLY if approved
     if (effectiveOtStatus === 'approved') {
       otMins = totalMins
     }
@@ -2275,7 +2312,7 @@ export function calculateRegulatedSession(
 
   return {
     clockIn,
-    clockOut: clockOut,
+    clockOut,
     minutes: totalMins,
     regularMinutes: regMins,
     overtimeMinutes: otMins,
@@ -2370,12 +2407,12 @@ export async function getAttendanceReportData(startDate: string, endDate: string
     shiftsMap.set(key, shift)
   }
 
-  // Create OT Map for quick lookup by attendance_log_id
-  const otMap = new Map<string, OvertimeRequest>()
+  // Group OT Requests by employee_id and date for broader lookup
+  const otMap = new Map<string, OvertimeRequest[]>()
   for (const ot of allOT) {
-    if (ot.attendance_log_id) {
-       otMap.set(ot.attendance_log_id, ot)
-    }
+    const key = `${ot.employee_id}_${ot.request_date}`
+    if (!otMap.has(key)) otMap.set(key, [])
+    otMap.get(key)!.push(ot)
   }
   
   // Create a list of dates between start and end using local date logic
@@ -2422,19 +2459,20 @@ export async function getAttendanceReportData(startDate: string, endDate: string
           const action = (log.action || log.type || '').toLowerCase()
           
           if (action.includes('in')) {
-            // If there's an existing in-log, push it as active before starting new
             if (currentInLog) {
-              const otReq = otMap.get(currentInLog.id)
-              // FOOLPROOF: If log status is rejected, prioritize that over the OT request status
-              const os = currentInLog.status === 'rejected' ? 'rejected' : (otReq?.status || currentInLog.status || 'none')
-              dailySessions.push(calculateRegulatedSession(currentInLog, null, empDayShift, os))
+              const dayOts = otMap.get(key) || []
+              // Find if this specific log is linked to an OT request
+              const specificOt = dayOts.find(o => o.attendance_log_id === currentInLog!.id)
+              const os = currentInLog.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog.status || 'none')
+              dailySessions.push(calculateRegulatedSession(currentInLog, null, empDayShift, os, specificOt?.approved_overtime_minutes, dayOts))
             }
             currentInLog = log
           } else if (action.includes('out')) {
-            const otReq = currentInLog ? otMap.get(currentInLog.id) : null
-            const os = otReq?.status || (currentInLog?.status) || 'none'
+            const dayOts = otMap.get(key) || []
+            const specificOt = currentInLog ? dayOts.find(o => o.attendance_log_id === currentInLog!.id) : null
+            const os = currentInLog?.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog?.status || 'none')
             
-            const session = calculateRegulatedSession(currentInLog || log, currentInLog ? log : null, empDayShift, os)
+            const session = calculateRegulatedSession(currentInLog || log, currentInLog ? log : null, empDayShift, os, specificOt?.approved_overtime_minutes, dayOts)
             dailySessions.push(session)
             
             if (session.isLate) dayIsLate = true
@@ -2445,16 +2483,17 @@ export async function getAttendanceReportData(startDate: string, endDate: string
             
             currentInLog = null
           } else {
-            // Fallback for weird actions: just push it as a standalone session so it's not lost
-            dailySessions.push(calculateRegulatedSession(log, null, empDayShift, log.status || 'none'))
+            const dayOts = otMap.get(key) || []
+            const specificOt = dayOts.find(o => o.attendance_log_id === log.id)
+            dailySessions.push(calculateRegulatedSession(log, null, empDayShift, log.status || specificOt?.status || 'none', specificOt?.approved_overtime_minutes, dayOts))
           }
         }
 
         if (currentInLog) {
-          const otReq = otMap.get(currentInLog.id)
-          // FOOLPROOF: Priority on log status if rejected
-          const otStatus = currentInLog.status === 'rejected' ? 'rejected' : (otReq?.status || currentInLog.status || 'none')
-          const session = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus)
+          const dayOts = otMap.get(key) || []
+          const specificOt = dayOts.find(o => o.attendance_log_id === currentInLog!.id)
+          const otStatus = currentInLog.status === 'rejected' ? 'rejected' : (specificOt?.status || currentInLog.status || 'none')
+          const session = calculateRegulatedSession(currentInLog, null, empDayShift, otStatus, specificOt?.approved_overtime_minutes, dayOts)
           dailySessions.push(session)
           
           if (session.isLate) dayIsLate = true
@@ -2464,9 +2503,46 @@ export async function getAttendanceReportData(startDate: string, endDate: string
           if (!rowOutletId) rowOutletId = session.outletId
         }
 
+        // UNIFY SESSIONS: Merge contiguous/overlapping sessions into single rows
+        const mergedReportRows: any[] = []
         if (dailySessions.length > 0) {
-          // Push each session as an individual row for full transparency
-          for (const session of dailySessions) {
+          // Sort daily sessions by clock-in time to ensure order for merging
+          const sortedSessions = [...dailySessions].sort((a, b) => new Date(a.clockIn).getTime() - new Date(b.clockIn).getTime())
+          
+          let currentGroup = sortedSessions[0]
+          const finalSessionsForDay: any[] = []
+          
+          for (let i = 1; i < sortedSessions.length; i++) {
+            const nextOne = sortedSessions[i]
+            const currentEnd = new Date(currentGroup.clockOut || new Date())
+            const nextStart = new Date(nextOne.clockIn)
+            
+            // If the next session starts within 15 minutes of the current one ending, merge them
+            const gapMins = (nextStart.getTime() - currentEnd.getTime()) / 60000
+            
+            if (gapMins <= 15) {
+              // Merge them
+              currentGroup = {
+                ...currentGroup,
+                clockOut: nextOne.clockOut || currentGroup.clockOut,
+                minutes: currentGroup.minutes + nextOne.minutes,
+                regularMinutes: currentGroup.regularMinutes + nextOne.regularMinutes,
+                overtimeMinutes: currentGroup.overtimeMinutes + nextOne.overtimeMinutes,
+                isLate: currentGroup.isLate || nextOne.isLate,
+                lateMinutes: Math.max(currentGroup.lateMinutes || 0, nextOne.lateMinutes || 0),
+                isPenalty: currentGroup.isPenalty || nextOne.isPenalty,
+                isAutoClockOut: currentGroup.isAutoClockOut || nextOne.isAutoClockOut,
+                // Combine child sessions for drilling down if needed
+                childSessions: [...(currentGroup.childSessions || [currentGroup]), nextOne]
+              }
+            } else {
+              finalSessionsForDay.push(currentGroup)
+              currentGroup = nextOne
+            }
+          }
+          finalSessionsForDay.push(currentGroup)
+
+          for (const session of finalSessionsForDay) {
             report.push({
               employee_id: emp.id,
               employee_name: emp.name,
@@ -2477,7 +2553,7 @@ export async function getAttendanceReportData(startDate: string, endDate: string
               isPenalty: session.isPenalty || false,
               lateMinutes: session.lateMinutes || 0,
               isAbsent: false,
-              sessions: [session], // Each row represents exactly one session
+              sessions: session.childSessions || [session],
               method: session.method,
               deviceInfo: session.deviceInfo,
               outletId: session.outletId
@@ -2818,19 +2894,28 @@ export async function getShiftsByEmployee(employeeId: string): Promise<ShiftAssi
 }
 
 export async function hasShiftOnDate(employeeId: string, date: string): Promise<boolean> {
+  const shift = await getShiftOnDate(employeeId, date)
+  return !!shift
+}
+
+export async function getShiftOnDate(employeeId: string, date: string): Promise<ShiftAssignment | null> {
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('shifts')
-      .select('id')
+      .select('*')
       .eq('employee_id', employeeId)
       .eq('date', date)
-      .single()
+      .maybeSingle()
     
-    return !error && data !== null
+    if (error) {
+      console.error("ERROR (getShiftOnDate):", error)
+      return null
+    }
+    return data
   }
   
   const shifts = await getShiftAssignments()
-  return shifts.some(s => s.employee_id === employeeId && s.date === date)
+  return shifts.find(s => s.employee_id === employeeId && s.date === date) || null
 }
 
 // SCHEDULING FIX - Insert into shifts: employee_id, date, start_time, end_time, shift_config_id (optional)
@@ -3096,7 +3181,10 @@ export async function getOvertimeRequests(): Promise<OvertimeRequest[]> {
     status: req.status,
     reviewed_by: 'reviewed_by' in req ? req.reviewed_by : (req as { reviewedBy?: string }).reviewedBy,
     reviewed_at: 'reviewed_at' in req ? req.reviewed_at : (req as { reviewedAt?: string }).reviewedAt,
-    notes: req.notes
+    notes: req.notes,
+    is_scheduled: !!('is_scheduled' in req ? req.is_scheduled : (req as { isScheduled?: boolean }).isScheduled),
+    scheduled_end_time: 'scheduled_end_time' in req ? req.scheduled_end_time : (req as { scheduledEndTime?: string }).scheduledEndTime,
+    approved_overtime_minutes: 'approved_overtime_minutes' in req ? req.approved_overtime_minutes : (req as { approvedMinutes?: number }).approvedMinutes
   })) as OvertimeRequest[]
 }
 
@@ -3129,10 +3217,8 @@ export async function addOvertimeRequest(request: Omit<OvertimeRequest, 'id'>): 
       .select()
       .single()
     
-    console.log("DATA (addOvertimeRequest):", data)
-    console.log("ERROR (addOvertimeRequest):", error)
-    
     if (error) {
+      console.error("CRITICAL ERROR (addOvertimeRequest):", error.message || "Unknown error", error)
       return null
     }
     return data
@@ -3148,14 +3234,42 @@ export async function addOvertimeRequest(request: Omit<OvertimeRequest, 'id'>): 
   return newRequest
 }
 
-export async function approveOvertimeRequest(id: string, reviewerName: string): Promise<OvertimeRequest | null> {
+export async function updateOvertimeRequest(id: string, updates: Partial<OvertimeRequest>): Promise<OvertimeRequest | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('overtime_requests')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) {
+      console.error("ERROR (updateOvertimeRequest):", error.message, error)
+      return null
+    }
+    return data
+  }
+  
+  const requests = await getOvertimeRequests()
+  const index = requests.findIndex((r: OvertimeRequest) => r.id === id)
+  if (index === -1) return null
+  
+  const updatedReq: OvertimeRequest = { ...requests[index], ...updates }
+  requests[index] = updatedReq
+  setStoredData(STORAGE_KEYS.overtimeRequests, requests)
+  return updatedReq
+}
+
+
+export async function approveOvertimeRequest(id: string, reviewerName: string, approvedMinutes: number = 0): Promise<OvertimeRequest | null> {
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('overtime_requests')
       .update({
         status: 'approved',
         reviewed_by: reviewerName,
-        reviewed_at: new Date().toISOString()
+        reviewed_at: new Date().toISOString(),
+        approved_overtime_minutes: approvedMinutes
       })
       .eq('id', id)
       .select()
@@ -3176,7 +3290,8 @@ export async function approveOvertimeRequest(id: string, reviewerName: string): 
     ...requests[index],
     status: 'approved' as const,
     reviewed_by: reviewerName,
-    reviewed_at: new Date().toISOString()
+    reviewed_at: new Date().toISOString(),
+    approved_overtime_minutes: approvedMinutes
   }
   
   requests[index] = updatedReq
@@ -3230,6 +3345,73 @@ export async function rejectOvertimeRequest(id: string, reviewerName: string, no
   }
   
   return requests[index]
+}
+
+export async function deleteOvertimeRequest(id: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('overtime_requests')
+      .delete()
+      .eq('id', id)
+    
+    if (error) {
+      console.error("ERROR (deleteOvertimeRequest):", error)
+      return false
+    }
+    return true
+  }
+  
+  const requests = await getOvertimeRequests()
+  const filtered = requests.filter(r => r.id !== id)
+  if (requests.length === filtered.length) return false
+  
+  setStoredData(STORAGE_KEYS.overtimeRequests, filtered)
+  return true
+}
+
+export async function getOvertimeRequestsByEmployee(employeeId: string): Promise<OvertimeRequest[]> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('overtime_requests')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('request_date', { ascending: false })
+    
+    if (error) {
+      console.error("ERROR (getOvertimeRequestsByEmployee):", error)
+      return []
+    }
+    return data || []
+  }
+  
+  const requests = await getOvertimeRequests()
+  return requests.filter(r => r.employee_id === employeeId)
+}
+
+export async function getScheduledOvertime(employeeId: string, date: string): Promise<OvertimeRequest | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('overtime_requests')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .eq('request_date', date)
+      .eq('is_scheduled', true)
+      .eq('status', 'approved')
+      .maybeSingle()
+    
+    if (error) {
+      console.error("ERROR (getScheduledOvertime):", error)
+      return null
+    }
+    return data
+  }
+  
+  const requests = await getOvertimeRequests()
+  return requests.find(r => 
+    r.employee_id === employeeId && 
+    r.request_date === date && 
+    r.is_scheduled === true
+  ) || null
 }
 
 // ========== HELPER FUNCTIONS ==========
@@ -3410,16 +3592,9 @@ export async function getOnShiftEmployees(): Promise<Employee[]> {
 
     const empShift = allShifts.find(s => s.employee_id === empId && s.date === lastInLog.date)
     const otReq = otMap.get(lastInLog.id)
-    
-    // Explicitly hide employees from "On Shift" if they don't have a shift 
-    // AND their overtime request is not yet approved.
-    if (!empShift && otReq?.status !== 'approved') {
-      clockedIn.delete(empId)
-      continue
-    }
 
     // Reuse the regulation logic. If it determines an auto-clock-out, remove from list.
-    const session = calculateRegulatedSession(lastInLog, null, empShift, otReq?.status)
+    const session = calculateRegulatedSession(lastInLog, null, empShift, otReq?.status, otReq?.approved_overtime_minutes)
     if (session.isAutoClockOut) {
       clockedIn.delete(empId)
     }
@@ -4486,18 +4661,7 @@ export async function upsertMonthlyTarget(target: Omit<MonthlyTarget, 'id'>): Pr
 }
 
 async function calculateAutoTarget(month: string): Promise<MonthlyTarget | null> {
-  // Logic: Avg of last 3 months + Growth % (default 10%)
-  // For simplicity here, we'll fetch last 3 months and calculate
-  // But to stay performant for now, let's return a default based on current run if it's the first time
-  return {
-    id: 'auto-' + month,
-    month: month,
-    revenue_target: 10000000, // Default 10M IDR fallback
-    sales_target: 500,        // Default 500 units
-    aov_target: 20000,        // Default 20k AOV
-    growth_percentage: 10,
-    is_automatic: true
-  }
+  return null
 }
 
 // ========== FINANCIAL ANALYTICS ==========

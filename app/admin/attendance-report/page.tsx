@@ -56,6 +56,16 @@ export default function AttendanceReportPage() {
   const [resolveTimes, setResolveTimes] = useState({ clockIn: "08:00", clockOut: "17:00" })
   const [isResolving, setIsResolving] = useState(false)
 
+  const refreshReport = async (silent = false) => {
+    if (!silent) setIsLoading(true)
+    const data = await getAttendanceReportData(
+      format(dateRange.from, "yyyy-MM-dd"),
+      format(dateRange.to, "yyyy-MM-dd")
+    )
+    setReportData(data)
+    if (!silent) setIsLoading(false)
+  }
+
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
@@ -77,15 +87,14 @@ export default function AttendanceReportPage() {
     fetchData()
   }, [])
 
-  const refreshReport = async () => {
-    setIsLoading(true)
-    const data = await getAttendanceReportData(
-      format(dateRange.from, "yyyy-MM-dd"),
-      format(dateRange.to, "yyyy-MM-dd")
-    )
-    setReportData(data)
-    setIsLoading(false)
-  }
+  // Auto-refresh active session durations every 15 seconds (silent)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshReport(true)
+    }, 15000)
+    return () => clearInterval(interval)
+  })
+
 
   // Helper to parse YYYY-MM-DD to local Date without UTC shifting
   const parseLocalDate = (dateStr: string) => {
@@ -441,10 +450,12 @@ export default function AttendanceReportPage() {
                                <span className="font-mono text-muted-foreground">
                                  {row.sessions[row.sessions.length - 1].clockOut 
                                    ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
-                                   : (!shift && row.sessions[0]?.otStatus === 'rejected') ? (
+                                   : (row.sessions[0]?.otStatus === 'rejected') ? (
                                      <span className="text-destructive font-bold text-[10px] uppercase tracking-wider bg-destructive/10 px-1 py-0.5 rounded-sm">Rejected</span>
-                                   ) : (!shift && (row.sessions[0]?.otStatus === 'pending' || row.sessions[0]?.otStatus === 'none')) ? (
-                                     <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending OT</span>
+                                   ) : (row.sessions[0]?.otStatus === 'pending') ? (
+                                     <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending</span>
+                                   ) : (row.sessions[0]?.otStatus === 'approved') ? (
+                                     <span className="text-green-500 font-bold text-[10px] uppercase tracking-wider bg-green-500/10 px-1 py-0.5 rounded-sm">Active</span>
                                    ) : "Active"}
                                </span>
                             </div>
@@ -534,12 +545,12 @@ export default function AttendanceReportPage() {
                           <span className={cn(row.overtimeMinutes > 0 ? "text-amber-600 font-bold" : "text-muted-foreground")}>
                             {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.overtimeMinutes)}
                           </span>
-                          {!shift && !row.isAbsent && row.sessions[0]?.otStatus && (
+                          {!row.isAbsent && row.sessions[0]?.otStatus && row.sessions[0].otStatus !== 'none' && (
                             <Badge variant="outline" className={cn(
                               "text-[8.5px] uppercase px-1 py-0 h-4 border-none leading-none tracking-tight",
                               row.sessions[0].otStatus === 'approved' ? "text-green-600 bg-green-500/10" :
                               row.sessions[0].otStatus === 'rejected' ? "text-destructive bg-destructive/10" :
-                              "text-muted-foreground bg-muted"
+                              "text-amber-600 bg-amber-500/10"
                             )}>
                               OT {row.sessions[0].otStatus}
                             </Badge>

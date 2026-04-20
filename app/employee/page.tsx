@@ -12,15 +12,18 @@ import {
   getOverallStockHealth,
   getStockHealth,
   getShiftConfigs,
-   getAttendanceStats,
+  getAttendanceStats,
+  getScheduledOvertime,
    getEmployeePayrolls,
-   getOvertimeRequests,
+   getOvertimeRequestsByEmployee,
    addOvertimeRequest,
+   getShiftOnDate,
    hasShiftOnDate,
    getDailyWorkDuration,
    calculateRegulatedSession,
    getOutlets,
    addAttendanceLog,
+   updateEmployee,
    type Employee,
    type AttendanceLog,
   type InventoryItem,
@@ -30,6 +33,14 @@ import {
   type OvertimeRequest,
   type Outlet
 } from "@/lib/api/supabase-service"
+import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -80,6 +91,8 @@ export default function EmployeeDashboard() {
   const [isLocating, setIsLocating] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
+  const [isOTPromptOpen, setIsOTPromptOpen] = useState(false)
+  const [otPromptMessage, setOTPromptMessage] = useState("")
 
   const fetchData = async () => {
     if (!user?.employeeId) {
@@ -98,7 +111,7 @@ export default function EmployeeDashboard() {
       getShiftConfigs(),
       getAttendanceStats(user.employeeId),
       getEmployeePayrolls(user.employeeId),
-      getOvertimeRequests(),
+      getOvertimeRequestsByEmployee(user.employeeId),
       getOutlets()
     ])
 
@@ -184,6 +197,15 @@ export default function EmployeeDashboard() {
   
   const lastWasRejected = todayAttendance.length > 0 && lastAttendance.status === "rejected"
 
+  // Determine current overtime status for this session
+  const currentOTRequest = clockedIn && lastAttendance
+    ? overtimeRequests.find(ot => ot.attendance_log_id === lastAttendance.id)
+    : null
+  const currentOTStatus = currentOTRequest?.status || null // 'pending' | 'approved' | 'rejected' | null
+
+  // Get today's shift
+  const todayShift = myShifts.find(s => s.date === today)
+
   // Get low stock items for alerts
   const lowStockItems = getLowStockItems(inventory)
 
@@ -228,6 +250,16 @@ export default function EmployeeDashboard() {
     return diff / 60
   }
 
+  const getDeviceId = () => {
+    if (typeof window === 'undefined') return "unknown"
+    let id = localStorage.getItem('dnd_device_id')
+    if (!id) {
+      id = `dnd-dev-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`
+      localStorage.setItem('dnd_device_id', id)
+    }
+    return id
+  }
+
   const handleClockAction = async (type: "clock-in" | "clock-out") => {
     if (!user?.employeeId || !userLocation || !nearestOutlet) {
       toast.error("Required data missing. Ensure GPS is enabled.")
@@ -244,11 +276,93 @@ export default function EmployeeDashboard() {
 
     // Capture device info
     const deviceInfo = `${navigator.platform} - ${navigator.userAgent.split(')')[0].split('(')[1]}`
-    
+    const deviceFingerprint = getDeviceId()
+
+    // Rule: Strict Device Lock
+    if (employee?.registered_device && employee.registered_device !== deviceFingerprint) {
+      toast.error("Device Mismatch: This account is locked to another device. Please contact Admin if you changed your phone.")
+      return
+    }
     try {
       const today = getLocalYYYYMMDD()
-      const hasShift = await hasShiftOnDate(user.employeeId, today)
+      const todayShift = await getShiftOnDate(user.employeeId, today)
+      const hasShift = !!todayShift
       
+      // 1. Check for scheduled overtime first
+      const scheduledOT = await getScheduledOvertime(user.employeeId, today)
+
+      if (type === "clock-in") {
+        if (scheduledOT) {
+          const attendanceLog = await addAttendanceLog({
+            employee_id: user.employeeId,
+            employee_name: employee?.name || user.name,
+            type,
+            method: 'personal',
+            device_info: deviceInfo,
+            latitude: userLocation.lat,
+            longitude: userLocation.lng,
+            outlet_id: nearestOutlet.outlet.id,
+            is_ops_device: false
+          })
+          
+          if (attendanceLog) {
+            toast.success("Clocked in for SCHEDULED overtime!")
+            await fetchData()
+          }
+          setIsSubmitting(false)
+          return
+        }
+
+        // 2. Check regular shift rules
+        if (todayShift) {
+          const shiftStart = new Date(`${todayShift.date}T${todayShift.start_time}`)
+          const shiftEnd = new Date(`${todayShift.date}T${todayShift.end_time}`)
+          if (todayShift.end_time < todayShift.start_time) shiftEnd.setDate(shiftEnd.getDate() + 1)
+          
+          const now = new Date()
+          const earlyMins = Math.round((shiftStart.getTime() - now.getTime()) / 60000)
+          
+          // Rule 1: Too early - show interactive prompt
+          if (earlyMins > 45) {
+            const earliestTime = new Date(shiftStart.getTime() - 45 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+            setOTPromptMessage(`Clock-in too early. You can only clock in from ${earliestTime} (45 mins before shift). Do you want to request overtime instead?`)
+            setIsOTPromptOpen(true)
+            setIsSubmitting(false)
+            return
+          }
+
+          // Rule 3: Post-shift - auto-request OT
+          if (now > shiftEnd) {
+            const attendanceLog = await addAttendanceLog({
+              employee_id: user.employeeId,
+              employee_name: employee?.name || user.name,
+              type,
+              method: 'personal',
+              device_info: deviceInfo,
+              latitude: userLocation.lat,
+              longitude: userLocation.lng,
+              outlet_id: nearestOutlet.outlet.id,
+              is_ops_device: false
+            })
+            
+            if (attendanceLog) {
+              await addOvertimeRequest({
+                employee_id: user.employeeId,
+                employee_name: employee?.name || user.name || "Unknown",
+                attendance_log_id: attendanceLog.id,
+                request_date: today,
+                clock_in_time: new Date().toISOString(),
+                status: "pending"
+              })
+              toast.warning("Clocked in (Post-shift work — Overtime request submitted automatically)")
+              await fetchData()
+            }
+            setIsSubmitting(false)
+            return
+          }
+        }
+      }
+
       const attendanceLog = await addAttendanceLog({
         employee_id: user.employeeId,
         employee_name: employee?.name || user.name,
@@ -262,6 +376,9 @@ export default function EmployeeDashboard() {
       })
 
       if (attendanceLog) {
+        // Update last_device_id in employee profile
+        await updateEmployee(user.employeeId, { last_device_id: deviceFingerprint })
+        
         if (type === "clock-in") {
           const duration = await getDailyWorkDuration(user.employeeId, today)
           
@@ -294,6 +411,46 @@ export default function EmployeeDashboard() {
       }
     } catch (error) {
       toast.error("An error occurred")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleMobileOvertimeRequest = async () => {
+    if (!user?.employeeId || !userLocation || !nearestOutlet) return
+    
+    setIsSubmitting(true)
+    const today = getLocalYYYYMMDD()
+    const deviceInfo = `${navigator.platform} - ${navigator.userAgent.split(')')[0].split('(')[1]}`
+    
+    try {
+      const attendanceLog = await addAttendanceLog({
+        employee_id: user.employeeId,
+        employee_name: employee?.name || user.name,
+        type: "clock-in",
+        method: 'personal',
+        device_info: deviceInfo,
+        latitude: userLocation.lat,
+        longitude: userLocation.lng,
+        outlet_id: nearestOutlet.outlet.id,
+        is_ops_device: false
+      })
+      
+      if (attendanceLog) {
+        await addOvertimeRequest({
+          employee_id: user.employeeId,
+          employee_name: employee?.name || user.name || "Unknown",
+          attendance_log_id: attendanceLog.id,
+          request_date: today,
+          clock_in_time: new Date().toISOString(),
+          status: "pending"
+        })
+        toast.warning("Overtime request submitted for early clock-in")
+        setIsOTPromptOpen(false)
+        await fetchData()
+      }
+    } catch (error) {
+      toast.error("Failed to submit overtime request")
     } finally {
       setIsSubmitting(false)
     }
@@ -403,15 +560,37 @@ export default function EmployeeDashboard() {
             <Clock className="h-4 w-4" />
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-1.5">
               {clockedIn ? (
                 <>
-                  <Badge variant="default" className="bg-green-500 hover:bg-green-600 rounded-sm">
-                    Clocked In
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    Since {todayAttendance[0] && format(new Date(todayAttendance[0].timestamp), "HH:mm")}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {currentOTStatus === 'pending' ? (
+                      <Badge variant="outline" className="rounded-sm border-amber-500/50 text-amber-600 bg-amber-500/10 animate-pulse">
+                        OT Pending
+                      </Badge>
+                    ) : currentOTStatus === 'approved' ? (
+                      <Badge variant="default" className="bg-green-500 hover:bg-green-600 rounded-sm">
+                        OT Active
+                      </Badge>
+                    ) : currentOTStatus === 'rejected' ? (
+                      <Badge variant="destructive" className="rounded-sm">
+                        OT Rejected
+                      </Badge>
+                    ) : (
+                      <Badge variant="default" className="bg-green-500 hover:bg-green-600 rounded-sm">
+                        Clocked In
+                      </Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      Since {todayAttendance[0] && format(new Date(todayAttendance[0].timestamp), "HH:mm")}
+                    </span>
+                  </div>
+                  {currentOTStatus === 'pending' && (
+                    <p className="text-[10px] text-amber-600 italic">Awaiting admin approval — hours not counted until approved</p>
+                  )}
+                  {currentOTStatus === 'rejected' && (
+                    <p className="text-[10px] text-destructive italic">Overtime was rejected — please clock out</p>
+                  )}
                 </>
               ) : (
                 <Badge variant="secondary" className="rounded-sm">Not Clocked In</Badge>
@@ -489,34 +668,48 @@ export default function EmployeeDashboard() {
           <CardContent>
             {(() => {
               const todayShift = myShifts.find(s => s.date === today)
-              if (todayShift) {
-                const shiftType = getShiftType(todayShift)
-                return (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-semibold">{getShiftDisplayName(todayShift)}</span>
-                      <Badge 
-                        variant="outline" 
-                        className={shiftType === "Full Time" 
-                          ? "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800" 
-                          : "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800"
-                        }
-                      >
-                        {shiftType}
-                      </Badge>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {todayShift.start_time} - {todayShift.end_time}
-                    </span>
-                  </div>
-                )
-              }
+              const todayOT = overtimeRequests.find(r => r.request_date === today && r.is_scheduled && r.status === "approved")
+              
               return (
-                <div className="flex flex-col">
-                  <span className="text-lg font-semibold text-muted-foreground">No Shift</span>
-                  <span className="text-xs text-muted-foreground">
-                    No shift scheduled for today
-                  </span>
+                <div className="flex flex-col gap-3">
+                  {todayShift ? (
+                    <div className="flex flex-col gap-1 pb-3 lg:pb-0 lg:border-b-0 border-b border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-semibold">{getShiftDisplayName(todayShift)}</span>
+                        <Badge 
+                          variant="outline" 
+                          className={getShiftType(todayShift) === "Full Time" 
+                            ? "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800" 
+                            : "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800"
+                          }
+                        >
+                          {getShiftType(todayShift)}
+                        </Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {todayShift.start_time} - {todayShift.end_time}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col pb-3 lg:pb-0 lg:border-b-0 border-b border-border/50">
+                      <span className="text-lg font-semibold text-muted-foreground">No Shift</span>
+                      <span className="text-xs text-muted-foreground">
+                        No shift scheduled for today
+                      </span>
+                    </div>
+                  )}
+
+                  {todayOT && (
+                    <div className="flex flex-col gap-1 pt-1 lg:pt-3 lg:border-t border-border/50">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-semibold text-blue-600 dark:text-blue-400">Scheduled Overtime</span>
+                        <Badge className="bg-blue-500 hover:bg-blue-600 rounded-sm">Approved</Badge>
+                      </div>
+                      <span className="text-xs font-medium text-blue-800 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/30 self-start px-2 py-0.5 rounded-sm">
+                        From {format(new Date(todayOT.clock_in_time), "HH:mm")} (Limit: {todayOT.approved_overtime_minutes}m)
+                      </span>
+                    </div>
+                  )}
                 </div>
               )
             })()}
@@ -1155,6 +1348,37 @@ export default function EmployeeDashboard() {
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {/* Overtime Request Prompt Dialog */}
+      <Dialog open={isOTPromptOpen} onOpenChange={setIsOTPromptOpen}>
+        <DialogContent className="sm:max-w-[400px] rounded-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-primary font-bold">
+              <Clock className="w-5 h-5 text-orange-500" />
+              Overtime Required
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-foreground">
+              <p className="font-medium text-destructive mb-2">You are attempting to clock in more than 45 minutes before your shift starts.</p>
+              <p className="text-sm">Regular clock-in is only permitted within 45 minutes of your scheduled start time. To clock in now, please submit an **Overtime Request** for admin approval.</p>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-muted/30 p-3 rounded-sm text-[11px] border border-orange-200 dark:border-orange-950 text-muted-foreground italic">
+            Note: All early work must be approved to be counted towards your payroll.
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setIsOTPromptOpen(false)} className="rounded-sm flex-1">
+              Wait for Shift
+            </Button>
+            <Button 
+              onClick={handleMobileOvertimeRequest} 
+              disabled={isSubmitting}
+              className="rounded-sm flex-1 bg-orange-600 hover:bg-orange-700"
+            >
+              Request Overtime
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

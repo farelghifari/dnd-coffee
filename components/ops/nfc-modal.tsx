@@ -83,7 +83,8 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
       
       if (employee) {
         setStatus("success")
-        setMessage(`Welcome, ${employee.nickname || employee.name}!`)
+        const isClockOut = title.toLowerCase().includes("clock out")
+        setMessage(`${isClockOut ? 'Good Bye' : 'Welcome'}, ${employee.nickname || employee.name}!`)
         setTimeout(() => {
           onSuccess(employee.id, employee.nickname || employee.name)
         }, 1500)

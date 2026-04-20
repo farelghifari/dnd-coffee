@@ -268,7 +268,7 @@ export default function AnalyticsPage() {
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-1">Status as of {format(new Date(), "MMMM yyyy")}</p>
             </div>
-            {target && financials && (
+            {target && financials && target.revenue_target > 0 && (
               <Badge className={cn("rounded-sm px-3", 
                 (financials.revenue / target.revenue_target) < 0.8 ? "bg-red-500 hover:bg-red-500" :
                 (financials.revenue / target.revenue_target) < 1.0 ? "bg-amber-500 hover:bg-amber-500" :
@@ -286,7 +286,7 @@ export default function AnalyticsPage() {
             )}
           </CardHeader>
           <CardContent>
-            {target && financials ? (
+            {target && financials && target.revenue_target > 0 ? (
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm items-end mb-1">
@@ -312,8 +312,9 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             ) : (
-              <div className="h-32 flex items-center justify-center border border-dashed rounded-sm">
-                <p className="text-sm text-muted-foreground">Initializing monthly targets...</p>
+              <div className="h-32 flex flex-col items-center justify-center border border-dashed rounded-sm gap-2 mt-4">
+                <Target className="w-6 h-6 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No target has been set for this month</p>
               </div>
             )}
           </CardContent>
@@ -528,7 +529,11 @@ export default function AnalyticsPage() {
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center py-8">
                   <Calculator className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">Enter your fixed costs to calculate BEP</p>
+                  <p className="text-muted-foreground">
+                    {totalSalesVolume === 0 
+                      ? "Requires sales data to establish average price and cost" 
+                      : "Enter your fixed costs to calculate BEP"}
+                  </p>
                   <p className="text-sm text-muted-foreground mt-1">
                     BEP helps you understand how many items you need to sell to cover your costs
                   </p>
