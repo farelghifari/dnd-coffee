@@ -15,6 +15,7 @@ import {
   toBaseUnit,
   getAllowedUnitsForItem,
   getDefaultDisplayUnit,
+  processSale,
   type InventoryItem,
   type MenuItem,
   type MenuRecipeIngredient,
@@ -59,6 +60,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+import { ShoppingCart } from "lucide-react"
 
 const categories = ["all", "coffee", "non-coffee", "food"] as const
 const menuCategoryOptions = ["coffee", "non-coffee", "food"] as const
@@ -174,6 +177,26 @@ export default function MenuPage() {
     // Fetch HPP for all menus
     await fetchMenuHpp(menuData)
     setIsLoading(false)
+  }
+
+  const handleTestSale = async (item: MenuItem) => {
+    try {
+      setIsLoading(true)
+      const result = await processSale([item.id], [1], "Simulation")
+      if (result) {
+        toast.success(`Sold 1 ${item.name}! Ingredients deducted.`, {
+          description: "Check Report or Batch Tracking to see changes."
+        })
+        // Realtime update should handle this, but let's refetch to be sure
+        fetchData()
+      } else {
+        toast.error("Failed to record sale.")
+      }
+    } catch (err) {
+      toast.error("An error occurred.")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const filteredMenu = menuItems.filter((item) => {
@@ -466,9 +489,9 @@ export default function MenuPage() {
                     {item.recipe.ingredients.map((ing, idx) => {
                       const invItem = inventory.find((i) => i.id === ing.inventory_item_id)
                       return (
-                        <li key={idx} className="text-sm flex justify-between">
-                          <span>{getIngredientName(ing.inventory_item_id)}</span>
-                          <span className="text-muted-foreground font-mono">
+                        <li key={idx} className="text-sm flex justify-between gap-2">
+                          <span className="truncate">{getIngredientName(ing.inventory_item_id)}</span>
+                          <span className="text-muted-foreground font-mono shrink-0">
                             {ing.quantity} {invItem?.unit}
                           </span>
                         </li>
@@ -487,6 +510,16 @@ export default function MenuPage() {
                 onClick={() => openIngredientsModal(item)}
               >
                 Manage Ingredients
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 w-full border-green-200 bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-900/10 dark:border-green-900/20 dark:text-green-400"
+                onClick={() => handleTestSale(item)}
+                disabled={isLoading}
+              >
+                <ShoppingCart className="w-3 h-3 mr-2" />
+                Test Sale (1 qty)
               </Button>
             </CardContent>
           </Card>

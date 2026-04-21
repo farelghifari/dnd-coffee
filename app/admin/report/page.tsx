@@ -7,10 +7,12 @@ import {
   getSalesLogsGroupedByDate,
   bulkSellMenu,
   getInventory,
+  getBatches,
   getAllMenuRecipes,
   fromBaseUnit,
   subscribeToSalesLogs,
   subscribeToInventoryItems,
+  subscribeToInventoryBatches,
   type MenuItem,
   type SalesReport,
   type SalesLogGrouped,
@@ -65,6 +67,7 @@ export default function ReportPage() {
   const [salesReport, setSalesReport] = useState<SalesReport[]>([])
   const [salesLogsGrouped, setSalesLogsGrouped] = useState<SalesLogGrouped[]>([])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [batches, setBatches] = useState<any[]>([])
   const [recipes, setRecipes] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState("")
@@ -75,18 +78,20 @@ export default function ReportPage() {
 
   const fetchData = async () => {
     setIsLoading(true)
-    const [menuData, reportData, logsGroupedData, inventoryData, recipeData] = await Promise.all([
+    const [menuData, reportData, logsGroupedData, inventoryData, recipeData, batchData] = await Promise.all([
       getMenuItems(),
       getSalesReport(),
       getSalesLogsGroupedByDate(),
       getInventory(),
-      getAllMenuRecipes()
+      getAllMenuRecipes(),
+      getBatches()
     ])
     setMenuItems(menuData)
     setSalesReport(reportData)
     setSalesLogsGrouped(logsGroupedData)
     setInventory(inventoryData)
     setRecipes(recipeData)
+    setBatches(batchData)
     setIsLoading(false)
   }
 
@@ -105,10 +110,15 @@ export default function ReportPage() {
     const unsubInventory = subscribeToInventoryItems(() => {
       getInventory().then(setInventory)
     })
+
+    const unsubInventoryBatches = subscribeToInventoryBatches(() => {
+      getBatches().then(setBatches)
+    })
     
     return () => {
       unsubSalesLogs()
       unsubInventory()
+      unsubInventoryBatches()
     }
   }, [])
 
@@ -517,17 +527,22 @@ export default function ReportPage() {
                   </thead>
                   <tbody>
                     {inventory.map((item) => {
+                      // CALC: Get only "OPENED" batches for this item (Active Bar Stock)
+                      const itemOpenedBatches = batches.filter(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
+                      const activeBarStockBase = itemOpenedBatches.reduce((sum, b) => sum + (b.remaining_quantity || b.currentQuantity || 0), 0)
+                      
                       const baseStock = item.stock || item.current_stock || 0
-                      const maxStock = item.max_stock || 100 // Fallback
+                      const maxStock = item.max_stock || 100 
                       const baseConsumption = inventoryConsumption[item.id] || 0
-                      const displayUnit = (item.display_unit || item.unit) as DisplayUnit
                       
-                      // Convert base unit values to display unit
-                      const stock = fromBaseUnit(baseStock, displayUnit)
-                      const consumption = fromBaseUnit(baseConsumption, displayUnit)
+                      // Values for display - use RAW BASE UNIT (gram/ml) for precision
+                      const unitToDisplay = item.unit || "g"
+                      const stock = activeBarStockBase
+                      const consumption = baseConsumption
                       
-                      const progress = Math.min(100, Math.max(0, (baseStock / maxStock) * 100))
-                      const statusColor = baseStock <= 0 ? "bg-[var(--status-critical)]" : baseStock <= (item.min_stock || 10) ? "bg-[var(--status-warning)]" : "bg-[var(--status-healthy)]"
+                      // Progress bar reflects active stock against some threshold 
+                      const progress = Math.min(100, Math.max(0, (activeBarStockBase / (item.max_stock || 1000)) * 100))
+                      const statusColor = activeBarStockBase <= 0 ? "bg-[var(--status-critical)]" : activeBarStockBase <= (item.min_stock || 100) ? "bg-[var(--status-warning)]" : "bg-[var(--status-healthy)]"
                       
                       return (
                         <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
@@ -549,13 +564,13 @@ export default function ReportPage() {
                               <span className={cn(consumption > 0 ? "text-orange-500 font-bold" : "text-muted-foreground")}>
                                 {consumption > 0 ? `-${Number(consumption.toFixed(2))}` : '0'} 
                               </span>
-                              <span className="text-[10px] text-muted-foreground font-bold">{displayUnit}</span>
+                              <span className="text-[10px] text-muted-foreground font-bold">{unitToDisplay}</span>
                             </div>
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex flex-col items-end">
                               <span className="font-mono font-bold text-sm">{Number(stock.toFixed(2))}</span>
-                              <span className="text-[10px] text-muted-foreground font-bold">{displayUnit}</span>
+                              <span className="text-[10px] text-muted-foreground font-bold">{unitToDisplay}</span>
                             </div>
                           </td>
                         </tr>

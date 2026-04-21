@@ -118,42 +118,17 @@ export default function BatchesPage() {
         getBatches(),
         getInventory()
       ])
-      const mappedBatches: (InventoryBatch & { category?: string })[] = fetchedBatches.map((b: any) => {
-        let status: BatchStatus = "active"
-        const remaining = Number(b.remaining_quantity)
-        const daysToExpiry = getDaysUntilExpiry(b.expired_date)
-        if (remaining <= 0) status = "depleted"
+      
+      const mappedBatches = fetchedBatches.map((b: any) => {
+        let status = b.status
+        const daysToExpiry = getDaysUntilExpiry(b.expiryDate)
+        
+        if (b.currentQuantity <= 0) status = "depleted"
         else if (daysToExpiry <= 0) status = "expired"
 
-        const item = fetchedInventory.find((i: any) => i.id === b.item_id)
-
-        // Get display unit for this item
-        const displayUnit = (item?.display_unit || getDefaultDisplayUnit(item?.unit || 'pcs')) as DisplayUnit
-        let convRate = item?.conversion_rate || 1
-        if (convRate === 1 && displayUnit.toLowerCase() !== (item?.unit || 'pcs').toLowerCase()) {
-          convRate = getConversionRate(displayUnit, item?.unit || 'pcs')
-        }
-
         return {
-          id: b.id,
-          batchNumber: b.batch_number,
-          inventoryItemId: b.item_id,
-          inventoryItemName: b.inventory_items?.name || 'Unknown',
-          category: item?.category || 'other',
-          supplier: b.supplier_name,
-          initialQuantity: Number(b.quantity),
-          currentQuantity: remaining,
-          unitCost: Number(b.cost_per_unit),
-          receivedDate: b.received_date,
-          expiryDate: b.expired_date,
-          status,
-          notes: b.notes,
-          is_opened: !!b.is_opened,
-          opened_at: b.opened_at,
-          createdAt: b.created_at,
-          updatedAt: b.created_at,
-          displayUnit: displayUnit,
-          conversionRate: convRate
+          ...b,
+          status
         }
       })
       
@@ -260,7 +235,7 @@ export default function BatchesPage() {
         batchId: batch.id,
         batchNumber: batch.batchNumber,
         inventoryItemId: (batch.inventoryItemId as unknown) as string,
-        inventoryItemName: batch.inventoryItemName,
+        inventoryItemName: batch.inventoryItemName || 'Unknown',
         type: movementForm.type,
         quantity,
         employeeId: "emp-admin",
@@ -531,7 +506,7 @@ export default function BatchesPage() {
                 ) : (
                   filteredBatches.map((batch) => {
                     const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate)
-                    const status = statusConfig[batch.status]
+                    const status = statusConfig[batch.status || 'active'] || statusConfig.active
                     const usagePercent = ((batch.initialQuantity - batch.currentQuantity) / batch.initialQuantity) * 100
                     
                     return (
@@ -551,11 +526,16 @@ export default function BatchesPage() {
                         <TableCell className="text-right">
                           <div className="flex flex-col items-end gap-1">
                             {(() => {
-                              const conv = (batch as any).conversionRate || 1
-                              const unit = (batch as any).displayUnit || 'pcs'
-                              const current = parseFloat((batch.currentQuantity / conv).toFixed(2))
-                              const initial = parseFloat((batch.initialQuantity / conv).toFixed(2))
-                              return <span>{current} / {initial} <span className="text-xs text-muted-foreground">{unit}</span></span>
+                              // Changed to always show base unit for accuracy
+                              const current = batch.currentQuantity
+                              const initial = batch.initialQuantity
+                              const unit = (batch as any).unit || 'pcs'
+                              return (
+                                <span className="font-mono">
+                                  {current.toLocaleString()} / {initial.toLocaleString()} 
+                                  <span className="text-[10px] ml-1 text-muted-foreground uppercase">{unit}</span>
+                                </span>
+                              )
                             })()}
                             <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
                               <div 
@@ -823,15 +803,21 @@ export default function BatchesPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Current Qty</p>
-                    <p className="text-lg font-semibold">{selectedBatch.currentQuantity.toLocaleString()}</p>
+                    <p className="text-lg font-semibold font-mono">
+                      {selectedBatch.currentQuantity.toLocaleString()} 
+                      <span className="text-xs ml-1 text-muted-foreground uppercase">{(selectedBatch as any).unit}</span>
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Initial Qty</p>
-                    <p className="text-lg font-semibold">{selectedBatch.initialQuantity.toLocaleString()}</p>
+                    <p className="text-lg font-semibold font-mono">
+                      {selectedBatch.initialQuantity.toLocaleString()}
+                      <span className="text-xs ml-1 text-muted-foreground uppercase">{(selectedBatch as any).unit}</span>
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Unit Cost</p>
-                    <p className="text-lg font-semibold">{formatCurrency(selectedBatch.unitCost)}</p>
+                    <p className="text-lg font-semibold font-mono">{formatCurrency(selectedBatch.unitCost)}</p>
                   </div>
                 </div>
 
@@ -891,8 +877,9 @@ export default function BatchesPage() {
                                   <span>{typeConfig.label}</span>
                                 </div>
                               </TableCell>
-                              <TableCell className="text-right font-mono">
-                                {movement.type === "in" ? "+" : "-"}{movement.quantity}
+                              <TableCell className="text-right font-mono text-sm">
+                                {movement.type === "in" ? "+" : "-"}{movement.quantity.toLocaleString()}
+                                <span className="text-[10px] ml-1 text-muted-foreground">{(selectedBatch as any).unit}</span>
                               </TableCell>
                               <TableCell className="text-sm">{movement.employeeName}</TableCell>
                               <TableCell className="text-sm text-muted-foreground">

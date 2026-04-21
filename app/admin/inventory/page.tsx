@@ -27,6 +27,7 @@ import {
   calculateRollingDailyUsage,
   subscribeToInventoryTransactions,
   subscribeToInventoryItems,
+  subscribeToInventoryBatches,
   toBaseUnit,
   fromBaseUnit,
   getConversionRate,
@@ -35,6 +36,7 @@ import {
   getBatches,
   updateBatch,
   getBatchesByItem,
+  updateBatchesExpiryByItem,
   type InventoryItem,
   type InventoryBatch,
   type MenuItem,
@@ -148,10 +150,11 @@ export default function InventoryPage() {
   const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false)
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false)
   const [isStockOutModalOpen, setIsStockOutModalOpen] = useState(false)
-  const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
-  const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
-  const [isAddOpexModalOpen, setIsAddOpexModalOpen] = useState(false)
-  const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
+   const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
+   const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
+   const [isAddOpexModalOpen, setIsAddOpexModalOpen] = useState(false)
+   const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
+   const [isSubmitting, setIsSubmitting] = useState(false)
   
   // Custom Delete Alert State
   const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'item' | 'menu' | null, id: string | null}>({ isOpen: false, type: null, id: null })
@@ -232,10 +235,12 @@ export default function InventoryPage() {
 
     const unsubscribeTransactions = subscribeToInventoryTransactions(() => fetchData())
     const unsubscribeInventory = subscribeToInventoryItems(() => fetchData())
+    const unsubscribeBatches = subscribeToInventoryBatches(() => fetchData())
 
     return () => {
       unsubscribeTransactions()
       unsubscribeInventory()
+      unsubscribeBatches()
     }
   }, [])
 
@@ -407,8 +412,14 @@ export default function InventoryPage() {
         daily_usage: dailyVal,
         unit_cost: normalizedCost,
         supplier_name: formData.supplierName,
-        notes: formData.notes
+        notes: formData.notes,
+        expiry_date: formData.expiryDate
       }, actorName)
+      
+      // Update expiry date on batches if provided
+      if (formData.expiryDate) {
+        await updateBatchesExpiryByItem(formData.id, formData.expiryDate)
+      }
       
       setIsEditItemModalOpen(false)
       resetItemForm()
@@ -454,15 +465,25 @@ export default function InventoryPage() {
       if (itemBatches.length > 0) {
         // Get dates from the oldest batch (first one created)
         const primaryBatch = itemBatches[0]
-        if (primaryBatch.received_date) {
-          batchReceivedDate = new Date(primaryBatch.received_date).toISOString().split("T")[0]
+        if (primaryBatch.receivedDate) {
+          batchReceivedDate = new Date(primaryBatch.receivedDate).toISOString().split("T")[0]
         }
-        if (primaryBatch.expired_date) {
-          batchExpiryDate = new Date(primaryBatch.expired_date).toISOString().split("T")[0]
+        if (primaryBatch.expiryDate) {
+          batchExpiryDate = new Date(primaryBatch.expiryDate).toISOString().split("T")[0]
         }
       }
     } catch (e) {
       console.error("Failed to fetch batch info:", e)
+    }
+
+    // FINAL FALLBACK: If no batch dates found, use the item's own database fields
+    if (!batchExpiryDate && (item.expiry_date || item.expired_date || item.expiryDate)) {
+      const dbDate = item.expiry_date || item.expired_date || item.expiryDate
+      if (dbDate) batchExpiryDate = new Date(dbDate).toISOString().split("T")[0]
+    }
+    if (batchReceivedDate === new Date().toISOString().split("T")[0] && (item.last_updated || item.lastUpdated)) {
+      const dbDate = item.last_updated || item.lastUpdated
+      if (dbDate) batchReceivedDate = new Date(dbDate).toISOString().split("T")[0]
     }
 
     setFormData({
@@ -554,25 +575,49 @@ export default function InventoryPage() {
 
   // Stock Out (Manual Waste/Damage)
   const handleStockOutManual = async () => {
-    if (!stockOutForm.itemId || !stockOutForm.quantity) return
+    if (!stockOutForm.itemId || !stockOutForm.quantity) {
+      setError("Please select an item and enter a quantity.");
+      return;
+    }
+    
+    setError(null);
+    setIsLoading(true);
     
     try {
       const item = inventory.find(i => i.id === stockOutForm.itemId)
       const multiplier = item?.conversion_rate || getConversionRate(stockOutForm.displayUnit, item?.unit || 'pcs') || 1
-      const baseQty = parseFloat(stockOutForm.quantity) * multiplier
+      const rawQty = parseFloat(stockOutForm.quantity)
+      const baseQty = rawQty * multiplier
       
-      await stockOutManual(
+      // UNIVERSAL SPLIT: If using a larger unit (multiplier > 1), split into multiple rows
+      // Example: 2 Liter -> 2 rows. 500 gram -> 1 row.
+      const batchCount = multiplier > 1 ? Math.max(1, Math.floor(rawQty)) : 1
+
+      console.log("Attempting universal multi-batch stock out:", { itemName: item?.name, qty: baseQty, count: batchCount });
+
+
+      const success = await stockOutManual(
         stockOutForm.itemId,
         baseQty,
-        stockOutForm.reason,
-        actorName
+        stockOutForm.reason || 'manual',
+        actorName,
+        batchCount
       )
+
+      if (!success) {
+        setError("Database rejected the stock-out. Running the SQL fix and refreshing the page may help.");
+        setIsLoading(false);
+        return;
+      }
       
       setIsStockOutModalOpen(false)
       setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
-      fetchData()
+      await fetchData()
     } catch (err) {
-      setError("Failed to remove stock")
+      console.error("Stock out error:", err);
+      setError("Failed to remove stock: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -634,59 +679,61 @@ export default function InventoryPage() {
     return acc + (invItem.unit_cost || 0) * baseQty;
   }, 0);
 
-  const handleAddMenu = async () => {
-    if (!menuForm.name || !menuForm.price) return
+  const handleSaveMenu = async () => {
+    if (!menuForm.name || !menuForm.price) {
+      setError("Name and price are required")
+      return
+    }
+
+    setIsSubmitting(true)
+    setError("")
+
     try {
-      const newMenu = await addMenuItem({
-        name: menuForm.name,
-        type: menuForm.category,
-        price: parseFloat(menuForm.price),
-        packaging_cost: parseFloat(menuForm.packaging_cost) || 0,
-        status: 'active'
-      })
+      let savedMenuId = menuForm.id
       
-      if (newMenu && menuForm.ingredients.length > 0) {
-        // Convert quantities to base unit (g/ml) for DB
+      if (isEditMenuModalOpen) {
+        // UPDATE Existing
+        await updateMenuItem(menuForm.id, {
+          name: menuForm.name,
+          type: menuForm.category,
+          price: parseFloat(menuForm.price),
+          status: 'active'
+        })
+      } else {
+        // CREATE New
+        const newItem = {
+          name: menuForm.name,
+          type: menuForm.category,
+          price: parseFloat(menuForm.price),
+          status: 'active'
+        }
+        const saved = await addMenuItem(newItem as MenuItem)
+        if (!saved) throw new Error("Database rejected the new menu item")
+        savedMenuId = saved.id
+      }
+      
+      // Save/Update Recipes
+      if (menuForm.ingredients.length > 0) {
         const baseIngredients = menuForm.ingredients.map(ing => ({
           inventory_item_id: ing.inventory_item_id,
           quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit),
           unit: ing.unit || 'pcs'
         }))
-        await saveMenuRecipes(newMenu.id, baseIngredients)
+        await saveMenuRecipes(savedMenuId, baseIngredients)
       }
       
       setIsAddMenuModalOpen(false)
+      setIsEditMenuModalOpen(false)
       resetMenuForm()
-      fetchData()
+      await fetchData()
     } catch (err) {
-      setError("Failed to add menu item")
+      console.error("Save menu error:", err)
+      setError("Failed to save menu: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const handleEditMenu = async () => {
-    if (!menuForm.id || !menuForm.name || !menuForm.price) return
-    try {
-      await updateMenuItem(menuForm.id, {
-        name: menuForm.name,
-        type: menuForm.category,
-        price: parseFloat(menuForm.price),
-        packaging_cost: parseFloat(menuForm.packaging_cost) || 0
-      })
-      
-      const baseIngredients = menuForm.ingredients.map(ing => ({
-        inventory_item_id: ing.inventory_item_id,
-        quantity: toBaseUnit(ing.quantity, ing.unit || 'pcs' as DisplayUnit),
-        unit: ing.unit || 'pcs'
-      }))
-      await saveMenuRecipes(menuForm.id, baseIngredients)
-      
-      setIsEditMenuModalOpen(false)
-      resetMenuForm()
-      fetchData()
-    } catch (err) {
-      setError("Failed to update menu item")
-    }
-  }
 
   const openEditMenuModal = (item: MenuItem) => {
     setMenuForm({
@@ -1547,6 +1594,13 @@ export default function InventoryPage() {
             <DialogTitle>Stock Out (Manual)</DialogTitle>
             <DialogDescription>Manually subtract stock for waste, damage, or other reasons.</DialogDescription>
           </DialogHeader>
+          
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-sm text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
           <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1610,12 +1664,12 @@ export default function InventoryPage() {
                 <Label className="text-[10px] uppercase font-bold text-muted-foreground">FIFO Suggestions (Prioritize Opened)</Label>
                 <div className="space-y-1">
                   {batches
-                    .filter(b => b.item_id === stockOutForm.itemId && b.remaining_quantity > 0)
+                    .filter(b => b.item_id === stockOutForm.itemId && (b.remaining_quantity ?? 0) > 0)
                     .sort((a, b) => {
                       // Sort by opened first, then by received date
                       if (a.is_opened && !b.is_opened) return -1;
                       if (!a.is_opened && b.is_opened) return 1;
-                      return new Date(a.received_date).getTime() - new Date(b.received_date).getTime();
+                      return new Date(a.received_date || 0).getTime() - new Date(b.received_date || 0).getTime();
                     })
                     .slice(0, 3)
                     .map(b => (
@@ -1629,7 +1683,7 @@ export default function InventoryPage() {
                       </div>
                     ))
                   }
-                  {batches.filter(b => b.item_id === stockOutForm.itemId && b.remaining_quantity > 0).length === 0 && (
+                  {batches.filter(b => b.item_id === stockOutForm.itemId && (b.remaining_quantity ?? 0) > 0).length === 0 && (
                     <p className="text-[10px] text-muted-foreground italic">No active batches for this item</p>
                   )}
                 </div>
@@ -1696,46 +1750,80 @@ export default function InventoryPage() {
             </div>
             <div className="space-y-2">
               <Label>Ingredients</Label>
-              {menuForm.ingredients.map((ing, idx) => {
+              {menuForm.ingredients.map((ing, index) => {
                 const invItem = inventory.find(i => i.id === ing.inventory_item_id);
                 const currentUnit = ing.unit || (invItem?.unit as DisplayUnit) || 'pcs';
                 
                 return (
-                  <div key={idx} className="p-3 border rounded-sm bg-muted/30 space-y-3 relative">
+                  <div key={index} className="p-3 border rounded-sm bg-muted/30 space-y-3 relative">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ingredient #{idx + 1}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeIngredientRow(idx)}>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ingredient #{index + 1}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeIngredientRow(index)}>
                         <X className="w-4 h-4" />
                       </Button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-[10px] uppercase text-muted-foreground font-semibold">Inventory Item</Label>
-                        <Select value={ing.inventory_item_id} onValueChange={(v) => updateIngredient(idx, 'inventory_item_id', v)}>
-                          <SelectTrigger className="h-9"><SelectValue placeholder="Select item"/></SelectTrigger>
-                          <SelectContent>{inventory.map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)}</SelectContent>
+
+                    <div className="flex flex-nowrap items-end gap-3 pr-1 w-full overflow-hidden">
+                      <div className="flex-grow flex-shrink min-w-0 space-y-1.5" style={{ flexBasis: '55%' }}>
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider block truncate">Inventory Item</Label>
+                        <Select 
+                          value={ing.inventory_item_id} 
+                          onValueChange={(val) => updateIngredient(index, "inventory_item_id", val)}
+                        >
+                          <SelectTrigger className="h-9 text-xs rounded-sm bg-white/50 border-gray-200 w-full overflow-hidden">
+                            <SelectValue placeholder="Select item" className="truncate text-left block" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <div className="max-h-[250px] overflow-y-auto">
+                              {inventory.map((item) => (
+                                <SelectItem key={item.id} value={item.id || ""}>
+                                  <div className="flex flex-col items-start gap-0.5">
+                                    <span className="font-medium text-[11px]">{item.name}</span>
+                                    <span className="text-[9px] text-muted-foreground opacity-70">
+                                      {item.current_stock || item.stock || 0} {item.unit} available
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </div>
+                          </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-[10px] uppercase text-muted-foreground font-semibold">Quantity & Unit</Label>
-                        <div className="flex gap-1">
-                          <Input className="h-9 flex-1" type="number" placeholder="0" value={ing.quantity} onChange={(e) => updateIngredient(idx, 'quantity', e.target.value)} />
-                          <Select value={currentUnit} onValueChange={(v) => handleIngredientUnitChange(idx, v as DisplayUnit)}>
-                            <SelectTrigger className="h-9 w-[80px] text-[10px] font-bold uppercase [&>span]:truncate"><SelectValue/></SelectTrigger>
-                            <SelectContent>
-                              {(() => {
-                                const base = invItem?.unit || 'pcs';
-                                const units = getAllowedUnitsForItem(base);
-                                if (invItem?.display_unit && !units.includes(invItem.display_unit as any)) {
-                                  units.push(invItem.display_unit as any);
-                                }
-                                return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
-                              })()}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                      
+                      <div className="w-[70px] space-y-1.5" style={{ flexShrink: 0 }}>
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Qty</Label>
+                        <Input 
+                          type="number" 
+                          value={ing.quantity || ""} 
+                          onChange={(e) => updateIngredient(index, "quantity", e.target.value)}
+                          className="h-9 text-xs rounded-sm bg-white/50"
+                          placeholder="0"
+                        />
+                      </div>
+                      
+                      <div className="w-[85px] space-y-1.5" style={{ flexShrink: 0 }}>
+                        <Label className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Unit</Label>
+                        <Select 
+                          value={currentUnit} 
+                          onValueChange={(val) => handleIngredientUnitChange(index, val as DisplayUnit)}
+                        >
+                          <SelectTrigger className="h-9 text-[10px] uppercase font-bold rounded-sm bg-white/50">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(() => {
+                              const base = invItem?.unit || 'pcs';
+                              const units = getAllowedUnitsForItem(base);
+                              if (invItem?.display_unit && !units.includes(invItem.display_unit as any)) {
+                                units.push(invItem.display_unit as any);
+                              }
+                              return units.map(u => <SelectItem key={u} value={u.toLowerCase()}>{u.toUpperCase()}</SelectItem>);
+                            })()}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
+
                     {invItem && (
                       <div className="flex justify-between items-center px-1 pt-1 border-t border-border/50">
                         <span className="text-[10px] text-muted-foreground">
@@ -1749,18 +1837,24 @@ export default function InventoryPage() {
                   </div>
                 );
               })}
-              <Button variant="outline" size="sm" onClick={addIngredientRow}><Plus className="w-4 h-4 mr-2"/>Add Ingredient</Button>
+              <Button variant="outline" size="sm" onClick={addIngredientRow} className="w-full mt-2 font-bold text-[10px] uppercase tracking-widest">
+                <Plus className="w-3 h-3 mr-2"/>Add Ingredient
+              </Button>
             </div>
 
-              <div className="flex justify-between items-center p-3 rounded-sm bg-primary/10 border border-primary/20">
-                <div className="flex flex-col">
-                  <span className="text-xs text-muted-foreground uppercase font-bold">Estimated COGS</span>
-                  <p className="text-[10px] text-muted-foreground">Recipe + Packaging</p>
-                </div>
-                <span className="text-lg font-bold text-primary">{formatPrice(menuCOGS + (parseFloat(menuForm.packaging_cost) || 0))}</span>
+            <div className="flex justify-between items-center p-3 rounded-sm bg-primary/5 border border-primary/20 mt-4">
+              <div className="flex flex-col">
+                <span className="text-xs text-muted-foreground uppercase font-bold tracking-tight">Estimated Menu COGS</span>
+                <p className="text-[10px] text-muted-foreground">Total of all ingredients and packaging</p>
               </div>
+              <span className="text-xl font-bold text-primary">{formatPrice(menuCOGS + (parseFloat(menuForm.packaging_cost) || 0))}</span>
+            </div>
           </div>
-          <DialogFooter><Button onClick={isEditMenuModalOpen ? handleEditMenu : handleAddMenu}>Save</Button></DialogFooter>
+          <DialogFooter className="pt-4 border-t border-border">
+            <Button onClick={handleSaveMenu} disabled={isSubmitting} className="w-full sm:w-auto">
+              {isSubmitting ? "Saving..." : "Save Menu Item"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1799,7 +1893,7 @@ export default function InventoryPage() {
                   const item = inventory.find(i => i.id === v);
                   if (item) {
                     const dUnit = (item.display_unit as DisplayUnit) || getDefaultDisplayUnit(item.unit);
-                    const theoretical = fromBaseUnit(item.stock, dUnit);
+                    const theoretical = fromBaseUnit(item.stock ?? 0, dUnit);
                     setOpnameForm(p => ({ 
                       ...p, 
                       itemId: v, 
@@ -1857,7 +1951,7 @@ export default function InventoryPage() {
                     const item = inventory.find(i => i.id === opnameForm.itemId);
                     if (item) {
                       const newUnit = v as DisplayUnit;
-                      const theoretical = fromBaseUnit(item.stock, newUnit);
+                      const theoretical = fromBaseUnit(item.stock ?? 0, newUnit);
                       setOpnameForm(p => ({ 
                         ...p, 
                         displayUnit: newUnit, 

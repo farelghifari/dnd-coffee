@@ -198,7 +198,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setInventory(prev => prev.map(item => {
       if (item.id !== itemId) return item
       
-      let newStock = item.currentStock
+      let newStock = item.currentStock ?? item.stock ?? 0
       switch (type) {
         case "in":
           newStock += amount
@@ -423,7 +423,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Helper: Get stock health
   const getStockHealth = useCallback((item: InventoryItem): "healthy" | "warning" | "critical" => {
-    const daysRemaining = item.currentStock / item.dailyUsage
+    const daysRemaining = (item.currentStock ?? 0) / (item.dailyUsage ?? 1)
     if (daysRemaining <= 1) return "critical"
     if (daysRemaining <= 3) return "warning"
     return "healthy"
@@ -431,7 +431,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Helper: Get days remaining
   const getDaysRemaining = useCallback((item: InventoryItem): number => {
-    return Math.round((item.currentStock / item.dailyUsage) * 10) / 10
+    return Math.round(((item.currentStock ?? 0) / (item.dailyUsage ?? 1)) * 10) / 10
   }, [])
 
   // Helper: Get overall stock health
@@ -463,7 +463,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .filter(item => getDaysRemaining(item) <= 7)
       .map(item => {
         const coverageDays = 7
-        const recommendedQty = Math.ceil(item.dailyUsage * coverageDays)
+        const recommendedQty = Math.ceil((item.dailyUsage ?? 0) * coverageDays)
         return { item, recommendedQty, coverageDays }
       })
       .sort((a, b) => getDaysRemaining(a.item) - getDaysRemaining(b.item))

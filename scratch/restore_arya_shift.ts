@@ -1,4 +1,4 @@
-import { supabase } from './lib/supabase'
+import { supabase } from '../lib/supabase'
 
 async function restore() {
   // 1. Find Arya

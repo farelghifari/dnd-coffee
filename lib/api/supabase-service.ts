@@ -1,4 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import type { InventoryItem, InventoryBatch, BatchStatus } from '@/lib/data'
+export type { InventoryItem, InventoryBatch, BatchStatus }
+
 import {
   inventory as mockInventory,
   employees as mockEmployees,
@@ -9,6 +12,7 @@ import {
   overtimeRequests as mockOvertimeRequests,
   shiftConfigs as mockShiftConfigs
 } from '@/lib/data'
+
 import { getLocalYYYYMMDD, isShiftLocked, isPastDate } from '@/lib/utils'
 
 // Storage keys for localStorage fallback
@@ -211,21 +215,19 @@ export interface EmployeeContract {
 }
 
 // DB Schema: inventory_items(id, name, category, unit, stock)
-export interface InventoryItem {
+export interface DBInventoryItem {
   id: string
   name: string
-  category: "beans" | "milk" | "syrup" | "cups" | "food"
+  category: string
   unit: string
   stock: number
-  // For local/fallback compatibility
-  current_stock?: number
   min_stock?: number
   max_stock?: number
   daily_usage?: number
-  last_updated?: string
   unit_cost?: number
   display_unit?: string
   conversion_rate?: number
+  expiry_date?: string
   supplier_name?: string
   notes?: string
 }
@@ -935,26 +937,48 @@ export async function getInventory(): Promise<InventoryItem[]> {
     if (error) {
       return []
     }
-    // Map 'stock' to 'current_stock' for compatibility
-    return (data || []).map(item => ({
-      ...item,
-      current_stock: item.stock
+    // Map database fields to application fields carefully
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      category: row.category,
+      unit: row.unit || 'pcs',
+      displayUnit: row.display_unit || row.unit || 'pcs',
+      currentStock: row.stock ?? 0,
+      stock: row.stock ?? 0,
+      current_stock: row.stock ?? 0,
+      minStock: row.min_stock ?? 10,
+      min_stock: row.min_stock ?? 10,
+      maxStock: row.max_stock ?? 100,
+      max_stock: row.max_stock ?? 100,
+      dailyUsage: row.daily_usage ?? 0,
+      daily_usage: row.daily_usage ?? 0,
+      unitCost: row.unit_cost ?? 0,
+      unit_cost: row.unit_cost ?? 0,
+      lastUpdated: row.last_updated || row.updated_at || new Date().toISOString(),
+      last_updated: row.last_updated || row.updated_at || new Date().toISOString(),
+      conversionRate: row.conversion_rate ?? 1,
+      conversion_rate: row.conversion_rate ?? 1,
+      display_unit: row.display_unit || row.unit || 'pcs',
+      expiryDate: row.expiry_date,
+      expiry_date: row.expiry_date,
+      status: row.status || 'active'
     }))
   }
   
   const stored = getStoredData(STORAGE_KEYS.inventory, mockInventory)
-  return stored.map(item => ({
-    id: item.id,
-    name: item.name,
-    category: item.category,
-    unit: item.unit,
-    stock: 'currentStock' in item ? (item as { currentStock: number }).currentStock : (item as InventoryItem).stock || 0,
-    current_stock: 'currentStock' in item ? (item as { currentStock: number }).currentStock : (item as InventoryItem).stock || 0,
-    min_stock: 'minStock' in item ? (item as { minStock: number }).minStock : 0,
-    max_stock: 'maxStock' in item ? (item as { maxStock: number }).maxStock : 100,
-    daily_usage: 'dailyUsage' in item ? (item as { dailyUsage: number }).dailyUsage : 1,
-    last_updated: 'lastUpdated' in item ? (item as { lastUpdated: string }).lastUpdated : new Date().toISOString(),
-    unit_cost: 'unitCost' in item ? (item as { unitCost: number }).unitCost : 0
+  return (stored as any[]).map(item => ({
+    ...item,
+    currentStock: item.currentStock ?? item.stock ?? 0,
+    stock: item.stock ?? item.currentStock ?? 0,
+    current_stock: item.currentStock ?? item.stock ?? 0,
+    minStock: item.minStock ?? 10,
+    maxStock: item.maxStock ?? 100,
+    dailyUsage: item.dailyUsage ?? 0,
+    unitCost: item.unitCost ?? 0,
+    displayUnit: item.displayUnit || item.unit || 'pcs',
+    display_unit: item.displayUnit || item.unit || 'pcs',
+    lastUpdated: item.lastUpdated || new Date().toISOString()
   })) as InventoryItem[]
 }
 
@@ -1172,12 +1196,15 @@ export interface UpsertInventoryData {
   supplier_name?: string
   notes?: string
   received_date?: string
-  expired_date?: string
+  expiry_date?: string
 }
 
 export async function upsertInventory(data: UpsertInventoryData, actorName: string = 'System'): Promise<InventoryItem | null> {
   const isUpdate = !!data.id
   let resultItem: InventoryItem | null = null
+  
+  // SANITIZE: Convert empty strings to null for database compatibility
+  const sanitizedExpiry = data.expiry_date && data.expiry_date.trim() !== "" ? data.expiry_date : null;
 
   if (isSupabaseConfigured()) {
     // Call RPC: upsert_inventory
@@ -1190,7 +1217,10 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
       p_min_stock: data.min_stock || 0,
       p_max_stock: data.max_stock || 0,
       p_daily_usage: data.daily_usage || 0,
-      p_unit_cost: data.unit_cost || 0
+      p_unit_cost: data.unit_cost || 0,
+      p_expiry_date: sanitizedExpiry,
+      p_display_unit: data.display_unit || null,
+      p_conversion_rate: data.conversion_rate || 1
     })
     
     if (error) {
@@ -1205,7 +1235,8 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
         daily_usage: data.daily_usage,
         unit_cost: data.unit_cost,
         supplier_name: data.supplier_name,
-        notes: data.notes
+        notes: data.notes,
+        expiry_date: sanitizedExpiry
       }
       
       const extendedUpdate = {
@@ -1235,8 +1266,10 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
           uError = retry.error
         }
         
-        if (uError) console.error("CRITICAL ERROR (upsert fallback):", uError)
-        resultItem = updated ? { ...updated, current_stock: updated.stock } : null
+        if (uError) {
+          console.error("UPSERT FALLBACK ERROR:", uError.message || uError)
+        }
+        resultItem = updated ? { ...updated, current_stock: updated.stock } : (data.id ? { ...data, stock: data.stock, current_stock: data.stock } : null) as any
       } else {
         // Try insert with all columns first
         let { data: inserted, error: iError } = await supabase
@@ -1255,7 +1288,7 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
           iError = retry.error
         }
         
-        if (iError) console.error("CRITICAL ERROR (upsert fallback):", iError)
+        if (iError) console.error("INSERT FALLBACK ERROR:", iError.message || iError)
         resultItem = inserted ? { ...inserted, current_stock: inserted.stock } : null
       }
     } else {
@@ -1270,7 +1303,6 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
             conversion_rate: data.conversion_rate || 1
           })
           .eq('id', targetId)
-        // We don't log error here because it's non-fatal if columns are missing
       }
       
       if (targetId) {
@@ -1378,22 +1410,22 @@ export async function stockOut(itemId: string, quantity: number): Promise<boolea
 // INPUT: item_id, quantity, reason (optional)
 // Calls RPC: stock_out_manual(item_id, quantity, reason)
 
-export async function stockOutManual(itemId: string, quantity: number, reason?: string, actorName: string = 'System'): Promise<boolean> {
+export async function stockOutManual(itemId: string, quantity: number, reason?: string, actorName: string = 'System', batchCount: number = 1): Promise<boolean> {
   // Get item name for logging
   const item = await getInventoryItem(itemId)
   
   if (isSupabaseConfigured()) {
-    const { error } = await supabase.rpc('stock_out_manual', {
+    const { error } = await supabase.rpc('stock_out_v2', {
       p_item_id: itemId,
       p_quantity: quantity,
       p_reason: reason || 'manual',
       p_actor_name: actorName,
-      p_actor_id: getCurrentUser()?.id || null
+      p_batch_count: batchCount
     })
     
     if (error) {
-      console.log("ERROR (stockOutManual RPC):", error)
-      return false
+      console.error("ERROR (stockOutManual RPC):", error)
+      throw new Error(error.message || "Database rejected the request")
     }
 
     if (item) {
@@ -1469,10 +1501,10 @@ export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecip
       .eq('menu_item_id', menuItemId)
     
     if (deleteError) {
-      console.log("ERROR (saveMenuRecipes delete):", deleteError)
+      console.error("ERROR (saveMenuRecipes delete):", deleteError.message)
     }
     
-    // STEP 2: Insert new recipes
+    // STEP 2: Prepare and Insert new recipes
     if (ingredients.length > 0) {
       const recipesToInsert = ingredients.map(ing => ({
         menu_item_id: menuItemId,
@@ -1486,29 +1518,8 @@ export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecip
         .insert(recipesToInsert)
       
       if (insertError) {
-        console.log("ERROR (saveMenuRecipes insert):", insertError)
+        console.error("ERROR (saveMenuRecipes insert):", insertError.message, insertError.details)
         return false
-      }
-      
-      // STEP 3: VERIFY - SELECT * FROM menu_recipes WHERE menu_item_id
-      const { data: verifyData, error: verifyError } = await supabase
-        .from('menu_recipes')
-        .select('*')
-        .eq('menu_item_id', menuItemId)
-      
-      console.log("VERIFY (saveMenuRecipes):", verifyData)
-      
-      // STEP 4: IF EMPTY → retry insert once
-      if (verifyError || !verifyData || verifyData.length === 0) {
-        console.log("VERIFY FAILED - retrying insert")
-        const { error: retryError } = await supabase
-          .from('menu_recipes')
-          .insert(recipesToInsert)
-        
-        if (retryError) {
-          console.log("ERROR (saveMenuRecipes retry):", retryError)
-          return false
-        }
       }
     }
     
@@ -1774,6 +1785,29 @@ export function subscribeToInventoryItems(callback: (payload?: RealtimePayload) 
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'inventory_items' },
+      (payload) => {
+        callback({
+          new: payload.new as Record<string, unknown>,
+          old: payload.old as Record<string, unknown>,
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE'
+        })
+      }
+    )
+    .subscribe()
+  
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}
+
+export function subscribeToInventoryBatches(callback: (payload?: RealtimePayload) => void) {
+  if (!isSupabaseConfigured()) return () => {}
+  
+  const channel = supabase
+    .channel('inventory_batches_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'inventory_batches' },
       (payload) => {
         callback({
           new: payload.new as Record<string, unknown>,
@@ -2695,14 +2729,16 @@ export async function getMenuItems(): Promise<MenuItem[]> {
 // FIX DUPLICATE MENU: Check if menu exists before adding
 // IF EXISTS: Update existing record instead of inserting duplicate
 export async function addMenuItem(item: { name: string; type: string; price: number; packaging_cost?: number; status?: string; category?: string }): Promise<MenuItem | null> {
+  console.log("INVOKING addMenuItem with object:", JSON.stringify(item, null, 2))
   if (isSupabaseConfigured()) {
   // STEP 1: Check if menu_items WHERE name = input_name EXISTS
-  const { data: existingItem, error: checkError } = await supabase
+  const { data: existingItems, error: checkError } = await supabase
     .from('menu_items')
     .select('*')
     .eq('name', item.name)
-    .single()
+    .range(0, 0)
   
+  const existingItem = existingItems && existingItems.length > 0 ? existingItems[0] : null
   console.log("CHECK EXISTING (addMenuItem):", existingItem)
   
   // IF EXISTS: Update existing record instead of inserting duplicate
@@ -2721,7 +2757,9 @@ export async function addMenuItem(item: { name: string; type: string; price: num
       .single()
     
     console.log("DATA (addMenuItem UPDATE):", updatedData)
-    console.log("ERROR (addMenuItem UPDATE):", updateError)
+    if (updateError) {
+      console.error("SUPABASE UPDATE ERROR (addMenuItem):", updateError.message, updateError.details);
+    }
     
     if (updateError) {
       return null
@@ -2743,7 +2781,9 @@ export async function addMenuItem(item: { name: string; type: string; price: num
   .single()
   
   console.log("DATA (addMenuItem INSERT):", data)
-  console.log("ERROR (addMenuItem INSERT):", error)
+  if (error) {
+    console.error("SUPABASE INSERT ERROR (addMenuItem):", error.message, error.details);
+  }
   
   if (error) {
   return null
@@ -3894,43 +3934,20 @@ export interface BulkSaleItem {
 
 export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
   if (isSupabaseConfigured()) {
-    const { error: fifoError } = await supabase.rpc('bulk_sell_menu_fifo', {
+    const { error: processError } = await supabase.rpc('process_menu_sales_fifo', {
       p_menu_ids: items.map(i => i.menu_id),
-      p_quantities: items.map(i => i.quantity)
+      p_quantities: items.map(i => i.quantity),
+      p_actor_name: 'Report'
     })
     
-    if (!fifoError) {
-      console.log("SUCCESS: bulkSellMenu via FIFO RPC")
-      return true
-    }
-    
-    console.log("FIFO RPC not available, trying legacy bulk_sell_menu:", fifoError.message)
-    
-    // Try legacy RPC
-    const { error: rpcError } = await supabase.rpc('bulk_sell_menu', {
-      p_menu_ids: items.map(i => i.menu_id),
-      p_quantities: items.map(i => i.quantity)
-    })
-    
-    if (!rpcError) {
-      return true
-    }
-    
-    // If RPC doesn't exist, fall back to individual sellMenu calls
-    console.log("RPC bulk_sell_menu not found, falling back to individual calls")
-    
-    for (const item of items) {
-      const success = await sellMenu(item.menu_id, item.quantity)
-      if (!success) {
-        console.log("Failed to sell menu:", item.menu_id)
-        return false
-      }
+    if (processError) {
+      console.error("DEDUCTION ENGINE ERROR:", processError.message)
+      return false
     }
     
     return true
   }
   
-  // Fallback - no local implementation
   return false
 }
 
@@ -3990,7 +4007,7 @@ export interface AddBatchData {
   is_opened?: boolean
 }
 
-export interface InventoryBatch {
+export interface DBInventoryBatch {
   id: string
   item_id: string
   batch_number: string
@@ -4153,24 +4170,30 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
   const batchNumber = generateBatchNumber(item.category)
   const newBatch: InventoryBatch = {
     id: `batch-${Date.now()}`,
-    item_id: data.item_id,
-    batch_number: batchNumber,
-    quantity: quantityInBaseUnit,
-    remaining_quantity: quantityInBaseUnit,
-    cost_per_unit: data.unit_cost,
-    supplier_name: data.supplier_name,
-    received_date: data.received_date,
-    expired_date: data.expired_date,
+    inventoryItemId: data.item_id,
+    batchNumber: batchNumber,
+    supplier: data.supplier_name,
+    receivedDate: data.received_date,
+    expiryDate: data.expired_date,
+    initialQuantity: quantityInBaseUnit,
+    currentQuantity: quantityInBaseUnit,
+    unitCost: data.unit_cost,
     notes: data.notes,
     is_opened: data.is_opened || false,
-    created_at: new Date().toISOString()
+    status: 'active',
+    createdAt: new Date().toISOString()
   }
   
   // Update stock locally
   const index = inventory.findIndex(i => i.id === data.item_id)
   if (index !== -1) {
-    const newStock = (inventory[index].stock || inventory[index].current_stock || 0) + quantityInBaseUnit
-    inventory[index] = { ...inventory[index], stock: newStock, current_stock: newStock }
+    const newStock = (inventory[index].stock ?? 0) + quantityInBaseUnit
+    inventory[index] = { 
+      ...inventory[index], 
+      stock: newStock, 
+      currentStock: newStock,
+      current_stock: newStock 
+    }
     setStoredData(STORAGE_KEYS.inventory, inventory)
   }
   
@@ -4224,10 +4247,29 @@ export async function getBatches(): Promise<InventoryBatch[]> {
       itemsData.forEach(item => itemMap.set(item.id, item))
     }
     
-    const mapped = batchesData.map(batch => ({
-      ...batch,
-      inventory_items: itemMap.get(batch.item_id) || { name: 'Unknown' }
-    }))
+    const mapped = batchesData.map(batch => {
+      const item = itemMap.get(batch.item_id)
+      return {
+        id: batch.id,
+        inventoryItemId: batch.item_id,
+        inventoryItemName: item?.name || 'Unknown',
+        batchNumber: batch.batch_number,
+        supplier: batch.supplier_name || batch.supplier || 'Unknown',
+        receivedDate: batch.received_date || batch.created_at,
+        expiryDate: batch.expired_date || batch.expiry_date,
+        initialQuantity: batch.quantity,
+        currentQuantity: batch.remaining_quantity,
+        unitCost: batch.cost_per_unit,
+        status: batch.status || 'active',
+        notes: batch.notes,
+        is_opened: batch.is_opened,
+        opened_at: batch.opened_at,
+        createdAt: batch.created_at,
+        updatedAt: batch.updated_at,
+        unit: item?.unit || 'pcs', // Using base unit from inventory item
+        category: item?.category || 'General'
+      }
+    })
     
     return mapped
   }
@@ -4380,7 +4422,25 @@ export async function getBatchesByItem(itemId: string): Promise<InventoryBatch[]
       return []
     }
     
-    return data || []
+    return (data || []).map(batch => ({
+      id: batch.id,
+      inventoryItemId: batch.item_id,
+      inventoryItemName: 'Syncing...', // Will be updated by the UI or fetched
+      batchNumber: batch.batch_number,
+      supplier: batch.supplier_name || batch.supplier,
+      receivedDate: batch.received_date,
+      expiryDate: batch.expired_date,
+      initialQuantity: batch.quantity || batch.initial_quantity || 0,
+      currentQuantity: batch.remaining_quantity || 0,
+      unitCost: batch.cost_per_unit || 0,
+      status: batch.status,
+      notes: batch.notes,
+      is_opened: batch.is_opened,
+      opened_at: batch.opened_at,
+      createdAt: batch.created_at,
+      updatedAt: batch.updated_at,
+      unit: 'ml' // Overwritten by UI join but defaulting to ml for milk items
+    }))
   }
   
   return []
@@ -4735,5 +4795,58 @@ export async function getFinancialSummary(month: string): Promise<FinancialSumma
     grossProfit: 0, netProfit: 0, aov: 0, 
     salesPerHour: {}, totalTransactions: 0
   }
+}
+
+// ========== SALES & BATCH INTEGRATION ==========
+
+/**
+ * Process a menu sale by deducting ingredients from batches using FIFO.
+ * Calls the database RPC: process_menu_sales_fifo
+ */
+export async function processSale(menuIds: string[], quantities: number[], actorName: string = 'System'): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase.rpc('process_menu_sales_fifo', {
+      p_menu_ids: menuIds,
+      p_quantities: quantities,
+      p_actor_name: actorName
+    })
+
+    if (error) {
+      console.error("ERROR (processSale):", error)
+      return false
+    }
+    
+    // Log activity
+    await logActivity(
+      'inventory_change',
+      actorName,
+      'Multiple Items',
+      `Sale Recorded: ${menuIds.length} items sold.`
+    )
+    
+    return true
+  }
+  return false
+}
+
+/**
+ * Update the expiry date for all active batches of a specific item.
+ * Typically called when the main inventory item's expiry date is updated.
+ */
+export async function updateBatchesExpiryByItem(itemId: string, newExpiry: string): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    const { error } = await supabase
+      .from('inventory_batches')
+      .update({ expired_date: newExpiry })
+      .eq('item_id', itemId)
+      .gt('remaining_quantity', 0) // Only update active batches
+
+    if (error) {
+      console.error("ERROR (updateBatchesExpiryByItem):", error)
+      return false
+    }
+    return true
+  }
+  return false
 }
 

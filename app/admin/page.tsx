@@ -70,7 +70,7 @@ export default function AdminDashboard() {
       setTodayAttendance(attendanceData)
       setPendingOvertimeRequests(overtimeData)
       setOnShiftEmployees(onShiftData)
-      setLatenessStats(attendanceStatsData)
+      setLatenessStats(attendanceStatsData as any[])
       if (!silent) setIsLoading(false)
     }
     

@@ -50,12 +50,31 @@ export interface InventoryItem {
   name: string
   category: "beans" | "milk" | "syrup" | "cups" | "food"
   unit: string
-  currentStock: number
-  minStock: number
-  maxStock: number
-  dailyUsage: number
-  lastUpdated: string
-  unitCost: number
+  stock?: number // Base unit stock
+  currentStock?: number // Alias for UI
+  minStock?: number
+  maxStock?: number
+  dailyUsage?: number
+  lastUpdated?: string
+  unitCost?: number
+  displayUnit?: string
+  conversionRate?: number
+  expiryDate?: string
+  status?: string
+  
+  // Database Aliases (for backward compatibility)
+  display_unit?: string
+  conversion_rate?: number
+  expired_date?: string
+  expiry_date?: string
+  current_stock?: number
+  min_stock?: number
+  max_stock?: number
+  daily_usage?: number
+  unit_cost?: number
+  last_updated?: string
+  supplier_name?: string
+  notes?: string
 }
 
 export interface MenuItem {
@@ -105,7 +124,7 @@ export type BatchStatus = "active" | "depleted" | "expired" | "quarantined"
 export interface InventoryBatch {
   id: string
   inventoryItemId: string
-  inventoryItemName: string
+  inventoryItemName?: string // Made optional for easier sync
   batchNumber: string
   supplier: string
   receivedDate: string
@@ -118,7 +137,20 @@ export interface InventoryBatch {
   is_opened?: boolean
   opened_at?: string
   createdAt: string
-  updatedAt: string
+  updatedAt?: string // Made optional
+  unit?: string // The unit name for display
+  category?: string
+  
+  // Database Aliases
+  item_id?: string
+  batch_number?: string
+  quantity?: number
+  remaining_quantity?: number
+  cost_per_unit?: number
+  supplier_name?: string
+  received_date?: string
+  expired_date?: string
+  created_at?: string
 }
 
 export interface BatchMovement {
@@ -964,14 +996,18 @@ export const attendanceLogs: AttendanceLog[] = [
 
 // Helper functions
 export function getStockHealth(item: InventoryItem): "healthy" | "warning" | "critical" {
-  const daysRemaining = item.currentStock / item.dailyUsage
+  const stock = item.currentStock ?? item.stock ?? 0;
+  const usage = item.dailyUsage ?? 1;
+  const daysRemaining = stock / usage;
   if (daysRemaining <= 1) return "critical"
   if (daysRemaining <= 3) return "warning"
   return "healthy"
 }
 
 export function getDaysRemaining(item: InventoryItem): number {
-  return Math.round((item.currentStock / item.dailyUsage) * 10) / 10
+  const stock = item.currentStock ?? item.stock ?? 0;
+  const usage = item.dailyUsage ?? 1;
+  return Math.round((stock / usage) * 10) / 10
 }
 
 export function getOverallStockHealth(): number {
@@ -999,7 +1035,8 @@ export function getPurchaseRecommendations(): { item: InventoryItem; recommended
     .filter((item) => getDaysRemaining(item) <= 7)
     .map((item) => {
       const coverageDays = 7
-      const recommendedQty = Math.ceil(item.dailyUsage * coverageDays)
+      const usage = item.dailyUsage ?? 0
+      const recommendedQty = Math.ceil(usage * coverageDays)
       return { item, recommendedQty, coverageDays }
     })
     .sort((a, b) => getDaysRemaining(a.item) - getDaysRemaining(b.item))
