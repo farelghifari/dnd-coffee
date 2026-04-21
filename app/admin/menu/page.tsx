@@ -21,6 +21,7 @@ import {
   type MenuRecipeIngredient,
   type DisplayUnit
 } from "@/lib/api/supabase-service"
+import { useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -72,6 +73,9 @@ interface IngredientWithUnit extends MenuRecipeIngredient {
 }
 
 export default function MenuPage() {
+  const { user } = useAuth()
+  const actorName = user?.name || user?.email || "Admin"
+  
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [menuHpp, setMenuHpp] = useState<Record<string, number>>({})
@@ -229,7 +233,7 @@ export default function MenuPage() {
       type: formCategory,
       category: formCategory,
       price: parseInt(formPrice, 10),
-    })
+    }, actorName)
 
     // Reset form
     setFormName("")
@@ -253,7 +257,7 @@ export default function MenuPage() {
       type: formCategory,
       category: formCategory,
       price: parseInt(formPrice, 10),
-    })
+    }, actorName)
 
     // Reset form
     setFormName("")
@@ -283,7 +287,7 @@ export default function MenuPage() {
 
   const trulyDeleteItem = async () => {
     if (!deleteConfirmId) return
-    const result = await deleteMenuItem(deleteConfirmId)
+    const result = await deleteMenuItem(deleteConfirmId, actorName)
     // CORE RULE: REFRESH PAGE after delete
     if (result) {
       window.location.reload()
@@ -355,7 +359,7 @@ export default function MenuPage() {
         quantity: toBaseUnit(ing.quantity, ing.unit)
       }))
 
-    const result = await saveMenuRecipes(ingredientsMenuId, validIngredients)
+    const result = await saveMenuRecipes(ingredientsMenuId, validIngredients, actorName)
 
     setIngredientsMenuId(null)
     setFormIngredients([])

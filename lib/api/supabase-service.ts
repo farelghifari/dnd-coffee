@@ -379,7 +379,7 @@ export interface OvertimeRequest {
 // System Activity Log - tracks all system changes
 export interface SystemLog {
   id: string
-  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action" | "contract_renewal" | "kpi_change" | "employee_delete"
+  action: "inventory_change" | "employee_update" | "role_change" | "settings_change" | "shift_change" | "overtime_action" | "contract_renewal" | "kpi_change" | "employee_delete" | "menu_change"
   actor: string // Who made the change (email or name)
   target: string // What was changed (item name, employee name, etc.)
   details: string // Description of the change
@@ -1492,7 +1492,7 @@ export interface MenuRecipeIngredient {
 // STEP 2: INSERT ALL ingredients into menu_recipes
 // STEP 3: VERIFY: SELECT * FROM menu_recipes WHERE menu_item_id
 // STEP 4: IF EMPTY → retry insert
-export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecipeIngredient[]): Promise<boolean> {
+export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecipeIngredient[], actorName: string = 'Admin'): Promise<boolean> {
   if (isSupabaseConfigured()) {
     // STEP 1: Delete existing recipes for this menu item
     const { error: deleteError } = await supabase
@@ -1520,6 +1520,17 @@ export async function saveMenuRecipes(menuItemId: string, ingredients: MenuRecip
       if (insertError) {
         console.error("ERROR (saveMenuRecipes insert):", insertError.message, insertError.details)
         return false
+      }
+
+      // Get menu item name for better logging
+      const menu = await getMenuItemById(menuItemId)
+      if (menu) {
+        await logActivity(
+          'menu_change',
+          actorName,
+          menu.name,
+          `Recipes Updated for ${menu.name} (${ingredients.length} ingredients)`
+        )
       }
     }
     
@@ -2725,10 +2736,26 @@ export async function getMenuItems(): Promise<MenuItem[]> {
   return getStoredData(STORAGE_KEYS.menuItems, mockMenuItems as MenuItem[])
 }
 
+export async function getMenuItemById(id: string): Promise<MenuItem | null> {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('id', id)
+      .single()
+    
+    if (error) return null
+    return data ? { ...data, category: data.type } : null
+  }
+  
+  const items = await getMenuItems()
+  return items.find(i => i.id === id) || null
+}
+
 // MENU FIX - Add menu must use only: name, type, price, status
 // FIX DUPLICATE MENU: Check if menu exists before adding
 // IF EXISTS: Update existing record instead of inserting duplicate
-export async function addMenuItem(item: { name: string; type: string; price: number; packaging_cost?: number; status?: string; category?: string }): Promise<MenuItem | null> {
+export async function addMenuItem(item: { name: string; type: string; price: number; packaging_cost?: number; status?: string; category?: string }, actorName: string = 'Admin'): Promise<MenuItem | null> {
   console.log("INVOKING addMenuItem with object:", JSON.stringify(item, null, 2))
   if (isSupabaseConfigured()) {
   // STEP 1: Check if menu_items WHERE name = input_name EXISTS
@@ -2764,6 +2791,16 @@ export async function addMenuItem(item: { name: string; type: string; price: num
     if (updateError) {
       return null
     }
+
+    if (updatedData) {
+      await logActivity(
+        'menu_change',
+        actorName,
+        updatedData.name,
+        `Menu Updated: ${updatedData.name} (${updatedData.type})`
+      )
+    }
+
     return updatedData ? { ...updatedData, category: updatedData.type } : null
   }
   
@@ -2788,6 +2825,16 @@ export async function addMenuItem(item: { name: string; type: string; price: num
   if (error) {
   return null
   }
+
+  if (data) {
+    await logActivity(
+      'menu_change',
+      actorName,
+      data.name,
+      `New Menu Added: ${data.name} (${data.type})`
+    )
+  }
+
   return data ? { ...data, category: data.type } : null
   }
   
@@ -2806,7 +2853,7 @@ export async function addMenuItem(item: { name: string; type: string; price: num
   return newItem
 }
 
-export async function updateMenuItem(id: string, updates: Partial<MenuItem>): Promise<MenuItem | null> {
+export async function updateMenuItem(id: string, updates: Partial<MenuItem>, actorName: string = 'Admin'): Promise<MenuItem | null> {
   if (isSupabaseConfigured()) {
     // Only update fields that exist in DB schema
     const dbUpdates: Record<string, unknown> = {}
@@ -2830,6 +2877,16 @@ export async function updateMenuItem(id: string, updates: Partial<MenuItem>): Pr
     if (error) {
       return null
     }
+
+    if (data) {
+      await logActivity(
+        'menu_change',
+        actorName,
+        data.name,
+        `Menu Updated: ${data.name}`
+      )
+    }
+
     return data ? { ...data, category: data.type } : null
   }
   
@@ -2841,7 +2898,7 @@ export async function updateMenuItem(id: string, updates: Partial<MenuItem>): Pr
   return items[index]
 }
 
-export async function deleteMenuItem(id: string): Promise<boolean> {
+export async function deleteMenuItem(id: string, actorName: string = 'Admin'): Promise<boolean> {
   if (isSupabaseConfigured()) {
     const { error } = await supabase
       .from('menu_items')
@@ -2853,6 +2910,14 @@ export async function deleteMenuItem(id: string): Promise<boolean> {
     if (error) {
       return false
     }
+
+    await logActivity(
+      'menu_change',
+      actorName,
+      id,
+      `Menu Deleted (ID: ${id})`
+    )
+
     return true
   }
   

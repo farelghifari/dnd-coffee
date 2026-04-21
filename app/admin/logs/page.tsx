@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { parseISO, format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
 import { 
   getStockLogs, 
   getAttendanceLogs,
@@ -67,7 +68,6 @@ import {
   Clock
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
 
 export default function LogsPage() {
   const [stockLogs, setStockLogs] = useState<StockLog[]>([])
@@ -150,16 +150,22 @@ export default function LogsPage() {
     }).format(price)
   }
 
+  const parseSafeISO = (dateStr: string | undefined | null) => {
+    if (!dateStr) return new Date(NaN)
+    const normalized = (dateStr.includes('Z') || dateStr.includes('+')) ? dateStr : `${dateStr.replace(' ', 'T')}Z`
+    return parseISO(normalized)
+  }
+
   const safeFormatTime = (dateStr: string | undefined | null) => {
     if (!dateStr) return "--:--"
-    const d = new Date(dateStr)
+    const d = parseSafeISO(dateStr)
     if (isNaN(d.getTime())) return "--:--"
     return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })
   }
 
   const safeFormatDate = (dateStr: string | undefined | null) => {
     if (!dateStr) return "Unknown Date"
-    const d = new Date(dateStr)
+    const d = parseSafeISO(dateStr)
     if (isNaN(d.getTime())) return "Unknown Date"
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }
@@ -167,7 +173,7 @@ export default function LogsPage() {
   // Filter stock logs by date and other criteria
   const filteredStockLogs = useMemo(() => {
     return stockLogs.filter((log) => {
-      const logDate = new Date(log.timestamp)
+      const logDate = parseSafeISO(log.timestamp)
       const dateStr = format(selectedDate, 'yyyy-MM-dd')
       const logDateStr = format(logDate, 'yyyy-MM-dd')
       
@@ -202,7 +208,7 @@ export default function LogsPage() {
 
     // Filter real logs for the selected date
     const dayLogs = attendanceLogs.filter((log) => {
-      const logDate = new Date(log.timestamp)
+      const logDate = parseSafeISO(log.timestamp)
       return logDate >= dateStart && logDate <= dateEnd
     })
 
@@ -369,7 +375,7 @@ export default function LogsPage() {
   // Filter sales/menu logs by date
   const filteredSalesLogs = useMemo(() => {
     return salesLogs.filter((log) => {
-      const logDate = new Date(log.created_at)
+      const logDate = parseSafeISO(log.created_at)
       const dateStr = format(selectedDate, 'yyyy-MM-dd')
       const logDateStr = format(logDate, 'yyyy-MM-dd')
       
@@ -390,7 +396,7 @@ export default function LogsPage() {
   // Filter system logs by date and search
   const filteredSystemLogs = useMemo(() => {
     return systemLogs.filter((log) => {
-      const logDate = new Date(log.timestamp)
+      const logDate = parseSafeISO(log.timestamp)
       const dateStr = format(selectedDate, 'yyyy-MM-dd')
       const logDateStr = format(logDate, 'yyyy-MM-dd')
       
@@ -412,6 +418,8 @@ export default function LogsPage() {
       case "settings_change": return <Settings className="w-4 h-4 text-gray-500" />
       case "shift_change": return <CalendarDays className="w-4 h-4 text-orange-500" />
       case "overtime_action": return <Clock className="w-4 h-4 text-yellow-500" />
+      case "menu_change": return <Coffee className="w-4 h-4 text-rose-500" />
+      case "kpi_change": return <Activity className="w-4 h-4 text-cyan-500" />
       default: return <Activity className="w-4 h-4 text-muted-foreground" />
     }
   }
@@ -424,7 +432,9 @@ export default function LogsPage() {
       role_change: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300",
       settings_change: "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-300",
       shift_change: "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300",
-      overtime_action: "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300"
+      overtime_action: "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300",
+      menu_change: "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300",
+      kpi_change: "bg-cyan-100 text-cyan-800 border-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-300"
     }
     const labels: Record<string, string> = {
       inventory_change: "Inventory",
@@ -432,7 +442,9 @@ export default function LogsPage() {
       role_change: "Role",
       settings_change: "Settings",
       shift_change: "Shift",
-      overtime_action: "Overtime"
+      overtime_action: "Overtime",
+      menu_change: "Menu",
+      kpi_change: "KPI/Performance"
     }
     return (
       <Badge variant="outline" className={cn("rounded-sm capitalize text-xs", styles[action] || "")}>
