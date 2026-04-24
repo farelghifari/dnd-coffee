@@ -1,0 +1,118 @@
+{
+  "shopName": "D&D Coffee",
+  "tagline": "Your Daily Coffee Escape",
+  "logo": "/images/logo-placeholder.png",
+  "promos": [
+    {
+      "enabled": true,
+      "text": "🔥 Buy 1 Get 1 – Setiap Jumat",
+      "bg": "linear-gradient(135deg, #634832, #3d2b1f)",
+      "color": "#ffffff"
+    },
+    {
+      "enabled": true,
+      "text": "✨ Koleksi Merchandise Baru!",
+      "bg": "linear-gradient(135deg, #111, #444)",
+      "color": "#ffffff"
+    }
+  ],
+  
+  "featuredMenu": [
+    {
+      "name": "Iced Vanilla Latte",
+      "price": "35k",
+      "image": "/images/latte.png"
+    },
+    {
+      "name": "Caramel Macchiato",
+      "price": "38k",
+      "image": "/images/macchiato.png"
+    },
+    {
+      "name": "Butter Croissant",
+      "price": "25k",
+      "image": "/images/croissant.png"
+    },
+    {
+      "name": "Butter Croissant",
+      "price": "25k",
+      "image": "/images/croissant.png"
+    }
+  ],
+  "quickLinks": [
+    {
+      "label": "📍 Visit Our Shop",
+      "url": "https://maps.google.com",
+      "icon": "MapPin",
+      "highlight": true,
+      "visible": true
+    },
+    {
+      "label": "🛵 Order via GoFood",
+      "url": "https://gofood.link",
+      "icon": "ShoppingBag",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "💬 Chat with Us",
+      "url": "https://wa.me/628123456789",
+      "icon": "MessageCircle",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "📖 Full Menu (PDF)",
+      "url": "/menu.pdf",
+      "icon": "FileText",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "📸 Follow Our Instagram",
+      "url": "https://instagram.com/dndcoffee",
+      "icon": "Instagram",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "🌐 Official Website",
+      "url": "https://donotdisturb.com",
+      "icon": "Globe",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "🎵 Follow Our TikTok",
+      "url": "https://tiktok.com/@dndcoffee",
+      "icon": "Music",
+      "highlight": false,
+      "visible": true
+    }
+  ],
+  "operatingHours": [
+    {
+      "days": "Mon - Fri",
+      "time": "08:00 – 22:00"
+    },
+    {
+      "days": "Sat - Sun",
+      "time": "07:00 – 23:00"
+    }
+  ],
+  "googleMapsEmbedUrl": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d15865.174351349586!2d106.8202511!3d-6.224163!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zNsKwMTMnMjcuMCJTIDEwNsKwNDknMTIuOSJF!5e0!3m2!1sen!2sid!4v1620000000000!5m2!1sen!2sid",
+  "socials": [
+    {
+      "platform": "Instagram",
+      "url": "https://instagram.com"
+    },
+    {
+      "platform": "TikTok",
+      "url": "https://tiktok.com"
+    },
+    {
+      "platform": "WhatsApp",
+      "url": "https://wa.me"
+    }
+  ]
+}
