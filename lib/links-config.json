@@ -2,6 +2,7 @@
   "shopName": "DND Coffee",
   "tagline": "Your Daily Coffee Escape",
   "logo": "/images/logo-placeholder.png",
+  "backgroundImage": "/images/background-links.jpg",
   "promos": [
     {
       "enabled": true,
@@ -10,7 +11,7 @@
       "color": "#ffffff"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "text": "✨ Koleksi Merchandise Baru!",
       "bg": "linear-gradient(135deg, #111, #444)",
       "color": "#ffffff"

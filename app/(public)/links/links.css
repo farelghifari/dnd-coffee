@@ -37,11 +37,18 @@
   width: 100%;
   max-width: 520px;
   min-height: 100vh;
-  padding: 60px 24px 60px; /* Reduced from 100px now that navbar is hidden */
+  padding: 60px 24px 60px; 
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
+  
+  /* Background inside container - Pattern Mode */
+  background-image: var(--bg-image, none);
+  background-size: 400px auto; /* Ukuran pola agar tidak ke-zoom */
+  background-repeat: repeat;   /* Ulangi gambar */
+  background-position: top center;
+  background-attachment: scroll;
 }
 
 /* Header */
@@ -288,4 +295,16 @@
 .social-link:hover {
   color: #ffffff;
   transform: translateY(-3px);
+}
+
+/* Background Image Overlay */
+.bg-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.4); 
+  z-index: -1;
+  pointer-events: none;
 }

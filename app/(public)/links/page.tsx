@@ -62,7 +62,13 @@ export default function LinksPage() {
     <div className={`links-page-wrapper ${isDarkMode ? 'dark' : 'light'}`}>
       <div className="bg-glow" />
       
-      <div className="links-container">
+      <div 
+        className="links-container"
+        style={config.backgroundImage ? { 
+          '--bg-image': `url(${config.backgroundImage})`
+        } as any : {}}
+      >
+        {config.backgroundImage && <div className="bg-overlay" style={{ position: 'absolute', zIndex: -1, borderRadius: 'inherit' }} />}
         {/* Top Controls */}
         <button className="theme-switcher" onClick={toggleTheme} aria-label="Toggle Theme">
           {isDarkMode ? <Sun size={20} strokeWidth={1.5} /> : <Moon size={20} strokeWidth={1.5} />}
