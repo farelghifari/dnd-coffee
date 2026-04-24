@@ -1,5 +1,5 @@
 {
-  "shopName": "D&D Coffee",
+  "shopName": "DND Coffee",
   "tagline": "Your Daily Coffee Escape",
   "logo": "/images/logo-placeholder.png",
   "promos": [
@@ -16,7 +16,6 @@
       "color": "#ffffff"
     }
   ],
-  
   "featuredMenu": [
     {
       "name": "Iced Vanilla Latte",
