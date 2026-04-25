@@ -87,7 +87,7 @@
 }
 
 @theme inline {
-  --font-sans: 'Bryndan Write', 'Caveat', 'Kalam', cursive;
+  --font-sans: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive;
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
   --color-background: var(--background);
   --color-foreground: var(--foreground);
