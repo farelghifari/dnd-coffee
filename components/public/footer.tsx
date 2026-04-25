@@ -55,7 +55,7 @@ export function Footer() {
 
           <div className="h-[500px] rounded-[3rem] overflow-hidden border-2 border-white/5 relative bg-[#111] shadow-2xl">
             <iframe
-              src="https://maps.google.com/maps?q=Jl.%20Indraprasta%20No.%2076,%20Semarang&t=&z=15&ie=UTF8&iwloc=&output=embed"
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.258179902994!2d110.40710899999999!3d-6.978833199999995!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e708b85cbe263fb%3A0x33e46ec6b85f5d89!2sDo%20Not%20Disturb!5e0!3m2!1sen!2ssg!4v1777114121203!5m2!1sen!2ssg"
               width="100%"
               height="100%"
               style={{ border: 0, filter: "grayscale(1) contrast(1.2) invert(0.9) opacity(0.8)" }}
@@ -122,7 +122,7 @@ export function Footer() {
                   <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
                   Album
                 </Link></li>
-                <li><Link href="#visit" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
+                <li><Link href="/visit" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
                   <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
                   Visit
                 </Link></li>

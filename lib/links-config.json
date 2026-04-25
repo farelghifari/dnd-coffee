@@ -52,11 +52,11 @@
       "url": "https://gofood.link",
       "icon": "ShoppingBag",
       "highlight": false,
-      "visible": true
+      "visible": false
     },
     {
       "label": "💬 Chat with Us",
-      "url": "https://wa.me/628123456789",
+      "url": "https://wa.me/628817801926",
       "icon": "MessageCircle",
       "highlight": false,
       "visible": true
@@ -70,14 +70,14 @@
     },
     {
       "label": "📸 Follow Our Instagram",
-      "url": "https://instagram.com/donotdisturb.coffee",
+      "url": "https://instagram.com/house.of.dnd",
       "icon": "Instagram",
       "highlight": false,
       "visible": true
     },
     {
       "label": "🛵 Follow Our TikTok",
-      "url": "https://tiktok.com/@donotdisturb.coffee",
+      "url": "https://tiktok.com/@house.of.dnd",
       "icon": "Music",
       "highlight": false,
       "visible": true
@@ -97,11 +97,11 @@
   "socials": [
     {
       "platform": "Instagram",
-      "url": "https://instagram.com/donotdisturb.coffee"
+      "url": "https://instagram.com/house.of.dnd"
     },
     {
       "platform": "TikTok",
-      "url": "https://tiktok.com/@donotdisturb.coffee"
+      "url": "https://tiktok.com/@house.of.dnd"
     },
     {
       "platform": "WhatsApp",

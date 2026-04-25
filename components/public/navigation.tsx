@@ -10,7 +10,7 @@ const navItems = [
   { href: "/", label: "Home" },
   { href: "/activity", label: "Journal" },
   { href: "/album", label: "Album" },
-  { href: "#visit", label: "Visit" },
+  { href: "/visit", label: "Visit" },
 ]
 
 export function Navigation() {

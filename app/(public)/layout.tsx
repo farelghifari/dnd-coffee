@@ -11,6 +11,7 @@ export default function PublicLayout({
 }) {
   const pathname = usePathname()
   const isLinksPage = pathname === "/links"
+  const isVisitPage = pathname === "/visit"
 
   return (
     <div className="public-typography">
@@ -18,7 +19,7 @@ export default function PublicLayout({
       <main className="min-h-screen">
         {children}
       </main>
-      {!isLinksPage && <Footer />}
+      {(!isLinksPage && !isVisitPage) && <Footer />}
     </div>
   )
 }

@@ -158,11 +158,24 @@
   overflow-x: auto;
   gap: 16px;
   margin-bottom: 48px;
-  padding-bottom: 10px;
-  scrollbar-width: none;
+  padding-bottom: 16px;
 }
 
-.featured-scroll::-webkit-scrollbar { display: none; }
+/* Sleek Custom Scrollbar for Desktop Users */
+.featured-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.featured-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+.featured-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+}
+.featured-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
 
 .menu-card {
   flex: 0 0 190px;

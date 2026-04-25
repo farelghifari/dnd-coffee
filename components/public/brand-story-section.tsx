@@ -165,9 +165,9 @@ export function BrandStorySection() {
             <div className="p-4 bg-white/10 backdrop-blur-md rounded-2xl mb-6 inline-block">
               <Eye size={24} className="text-[#F9F4EB]" />
             </div>
-            <h3 className="text-2xl md:text-3xl font-black mb-3 uppercase tracking-tighter">THE QUIET SESSION.</h3>
+            <h3 className="text-2xl md:text-3xl font-black mb-3 uppercase tracking-tighter">THE PRODUCTIVE VIBE.</h3>
             <p className="text-base md:text-lg opacity-80 leading-relaxed font-medium">
-              Silence is the ultimate specialty. Our spaces are curated for deep, uninterrupted focus—lighting, acoustics, and layout optimized to let your loudest ideas breathe.
+              We're not a silent library—we're a pulse for productivity. Expect curated playlists, ample power outlets, blazing-fast WiFi, and an atmosphere designed to keep you inspired.
             </p>
           </motion.div>
 
