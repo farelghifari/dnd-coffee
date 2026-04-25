@@ -13,12 +13,12 @@ export default function PublicLayout({
   const isLinksPage = pathname === "/links"
 
   return (
-    <>
+    <div className="public-typography">
       {!isLinksPage && <Navigation />}
       <main className="min-h-screen">
         {children}
       </main>
       {!isLinksPage && <Footer />}
-    </>
+    </div>
   )
 }

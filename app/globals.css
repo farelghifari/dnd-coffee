@@ -87,8 +87,9 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive;
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-bryndan: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -133,6 +134,15 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .public-typography,
+  .public-typography * {
+    --font-sans: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive;
+    --font-geist: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive;
+    font-family: var(--font-bryndan), var(--font-caveat), var(--font-kalam), cursive !important;
   }
 }
 

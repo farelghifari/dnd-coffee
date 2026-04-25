@@ -37,6 +37,15 @@ import {
 import { cn } from "@/lib/utils"
 import { format, startOfMonth, endOfMonth, isSameDay, subDays, addDays, parseISO } from "date-fns"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { UserPlus, UserMinus, HardDrive, ShieldCheck } from "lucide-react"
+import { toast } from "sonner"
 
 export default function AttendanceReportPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -55,6 +64,16 @@ export default function AttendanceReportPage() {
   const [resolveData, setResolveData] = useState<{ employee_id: string; employee_name: string; date: string } | null>(null)
   const [resolveTimes, setResolveTimes] = useState({ clockIn: "08:00", clockOut: "17:00" })
   const [isResolving, setIsResolving] = useState(false)
+  
+  // Manual Attendance Modal State
+  const [manualModalOpen, setManualModalOpen] = useState(false)
+  const [manualData, setManualData] = useState({
+    employeeId: "",
+    type: "clock-in" as "clock-in" | "clock-out",
+    date: format(new Date(), "yyyy-MM-dd"),
+    time: format(new Date(), "HH:mm")
+  })
+  const [isManualLoading, setIsManualLoading] = useState(false)
 
   const refreshReport = async (silent = false) => {
     if (!silent) setIsLoading(true)
@@ -131,6 +150,48 @@ export default function AttendanceReportPage() {
     await refreshReport()
   }
 
+  const handleManualAction = async () => {
+    if (!manualData.employeeId) {
+      toast.error("Please select a barista")
+      return
+    }
+
+    const employee = employees.find(e => e.id === manualData.employeeId)
+    if (!employee) return
+
+    setIsManualLoading(true)
+    try {
+      await addAttendanceLog({
+        employee_id: manualData.employeeId,
+        employee_name: employee.name,
+        type: manualData.type,
+        manual_date: manualData.date,
+        manual_time: `${manualData.time}:00`,
+        method: 'nfc', // Treat admin manual action as system-level
+        is_ops_device: true
+      })
+      
+      toast.success(`Successfully ${manualData.type === 'clock-in' ? 'clocked in' : 'clocked out'} ${employee.name}`)
+      setManualModalOpen(false)
+      await refreshReport()
+    } catch (error) {
+      console.error(error)
+      toast.error("Failed to process manual action")
+    } finally {
+      setIsManualLoading(false)
+    }
+  }
+
+  const triggerForceClockOut = (employeeId: string, employeeName: string, date: string) => {
+    setManualData({
+      employeeId,
+      type: "clock-out",
+      date,
+      time: format(new Date(), "HH:mm")
+    })
+    setManualModalOpen(true)
+  }
+
   const filteredReport = useMemo(() => {
     return [...reportData]
       .filter(r => r.employee_name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -197,6 +258,22 @@ export default function AttendanceReportPage() {
           <p className="text-muted-foreground">Monitor performance and calculate work hours for salary evaluations</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            className="rounded-sm gap-2 border-primary/20 text-primary hover:bg-primary/5"
+            onClick={() => {
+              setManualData({
+                employeeId: "",
+                type: "clock-in",
+                date: format(new Date(), "yyyy-MM-dd"),
+                time: format(new Date(), "HH:mm")
+              })
+              setManualModalOpen(true)
+            }}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Manual Action
+          </Button>
           <Button variant="outline" className="rounded-sm gap-2">
             <Download className="w-4 h-4" />
             Export CSV
@@ -364,7 +441,98 @@ export default function AttendanceReportPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Main Table */}
+      {/* Manual Attendance Modal */}
+      <Dialog open={manualModalOpen} onOpenChange={setManualModalOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-sm">
+          <DialogHeader>
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <ShieldCheck className="w-6 h-6 text-primary" />
+            </div>
+            <DialogTitle className="text-xl font-light">Manual Attendance Override</DialogTitle>
+            <DialogDescription>
+              Super Admin can manually insert clock-in or clock-out events. 
+              Use this for correcting missed taps.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-6 py-4">
+            <div className="grid gap-2">
+              <Label>Select Barista</Label>
+              <Select 
+                value={manualData.employeeId} 
+                onValueChange={(val) => setManualData({...manualData, employeeId: val})}
+              >
+                <SelectTrigger className="rounded-sm">
+                  <SelectValue placeholder="Choose employee..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Action Type</Label>
+                <Select 
+                  value={manualData.type} 
+                  onValueChange={(val: any) => setManualData({...manualData, type: val})}
+                >
+                  <SelectTrigger className="rounded-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clock-in">
+                      <div className="flex items-center gap-2 text-green-600">
+                        <UserPlus className="w-4 h-4" /> Clock In
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="clock-out">
+                      <div className="flex items-center gap-2 text-destructive">
+                        <UserMinus className="w-4 h-4" /> Clock Out
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Date</Label>
+                <Input 
+                  type="date" 
+                  value={manualData.date}
+                  onChange={(e) => setManualData({...manualData, date: e.target.value})}
+                  className="rounded-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Time (HH:mm)</Label>
+              <Input 
+                type="time" 
+                value={manualData.time}
+                onChange={(e) => setManualData({...manualData, time: e.target.value})}
+                className="rounded-sm"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" className="rounded-sm" onClick={() => setManualModalOpen(false)}>Cancel</Button>
+            <Button 
+              className="rounded-sm bg-foreground text-background hover:bg-foreground/90 px-8" 
+              onClick={handleManualAction} 
+              disabled={isManualLoading}
+            >
+              {isManualLoading ? "Processing..." : "Commit Action"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Card className="rounded-sm border-border shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
@@ -456,7 +624,17 @@ export default function AttendanceReportPage() {
                                      <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending</span>
                                    ) : (row.sessions[0]?.otStatus === 'approved') ? (
                                      <span className="text-green-500 font-bold text-[10px] uppercase tracking-wider bg-green-500/10 px-1 py-0.5 rounded-sm">Active</span>
-                                   ) : "Active"}
+                                   ) : (
+                                     <div className="flex items-center gap-2">
+                                       <span className="text-primary font-bold text-[10px] uppercase tracking-wider bg-primary/10 px-1 py-0.5 rounded-sm">Active</span>
+                                       <button 
+                                         onClick={() => triggerForceClockOut(row.employee_id, row.employee_name, row.date)}
+                                         className="text-[9px] font-bold text-destructive hover:underline flex items-center gap-1"
+                                       >
+                                         <UserMinus className="w-3 h-3" /> Force Out
+                                       </button>
+                                     </div>
+                                   )}
                                </span>
                             </div>
                             {row.sessions[row.sessions.length - 1].isAutoClockOut && (
