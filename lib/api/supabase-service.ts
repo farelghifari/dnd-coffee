@@ -3995,6 +3995,7 @@ export async function getMenusHpp(menuIds: string[]): Promise<Record<string, num
 export interface BulkSaleItem {
   menu_id: string
   quantity: number
+  total_price?: number // Optional custom price override for bundles/discounts
 }
 
 export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
@@ -4002,6 +4003,7 @@ export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
     const { error: processError } = await supabase.rpc('process_menu_sales_fifo', {
       p_menu_ids: items.map(i => i.menu_id),
       p_quantities: items.map(i => i.quantity),
+      p_total_prices: items.map(i => i.total_price ?? null),
       p_actor_name: 'Report'
     })
     

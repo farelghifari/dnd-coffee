@@ -43,7 +43,12 @@ import {
   ShoppingCart,
   ArrowDownToLine,
   BarChart3,
-  PieChart as PieIcon
+  PieChart as PieIcon,
+  Percent,
+  Tag,
+  BoxSelect,
+  Check,
+  Layers
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
@@ -74,6 +79,8 @@ export default function ReportPage() {
   
   // Daily Sales Input state (bulk sell)
   const [bulkSaleItems, setBulkSaleItems] = useState<BulkSaleItem[]>([{ menu_id: "", quantity: 0 }])
+  const [selectedRows, setSelectedRows] = useState<number[]>([])
+  const [bundlePrice, setBundlePrice] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const fetchData = async () => {
@@ -146,16 +153,61 @@ export default function ReportPage() {
   const removeBulkSaleRow = (index: number) => {
     if (bulkSaleItems.length <= 1) return
     setBulkSaleItems(bulkSaleItems.filter((_, i) => i !== index))
+    setSelectedRows(selectedRows.filter(i => i !== index).map(i => i > index ? i - 1 : i))
   }
   
-  const updateBulkSaleItem = (index: number, field: keyof BulkSaleItem, value: string | number) => {
+  const updateBulkSaleItem = (index: number, field: keyof BulkSaleItem | "discount", value: string | number) => {
     const updated = [...bulkSaleItems]
+    
     if (field === "menu_id") {
       updated[index].menu_id = value as string
-    } else {
+      updated[index].total_price = undefined
+    } else if (field === "quantity") {
       updated[index].quantity = typeof value === "string" ? parseInt(value, 10) || 0 : value
+    } else if (field === "total_price") {
+      updated[index].total_price = typeof value === "string" ? parseFloat(value) || 0 : value
+    } else if (field === "discount") {
+      const menu = menuItems.find(m => m.id === updated[index].menu_id)
+      if (menu) {
+        const discountPercent = typeof value === "string" ? parseFloat(value) || 0 : value
+        const subtotal = menu.price * updated[index].quantity
+        updated[index].total_price = subtotal * (1 - discountPercent / 100)
+      }
     }
+    
     setBulkSaleItems(updated)
+  }
+
+  const toggleRowSelection = (index: number) => {
+    if (selectedRows.includes(index)) {
+      setSelectedRows(selectedRows.filter(i => i !== index))
+    } else {
+      setSelectedRows([...selectedRows, index])
+    }
+  }
+
+  const applyBundlePrice = () => {
+    const totalBundle = parseFloat(bundlePrice)
+    if (isNaN(totalBundle) || selectedRows.length < 2) return
+
+    const updated = [...bulkSaleItems]
+    
+    const selectedItemsData = selectedRows.map(idx => {
+      const item = updated[idx]
+      const menu = menuItems.find(m => m.id === item.menu_id)
+      return { idx, normalPrice: (menu?.price || 0) * (item.quantity || 1) }
+    })
+
+    const combinedNormalTotal = selectedItemsData.reduce((sum, item) => sum + item.normalPrice, 0)
+    
+    selectedItemsData.forEach(item => {
+      const ratio = combinedNormalTotal > 0 ? item.normalPrice / combinedNormalTotal : 1 / selectedRows.length
+      updated[item.idx].total_price = Math.round(totalBundle * ratio)
+    })
+
+    setBulkSaleItems(updated)
+    setBundlePrice("")
+    setSelectedRows([])
   }
   
   // Handle bulk sell submission
@@ -185,6 +237,9 @@ export default function ReportPage() {
 
   // Calculate estimated total for bulk sale
   const bulkSaleTotal = bulkSaleItems.reduce((sum, item) => {
+    if (item.total_price !== undefined) {
+      return sum + item.total_price
+    }
     const menu = menuItems.find(m => m.id === item.menu_id)
     return sum + (menu ? menu.price * item.quantity : 0)
   }, 0)
@@ -244,48 +299,139 @@ export default function ReportPage() {
           <div className="space-y-3 mb-4">
             {bulkSaleItems.map((item, idx) => {
               const selectedMenu = menuItems.find(m => m.id === item.menu_id)
-              const itemTotal = selectedMenu ? selectedMenu.price * item.quantity : 0
+              const subtotal = selectedMenu ? selectedMenu.price * item.quantity : 0
+              const isOverridden = item.total_price !== undefined
+              const currentTotal = isOverridden ? item.total_price : subtotal
+              const discountPercent = subtotal > 0 ? ((subtotal - (item.total_price ?? subtotal)) / subtotal) * 100 : 0
+              const isSelectedForBundle = selectedRows.includes(idx)
+
               return (
-                <div key={idx} className="flex items-center gap-2">
-                  <Select 
-                    value={item.menu_id} 
-                    onValueChange={(v) => updateBulkSaleItem(idx, "menu_id", v)}
+                <div key={idx} className={cn(
+                  "flex flex-wrap items-center gap-2 p-2 rounded-sm border transition-all",
+                  isSelectedForBundle ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "border-border/50 bg-muted/5"
+                )}>
+                  <div 
+                    className={cn(
+                      "w-6 h-6 rounded-sm border flex items-center justify-center cursor-pointer transition-colors",
+                      isSelectedForBundle ? "bg-primary border-primary text-white" : "border-border hover:border-primary/50"
+                    )}
+                    onClick={() => toggleRowSelection(idx)}
                   >
-                    <SelectTrigger className="flex-1 rounded-sm">
-                      <SelectValue placeholder="Select menu" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {menuItems.filter(m => m.status === "active").map((menu) => (
-                        <SelectItem key={menu.id} value={menu.id}>
-                          {menu.name} - {formatPrice(menu.price)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    min="1"
-                    placeholder="Qty"
-                    value={item.quantity || ""}
-                    onChange={(e) => updateBulkSaleItem(idx, "quantity", e.target.value)}
-                    className="w-24 rounded-sm"
-                  />
-                  <span className="text-sm text-muted-foreground w-28 text-right font-mono">
-                    {formatPrice(itemTotal)}
-                  </span>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-9 w-9 text-destructive shrink-0"
-                    onClick={() => removeBulkSaleRow(idx)}
-                    disabled={bulkSaleItems.length <= 1}
-                  >
-                    <Minus className="w-4 h-4" />
-                  </Button>
+                    {isSelectedForBundle && <Check className="w-4 h-4" />}
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <Select 
+                      value={item.menu_id} 
+                      onValueChange={(v) => updateBulkSaleItem(idx, "menu_id", v)}
+                    >
+                      <SelectTrigger className="w-full rounded-sm border-none bg-transparent shadow-none hover:bg-muted/30">
+                        <SelectValue placeholder="Select menu" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {menuItems.filter(m => m.status === "active").map((menu) => (
+                          <SelectItem key={menu.id} value={menu.id}>
+                            {menu.name} ({formatPrice(menu.price)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-background/50 rounded-sm border border-border/50 px-2 h-9">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Qty</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity || ""}
+                      onChange={(e) => updateBulkSaleItem(idx, "quantity", e.target.value)}
+                      className="w-12 h-6 p-0 border-none bg-transparent shadow-none text-center focus-visible:ring-0"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-background/50 rounded-sm border border-border/50 px-2 h-9">
+                    <Percent className="w-3 h-3 text-muted-foreground" />
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="%"
+                      value={discountPercent > 0 ? Math.round(discountPercent) : ""}
+                      onChange={(e) => updateBulkSaleItem(idx, "discount", e.target.value)}
+                      className="w-8 h-6 p-0 border-none bg-transparent shadow-none text-center focus-visible:ring-0 text-xs"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-background/50 rounded-sm border border-border/50 px-2 h-9 group">
+                    <Tag className={cn("w-3 h-3", isOverridden ? "text-primary" : "text-muted-foreground")} />
+                    <Input
+                      type="number"
+                      placeholder={formatPrice(subtotal)}
+                      value={isOverridden ? item.total_price : ""}
+                      onChange={(e) => updateBulkSaleItem(idx, "total_price", e.target.value)}
+                      className={cn(
+                        "w-28 h-6 p-0 border-none bg-transparent shadow-none text-right focus-visible:ring-0 font-mono text-sm",
+                        isOverridden && "text-primary font-bold"
+                      )}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <span className={cn(
+                      "text-sm font-mono whitespace-nowrap min-w-[100px] text-right",
+                      isOverridden ? "text-primary" : "text-foreground"
+                    )}>
+                      {formatPrice(currentTotal ?? 0)}
+                    </span>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-destructive/50 hover:text-destructive hover:bg-destructive/10 rounded-sm"
+                      onClick={() => removeBulkSaleRow(idx)}
+                      disabled={bulkSaleItems.length <= 1}
+                    >
+                      <Minus className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               )
             })}
           </div>
+
+          {selectedRows.length >= 2 && (
+            <div className="bg-primary/10 border border-primary/20 p-3 rounded-sm mb-4 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-3">
+                <div className="bg-primary text-white p-1.5 rounded-sm">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-primary uppercase">Bundling Helper</p>
+                  <p className="text-xs text-muted-foreground">{selectedRows.length} items selected to group as a bundle</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">Rp</span>
+                  <Input 
+                    type="number"
+                    placeholder="Bundle Total"
+                    value={bundlePrice}
+                    onChange={(e) => setBundlePrice(e.target.value)}
+                    className="w-32 h-9 pl-8 rounded-sm bg-background border-primary/30 focus-visible:ring-primary"
+                  />
+                </div>
+                <Button 
+                  size="sm" 
+                  onClick={applyBundlePrice} 
+                  disabled={!bundlePrice}
+                  className="rounded-sm shadow-sm"
+                >
+                  Apply Bundle
+                </Button>
+              </div>
+            </div>
+          )}
           
           <div className="flex items-center justify-between">
             <Button variant="outline" onClick={addBulkSaleRow} className="rounded-sm">
