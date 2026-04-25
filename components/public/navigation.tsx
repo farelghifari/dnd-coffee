@@ -53,6 +53,7 @@ export function Navigation() {
         <div className="flex items-center justify-between">
           <Link 
             href="/" 
+            onClick={() => { if (pathname === '/') window.location.reload(); }}
             className={cn(
               "font-semibold text-lg tracking-tight transition-colors",
               "text-white"

@@ -209,11 +209,12 @@ export function BrandStorySection() {
         </motion.div>
       </div>
 
-      {/* Background Walking Human Overlay */}
-      <div className="absolute top-1/2 left-0 w-full overflow-hidden pointer-events-none z-0 opacity-10">
+      {/* Background Walking Human Overlay - Optimized for mobile */}
+      <div className="absolute top-1/2 left-0 w-full overflow-hidden pointer-events-none z-0 opacity-[0.03] md:opacity-[0.05]">
         <motion.div 
-          animate={{ x: ["100vw", "-100vw"] }}
-          transition={{ repeat: Infinity, duration: 25, ease: "linear", type: "tween" }}
+          animate={{ x: ["120vw", "-120vw"] }}
+          transition={{ repeat: Infinity, duration: 45, ease: "linear", type: "tween" }}
+          style={{ willChange: "transform" }}
           className="w-[800px] h-[800px]"
         >
           <img 

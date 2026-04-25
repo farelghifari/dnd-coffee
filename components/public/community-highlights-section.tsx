@@ -62,7 +62,7 @@ export function CommunityHighlightsSection() {
         </div>
 
         {/* Right Mood-board / Scattered Pictures Block */}
-        <div className="flex-1 w-full h-[500px] relative w-full lg:min-w-[550px] mt-12 xl:mt-0">
+        <div className="flex-1 w-full h-[400px] md:h-[500px] relative mt-12 xl:mt-0">
           
           <motion.div 
             initial={{ opacity: 0, rotate: -15, scale: 0.8, x: -50 }}
@@ -70,12 +70,12 @@ export function CommunityHighlightsSection() {
             whileHover={{ scale: 1.05, rotate: -2, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100 }}
-            className="absolute top-0 left-0 md:left-10 w-64 h-72 bg-[#F9F4EB] p-4 rounded-xl shadow-2xl shadow-black/50 rotate-[-6deg] z-10 cursor-pointer"
+            className="absolute top-0 left-0 md:left-10 w-48 h-56 md:w-64 md:h-72 bg-[#F9F4EB] p-3 md:p-4 rounded-xl shadow-2xl shadow-black/50 rotate-[-6deg] z-10 cursor-pointer"
           >
-            <div className="w-full h-4/5 bg-[#2A1B14] rounded-lg overflow-hidden flex items-center justify-center p-4 isolate">
+            <div className="w-full h-4/5 bg-[#2A1B14] rounded-lg overflow-hidden flex items-center justify-center p-3 md:p-4 isolate">
               <img src="/images/human_customer_transparent.png" alt="Creative Space" className="w-full h-full object-contain filter invert brightness-[2]" />
             </div>
-            <p className="text-[#2A1B14] font-bold text-center mt-3" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Morning Grinds</p>
+            <p className="text-[#2A1B14] font-bold text-center mt-2 md:mt-3 text-sm md:text-base" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Morning Grinds</p>
           </motion.div>
 
           <motion.div 
@@ -84,12 +84,12 @@ export function CommunityHighlightsSection() {
             whileHover={{ scale: 1.05, rotate: 2, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100, delay: 0.2 }}
-            className="absolute top-20 right-0 md:right-10 w-72 h-80 bg-[#F9F4EB] p-4 pb-8 rounded-xl shadow-2xl shadow-black/50 rotate-[8deg] z-20 cursor-pointer"
+            className="absolute top-16 right-0 md:top-20 md:right-10 w-52 h-60 md:w-72 md:h-80 bg-[#F9F4EB] p-3 md:p-4 pb-6 md:pb-8 rounded-xl shadow-2xl shadow-black/50 rotate-[8deg] z-20 cursor-pointer"
           >
             <div className="w-full h-[85%] bg-[#1B3629] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
                <img src="/images/human_barista_transparent.png" className="w-full h-full object-contain filter invert brightness-[2]" alt="Community Vibe" />
             </div>
-            <p className="text-[#2A1B14] font-bold text-center mt-4 text-lg" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Midnight Epiphanies</p>
+            <p className="text-[#2A1B14] font-bold text-center mt-2 md:mt-4 text-sm md:text-lg" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Midnight Epiphanies</p>
           </motion.div>
 
           <motion.div 
@@ -98,12 +98,12 @@ export function CommunityHighlightsSection() {
             whileHover={{ scale: 1.05, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100, delay: 0.4 }}
-            className="absolute bottom-0 left-1/4 w-60 h-64 bg-[#F9F4EB] p-4 rounded-xl shadow-2xl shadow-black/50 -rotate-[2deg] z-25 cursor-pointer"
+            className="absolute bottom-4 left-1/4 md:bottom-0 w-44 h-48 md:w-60 md:h-64 bg-[#F9F4EB] p-3 md:p-4 rounded-xl shadow-2xl shadow-black/50 -rotate-[2deg] z-25 cursor-pointer"
           >
             <div className="w-full h-4/5 bg-[#DC6835] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
               <img src="/images/human_customer_transparent.png" className="w-full h-full object-contain scale-x-[-1] filter invert brightness-[2]" alt="Code and Coffee" />
             </div>
-            <p className="text-[#2A1B14] font-bold text-center mt-3" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Code + Caffeine</p>
+            <p className="text-[#2A1B14] font-bold text-center mt-2 md:mt-3 text-xs md:text-base" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Code + Caffeine</p>
           </motion.div>
 
         </div>

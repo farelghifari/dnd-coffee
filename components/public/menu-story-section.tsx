@@ -92,7 +92,7 @@ const menuStructure = [
 
 export function MenuStorySection() {
   return (
-    <section className="bg-[#2A1B14] text-[#F9F4EB] py-24 md:py-32 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+    <section id="menu" className="bg-[#2A1B14] text-[#F9F4EB] py-24 md:py-32 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       
       {/* Decorative Assets - Subtle Brown Grain */}
       <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-[#DC6835]/5 to-transparent pointer-events-none" />
@@ -138,7 +138,8 @@ export function MenuStorySection() {
               initial={{ opacity: 0, y: 50 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}
-              transition={{ delay: sectionIdx * 0.1, type: "spring", stiffness: 80 }}
+              transition={{ delay: sectionIdx * 0.05, type: "spring", stiffness: 80 }}
+              style={{ willChange: "transform, opacity" }}
               className={`${section.color} ${section.textColor} p-8 md:p-10 rounded-[2.5rem] shadow-2xl flex flex-col h-[480px]`}
             >
               <div className="flex items-center justify-between mb-6">
@@ -151,7 +152,7 @@ export function MenuStorySection() {
                 {section.comingSoon && (
                   <motion.span 
                     animate={{ rotate: [-2, 2, -2], scale: [1, 1.05, 1] }} 
-                    transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                    transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
                     className="px-3 py-1 bg-black/80 text-white text-[10px] sm:text-xs rounded-full italic tracking-widest uppercase shadow-xl"
                   >
                     COMING SOON
@@ -245,10 +246,10 @@ export function MenuStorySection() {
                dragMomentum={true}
                whileHover={{ scale: 1.1, cursor: "grab" }}
                whileDrag={{ scale: 1.2, cursor: "grabbing" }}
-               animate={{ rotate: [-5, 5, -5], y: [0, 5, 0] }}
+               animate={{ rotate: [-3, 3, -3], y: [0, 4, 0] }}
                transition={{ 
-                  rotate: { repeat: Infinity, duration: 5, ease: "easeInOut", type: "tween" }, 
-                  y: { repeat: Infinity, duration: 5, ease: "easeInOut", type: "tween" } 
+                  rotate: { repeat: Infinity, duration: 10, ease: "easeInOut", type: "tween" }, 
+                  y: { repeat: Infinity, duration: 10, ease: "easeInOut", type: "tween" } 
                }}
                onClick={(e) => {
                  const target = e.currentTarget;

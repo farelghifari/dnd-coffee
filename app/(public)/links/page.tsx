@@ -145,7 +145,7 @@ export default function LinksPage() {
               </div>
             ))}
           </div>
-          <div className="map-card" onClick={() => window.open('https://maps.google.com', '_blank')} style={{ cursor: 'pointer' }}>
+          <div className="map-card" onClick={() => window.open('https://maps.app.goo.gl/UPDFyDJ3YWEDNQWE7', '_blank')} style={{ cursor: 'pointer' }}>
             <iframe
               title="Mini Map"
               width="100%"
@@ -181,9 +181,22 @@ export default function LinksPage() {
              </div>
           </button>
           
-          <p style={{ marginTop: '40px', fontSize: '10px', opacity: 0.3, letterSpacing: '2px', textTransform: 'uppercase' }}>
-            Powered by {config.shopName}
-          </p>
+          <div style={{ marginTop: '40px', display: 'flex', justifyContent: 'center' }}>
+            <span style={{ 
+              fontSize: '10px', 
+              letterSpacing: '2px', 
+              textTransform: 'uppercase',
+              background: 'rgba(255,255,255,0.05)',
+              backdropFilter: 'blur(4px)',
+              padding: '6px 16px',
+              borderRadius: '100px',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.4)',
+              fontWeight: '600'
+            }}>
+              Powered by {config.shopName}
+            </span>
+          </div>
         </footer>
       </div>
     </div>

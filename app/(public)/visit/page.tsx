@@ -1,155 +1,113 @@
+"use client"
+
+import { motion } from "framer-motion"
+import { Navigation } from "@/components/public/navigation"
+import { Footer } from "@/components/public/footer"
+import { MapPin, Clock, Phone, Instagram, MessageCircle, ExternalLink, ArrowLeft } from "lucide-react"
 import { shopInfo } from "@/lib/data"
-import { MapPin, Clock, Phone, Mail, Instagram, Coffee, Wifi, Laptop } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import Link from "next/link"
 
 export default function VisitPage() {
   return (
-    <div className="py-24 md:py-32">
-      {/* Header */}
-      <section className="px-6 mb-16">
-        <div className="max-w-7xl mx-auto text-center">
-          <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground mb-4">
-            Find Us
-          </p>
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-light tracking-tight mb-6">
-            Visit
-          </h1>
-          <p className="text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            We would love to serve you. Find us in the heart of South Jakarta, 
-            where every cup is crafted with intention.
-          </p>
-        </div>
-      </section>
-
-      {/* Map + Info Grid */}
-      <section className="px-6 mb-24">
+    <main className="min-h-screen bg-[#F9F4EB]">
+      <Navigation />
+      
+      <section className="pt-32 pb-24 px-6">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Map Placeholder */}
-            <div 
-              className="aspect-square lg:aspect-auto lg:min-h-[500px] bg-muted rounded-lg relative overflow-hidden"
-              style={{
-                backgroundImage: "url('/images/map-placeholder.jpg')",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
+          <Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-[#DC6835] mb-12 hover:gap-4 transition-all" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+            <ArrowLeft size={16} /> BACK TO HOME
+          </Link>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+            <motion.div
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="space-y-12"
             >
-              <div className="absolute inset-0 bg-foreground/5 flex items-center justify-center">
-                <div className="bg-background/95 backdrop-blur-sm p-6 rounded-lg text-center max-w-xs">
-                  <MapPin className="h-8 w-8 mx-auto mb-4 text-accent" />
-                  <p className="font-medium mb-2">{shopInfo.name}</p>
-                  <p className="text-sm text-muted-foreground">{shopInfo.address}</p>
-                  <Button className="mt-4" size="sm">
-                    Open in Maps
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Info Cards */}
-            <div className="space-y-6">
-              {/* Hours */}
-              <div className="p-8 rounded-lg border border-border">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="w-12 h-12 bg-accent/10 rounded-full flex items-center justify-center">
-                    <Clock className="h-6 w-6 text-accent" />
-                  </div>
-                  <h2 className="text-xl font-medium">Opening Hours</h2>
-                </div>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center py-3 border-b border-border">
-                    <span className="text-muted-foreground">Monday - Friday</span>
-                    <span className="font-medium">{shopInfo.hours.weekday}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3">
-                    <span className="text-muted-foreground">Saturday - Sunday</span>
-                    <span className="font-medium">{shopInfo.hours.weekend}</span>
-                  </div>
-                </div>
+              <div>
+                <span className="text-xs font-black tracking-[0.4em] text-[#DC6835] uppercase mb-4 block">Headquarters</span>
+                <h1 className="text-6xl md:text-8xl font-black text-[#2A1B14] leading-[0.8] tracking-tighter mb-8">
+                  Visit Our <br/><span className="text-[#DC6835]">Sanctuary.</span>
+                </h1>
+                <p className="text-xl text-[#2A1B14]/70 max-w-md font-medium" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+                  {shopInfo.address.split(', Semarang Tengah')[0]}. A space designed to help you disappear into your deepest work.
+                </p>
               </div>
 
-              {/* Contact */}
-              <div className="p-8 rounded-lg border border-border">
-                <h2 className="text-xl font-medium mb-6">Contact</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 <div className="space-y-4">
+                  <div className="flex items-center gap-3 text-[#DC6835]">
+                    <MapPin size={20} />
+                    <h3 className="font-black text-xs tracking-widest uppercase">Location</h3>
+                  </div>
+                  <p className="font-bold text-[#2A1B14]">
+                    {shopInfo.address}
+                  </p>
                   <a 
-                    href={`tel:${shopInfo.phone}`}
-                    className="flex items-center gap-4 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Phone className="h-5 w-5" />
-                    {shopInfo.phone}
-                  </a>
-                  <a 
-                    href={`mailto:${shopInfo.email}`}
-                    className="flex items-center gap-4 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Mail className="h-5 w-5" />
-                    {shopInfo.email}
-                  </a>
-                  <a 
-                    href={`https://instagram.com/${shopInfo.social.instagram.replace("@", "")}`}
+                    href={shopInfo.mapsUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-4 text-muted-foreground hover:text-foreground transition-colors"
+                    className="inline-flex items-center gap-2 text-xs font-black text-[#DC6835] hover:gap-4 transition-all"
                   >
-                    <Instagram className="h-5 w-5" />
-                    {shopInfo.social.instagram}
+                    GET DIRECTIONS <ExternalLink size={14} />
                   </a>
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      {/* Amenities */}
-      <section className="px-6 mb-24 bg-secondary py-24">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-light tracking-tight mb-4">
-              What to Expect
-            </h2>
-            <p className="text-muted-foreground">
-              A space designed for focus, creativity, and great coffee.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-            {[
-              { icon: Coffee, title: "Specialty Coffee", desc: "Single-origin beans, expertly roasted" },
-              { icon: Wifi, title: "Fast WiFi", desc: "100Mbps for your work needs" },
-              { icon: Laptop, title: "Power Outlets", desc: "At every table" },
-              { icon: Clock, title: "Extended Hours", desc: "Open late on weekends" },
-            ].map((amenity) => (
-              <div key={amenity.title} className="text-center">
-                <div className="w-12 h-12 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <amenity.icon className="h-6 w-6 text-accent" />
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 text-[#DC6835]">
+                    <Clock size={20} />
+                    <h3 className="font-black text-xs tracking-widest uppercase">Sessions</h3>
+                  </div>
+                  <div className="space-y-1 font-bold text-[#2A1B14]">
+                    <p>Mon - Sun: {shopInfo.hours.weekday}</p>
+                    <p className="text-xs opacity-40 uppercase tracking-tighter italic">Last Batch 23:30</p>
+                  </div>
                 </div>
-                <h3 className="font-medium mb-2">{amenity.title}</h3>
-                <p className="text-sm text-muted-foreground">{amenity.desc}</p>
               </div>
-            ))}
+
+              <div className="pt-12 border-t border-[#2A1B14]/10">
+                <div className="flex flex-wrap gap-8">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 text-[#DC6835]">
+                      <Phone size={20} />
+                      <h3 className="font-black text-xs tracking-widest uppercase">Contact</h3>
+                    </div>
+                    <p className="font-bold text-[#2A1B14]">{shopInfo.phone}</p>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 text-[#DC6835]">
+                      <MessageCircle size={20} />
+                      <h3 className="font-black text-xs tracking-widest uppercase">Social</h3>
+                    </div>
+                    <div className="flex gap-4">
+                      <a href={`https://instagram.com/${shopInfo.social.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-[#2A1B14] hover:text-[#DC6835] transition-colors">
+                        <Instagram size={20} />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative h-[600px] rounded-[3rem] overflow-hidden shadow-2xl border-2 border-[#2A1B14]/5"
+            >
+              <iframe 
+                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.258179902994!2d110.40710899999999!3d-6.978833199999995!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e708b85cbe263fb%3A0x33e46ec6b85f5d89!2sDo%20Not%20Disturb!5e0!3m2!1sen!2ssg!4v1777114121203!5m2!1sen!2ssg"
+                width="100%" 
+                height="100%" 
+                style={{ border: 0, filter: "grayscale(1) contrast(1.2) opacity(0.8)" }} 
+                allowFullScreen 
+                loading="lazy" 
+              />
+            </motion.div>
           </div>
         </div>
       </section>
 
-      {/* Address CTA */}
-      <section className="px-6">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-3xl md:text-4xl font-light tracking-tight mb-6">
-            See you soon
-          </h2>
-          <p className="text-xl text-muted-foreground mb-2">
-            {shopInfo.address}
-          </p>
-          <p className="text-muted-foreground mb-8">
-            Look for the minimalist storefront with the wooden door.
-          </p>
-          <Button size="lg" className="px-8">
-            Get Directions
-          </Button>
-        </div>
-      </section>
-    </div>
+      <Footer />
+    </main>
   )
 }

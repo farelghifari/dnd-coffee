@@ -1,6 +1,6 @@
 {
-  "shopName": "DND Coffee",
-  "tagline": "Your Daily Coffee Escape",
+  "shopName": "DONOTDISTURB",
+  "tagline": "Specialty Coffee & Creative Space",
   "logo": "/images/logo-placeholder.png",
   "backgroundImage": "/images/background-links.jpg",
   "promos": [
@@ -19,30 +19,30 @@
   ],
   "featuredMenu": [
     {
-      "name": "Iced Vanilla Latte",
-      "price": "35k",
-      "image": "/images/latte.png"
+      "name": "Butterscotch",
+      "price": "24k",
+      "image": "/images/gallery/coffee-4.jpg"
     },
     {
-      "name": "Caramel Macchiato",
-      "price": "38k",
-      "image": "/images/macchiato.png"
+      "name": "Mango Sticky Rice",
+      "price": "24k",
+      "image": "/images/gallery/coffee-1.jpg"
     },
     {
-      "name": "Butter Croissant",
+      "name": "Cafe Latte",
       "price": "25k",
-      "image": "/images/croissant.png"
+      "image": "/images/gallery/coffee-2.jpg"
     },
     {
-      "name": "Butter Croissant",
-      "price": "25k",
-      "image": "/images/croissant.png"
+      "name": "Americano",
+      "price": "20k",
+      "image": "/images/gallery/coffee-3.jpg"
     }
   ],
   "quickLinks": [
     {
-      "label": "📍 Visit Our Shop",
-      "url": "https://maps.google.com",
+      "label": "📍 Visit Our Shop (Semarang)",
+      "url": "https://maps.app.goo.gl/UPDFyDJ3YWEDNQWE7",
       "icon": "MapPin",
       "highlight": true,
       "visible": true
@@ -70,21 +70,14 @@
     },
     {
       "label": "📸 Follow Our Instagram",
-      "url": "https://instagram.com/dndcoffee",
+      "url": "https://instagram.com/donotdisturb.coffee",
       "icon": "Instagram",
       "highlight": false,
       "visible": true
     },
     {
-      "label": "🌐 Official Website",
-      "url": "https://donotdisturb.com",
-      "icon": "Globe",
-      "highlight": false,
-      "visible": true
-    },
-    {
-      "label": "🎵 Follow Our TikTok",
-      "url": "https://tiktok.com/@dndcoffee",
+      "label": "🛵 Follow Our TikTok",
+      "url": "https://tiktok.com/@donotdisturb.coffee",
       "icon": "Music",
       "highlight": false,
       "visible": true
@@ -92,27 +85,27 @@
   ],
   "operatingHours": [
     {
-      "days": "Mon - Fri",
-      "time": "08:00 – 22:00"
+      "days": "Monday - Friday",
+      "time": "09:00 - 00:00"
     },
     {
-      "days": "Sat - Sun",
-      "time": "07:00 – 23:00"
+      "days": "Saturday - Sunday",
+      "time": "09:00 - 00:00"
     }
   ],
-  "googleMapsEmbedUrl": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d15865.174351349586!2d106.8202511!3d-6.224163!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zNsKwMTMnMjcuMCJTIDEwNsKwNDknMTIuOSJF!5e0!3m2!1sen!2sid!4v1620000000000!5m2!1sen!2sid",
+  "googleMapsEmbedUrl": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.258179902994!2d110.40710899999999!3d-6.978833199999995!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e708b85cbe263fb%3A0x33e46ec6b85f5d89!2sDo%20Not%20Disturb!5e0!3m2!1sen!2ssg!4v1777114121203!5m2!1sen!2ssg",
   "socials": [
     {
       "platform": "Instagram",
-      "url": "https://instagram.com"
+      "url": "https://instagram.com/donotdisturb.coffee"
     },
     {
       "platform": "TikTok",
-      "url": "https://tiktok.com"
+      "url": "https://tiktok.com/@donotdisturb.coffee"
     },
     {
       "platform": "WhatsApp",
-      "url": "https://wa.me"
+      "url": "https://wa.me/628817801926"
     }
   ]
 }

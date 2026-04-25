@@ -626,6 +626,7 @@ export const shopInfo = {
     instagram: "@donotdisturb.coffee",
     twitter: "@dndcoffee",
   },
+  mapsUrl: "https://maps.app.goo.gl/UPDFyDJ3YWEDNQWE7",
 }
 
 // Simulated Sales Data (last 7 days)
