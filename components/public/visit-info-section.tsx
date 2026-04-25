@@ -12,7 +12,7 @@ export function VisitInfoSection() {
   const { ref: infoRef, isInView: infoInView } = useScrollAnimation()
 
   return (
-    <section className="py-24 md:py-32 px-6 bg-foreground text-background">
+    <section className="pt-24 md:pt-32 pb-12 px-6 bg-[#000000] text-[#F9F4EB]" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       <div className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
           <div
@@ -22,20 +22,20 @@ export function VisitInfoSection() {
               contentInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             )}
           >
-            <p className="text-xs uppercase tracking-[0.3em] text-background/50 mb-4">
+            <p className="text-xs uppercase tracking-[0.3em] opacity-50 mb-4 text-[#DC6835]">
               Find Us
             </p>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-light tracking-tight mb-8">
               Visit DONOTDISTURB
             </h2>
-            <p className="text-background/60 leading-relaxed mb-10 max-w-md">
+            <p className="opacity-60 leading-relaxed mb-10 max-w-md text-lg">
               Step into our space and discover where specialty coffee meets 
               thoughtful design. We look forward to serving you.
             </p>
             <Button 
               asChild 
               size="lg" 
-              className="bg-background text-foreground hover:bg-background/90 rounded-none"
+              className="bg-[#DC6835] text-white hover:bg-[#DC6835]/90 rounded-xl"
             >
               <Link href="/visit">
                 Get Directions
@@ -55,8 +55,8 @@ export function VisitInfoSection() {
                 <MapPin className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="font-medium mb-2">Location</h3>
-                <p className="text-background/60">{shopInfo.address}</p>
+                <h3 className="font-bold mb-2 text-xl">Location</h3>
+                <p className="opacity-70 text-lg uppercase">{shopInfo.address}</p>
               </div>
             </div>
 

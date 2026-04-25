@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import config from '@/lib/links-config.json';
 import './links.css';
 import { 
@@ -12,17 +12,12 @@ import {
   Globe, 
   ExternalLink, 
   ChevronRight,
-  Clock,
   Coffee,
   Moon,
   Sun,
-  Copy,
-  Check,
-  Facebook,
-  Twitter,
-  Youtube,
   Send,
-  Music
+  Music,
+  Check
 } from 'lucide-react';
 
 const iconMap: Record<string, any> = {
@@ -30,27 +25,18 @@ const iconMap: Record<string, any> = {
 };
 
 const socialIconMap: Record<string, any> = {
-  Instagram, Facebook, Twitter, Youtube, TikTok: Music, WhatsApp: MessageCircle
+  Instagram, TikTok: Music, WhatsApp: MessageCircle
 };
 
 export default function LinksPage() {
-  const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [copied, setCopied] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const savedTheme = localStorage.getItem('bio-theme');
-    if (savedTheme === 'light') setIsDarkMode(false);
   }, []);
 
-  if (!mounted) return <div className="links-page-wrapper dark" />;
-
-  const toggleTheme = () => {
-    const newTheme = !isDarkMode;
-    setIsDarkMode(newTheme);
-    localStorage.setItem('bio-theme', newTheme ? 'dark' : 'light');
-  };
+  if (!mounted) return <div className="links-page-wrapper" />;
 
   const copyUrl = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -59,7 +45,7 @@ export default function LinksPage() {
   };
 
   return (
-    <div className={`links-page-wrapper ${isDarkMode ? 'dark' : 'light'}`}>
+    <div className="links-page-wrapper">
       <div className="bg-glow" />
       
       <div 
@@ -68,25 +54,19 @@ export default function LinksPage() {
           '--bg-image': `url(${config.backgroundImage})`
         } as any : {}}
       >
-        {config.backgroundImage && <div className="bg-overlay" style={{ position: 'absolute', zIndex: -1, borderRadius: 'inherit' }} />}
-        {/* Top Controls */}
-        <button className="theme-switcher" onClick={toggleTheme} aria-label="Toggle Theme">
-          {isDarkMode ? <Sun size={20} strokeWidth={1.5} /> : <Moon size={20} strokeWidth={1.5} />}
-        </button>
+        <div className="bg-overlay" />
 
-        {/* Header Section */}
+        {/* Header */}
         <header className="header fade-in">
-          <div className="logo-wrapper">
-            <div className="logo-container">
-              {config.logo === "/images/logo-placeholder.png" ? (
-                <Coffee size={40} strokeWidth={1.5} color={isDarkMode ? "#fff" : "#000"} />
-              ) : (
-                <img src={config.logo} alt={config.shopName} />
-              )}
-            </div>
+          <div className="logo-container">
+            {config.logo === "/images/logo-placeholder.png" ? (
+              <Coffee size={48} strokeWidth={1.2} color="#fff" />
+            ) : (
+              <img src={config.logo} alt={config.shopName} className="menu-img" />
+            )}
           </div>
           <h1 className="shop-name">{config.shopName}</h1>
-          <p className="tagline">{config.tagline}</p>
+          <div className="tagline">{config.tagline}</div>
         </header>
 
         {/* Promo Banners */}
@@ -97,7 +77,7 @@ export default function LinksPage() {
               <div 
                 key={idx} 
                 className="promo-banner" 
-                style={{ background: p.bg, color: p.color, marginBottom: '12px' }}
+                style={{ background: p.bg, color: p.color, marginBottom: '16px' }}
               >
                 <span>{p.text}</span>
               </div>
@@ -105,10 +85,10 @@ export default function LinksPage() {
           }
         </div>
 
-        {/* Featured Menu - High UX Scroll */}
-        <section className="fade-in delay-2">
+        {/* Menu Section */}
+        <section className="fade-in delay-2" style={{ marginTop: '24px' }}>
           <div className="section-header">
-            <h2 className="section-title">Chef's Recommendations</h2>
+            <h3 className="section-title">Chef's Recommendations</h3>
           </div>
           <div className="featured-scroll">
             {config.featuredMenu.map((item, idx) => (
@@ -116,19 +96,17 @@ export default function LinksPage() {
                 <div className="card-img-wrapper">
                   <img src={item.image} alt={item.name} className="menu-img" />
                 </div>
-                <div className="menu-info">
-                  <p className="menu-name">{item.name}</p>
-                  <span className="menu-price">{item.price}</span>
-                </div>
+                <p className="menu-name">{item.name}</p>
+                <span className="menu-price">{item.price}</span>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Main Links Area */}
+        {/* Quick Links */}
         <section className="links-section fade-in delay-3">
           <div className="section-header">
-            <h2 className="section-title">Quick Actions</h2>
+            <h3 className="section-title">Quick Actions</h3>
           </div>
           {config.quickLinks
             .filter(link => link.visible)
@@ -142,23 +120,23 @@ export default function LinksPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <div className="link-content">
+                  <div className="link-content" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div className="link-icon-box">
                       <Icon size={20} strokeWidth={1.5} />
                     </div>
                     <span>{link.label}</span>
                   </div>
-                  <ChevronRight size={18} strokeWidth={1.5} opacity={0.4} />
+                  <ChevronRight size={18} strokeWidth={1.5} opacity={0.3} />
                 </a>
               );
             })}
         </section>
 
-        {/* Info Grid: Hours & Minimal Map */}
+        {/* Info Row */}
         <section className="info-row fade-in delay-4">
           <div className="hours-card">
             <div className="section-header" style={{ marginBottom: '16px' }}>
-              <h2 className="section-title">Hours</h2>
+              <h3 className="section-title">Operating Hours</h3>
             </div>
             {config.operatingHours.map((hour, idx) => (
               <div key={idx} className="hour-item">
@@ -167,7 +145,7 @@ export default function LinksPage() {
               </div>
             ))}
           </div>
-          <div className="map-card" onClick={() => window.open('https://maps.google.com', '_blank')}>
+          <div className="map-card" onClick={() => window.open('https://maps.google.com', '_blank')} style={{ cursor: 'pointer' }}>
             <iframe
               title="Mini Map"
               width="100%"
@@ -179,28 +157,32 @@ export default function LinksPage() {
           </div>
         </section>
 
-        {/* Footer & Socials */}
+        {/* Footer */}
         <footer className="footer fade-in delay-4">
           <div className="social-bar">
             {config.socials.map((social, idx) => {
               const SocialIcon = socialIconMap[social.platform] || Instagram;
               return (
                 <a key={idx} href={social.url} className="social-link" target="_blank" rel="noopener noreferrer">
-                  <SocialIcon size={22} strokeWidth={1.5} />
+                  <SocialIcon size={24} strokeWidth={1.5} />
                 </a>
               );
             })}
           </div>
           
-          <button className="link-button" onClick={copyUrl} style={{ width: '100%', justifyContent: 'center', background: 'rgba(255,255,255,0.03)', borderStyle: 'dashed' }}>
-             <div className="link-content">
-                {copied ? <Check size={18} color="#22c55e" /> : <Send size={18} opacity={0.5} />}
-                <span style={{ fontSize: '13px', opacity: 0.5 }}>{copied ? 'Copied to clipboard' : 'Share Bio Link'}</span>
+          <button 
+            className="link-button" 
+            onClick={copyUrl} 
+            style={{ width: '100%', justifyContent: 'center', background: 'rgba(255,255,255,0.03)', borderStyle: 'dashed' }}
+          >
+             <div className="link-content" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {copied ? <Check size={18} color="#22c55e" /> : <Send size={18} opacity={0.4} />}
+                <span style={{ fontSize: '14px', opacity: 0.5 }}>{copied ? 'Copied to clipboard' : 'Share Bio Link'}</span>
              </div>
           </button>
           
-          <p style={{ marginTop: '32px', fontSize: '11px', opacity: 0.3, letterSpacing: '1px' }}>
-            Powered by D&D Coffee Experience
+          <p style={{ marginTop: '40px', fontSize: '10px', opacity: 0.3, letterSpacing: '2px', textTransform: 'uppercase' }}>
+            Powered by {config.shopName}
           </p>
         </footer>
       </div>

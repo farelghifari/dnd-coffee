@@ -615,12 +615,12 @@ export const communityEvents = [
 export const shopInfo = {
   name: "DONOTDISTURB",
   tagline: "Specialty Coffee & Creative Space",
-  address: "Jl. Senopati No. 42, Jakarta Selatan",
-  phone: "+62 21 1234 5678",
+  address: "Jl. Indraprasta No.76, Pendrikan Kidul, Kec. Semarang Tengah, Kota Semarang, Jawa Tengah 50131",
+  phone: "08817801926",
   email: "hello@donotdisturb.coffee",
   hours: {
-    weekday: "07:00 - 22:00",
-    weekend: "08:00 - 23:00",
+    weekday: "09:00 - 00:00",
+    weekend: "09:00 - 00:00",
   },
   social: {
     instagram: "@donotdisturb.coffee",

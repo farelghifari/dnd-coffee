@@ -1,86 +1,111 @@
 "use client"
 
-import Link from "next/link"
-import { communityEvents } from "@/lib/data"
-import { ArrowRight, Users } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useScrollAnimation } from "@/hooks/use-scroll-animation"
-import { cn } from "@/lib/utils"
+import { motion } from "framer-motion"
+import { Users, PenTool, Coffee, MonitorPlay } from "lucide-react"
 
 export function CommunityHighlightsSection() {
-  const { ref: headerRef, isInView: headerInView } = useScrollAnimation()
-  const { ref: cardsRef, isInView: cardsInView } = useScrollAnimation()
-
   return (
-    <section className="py-24 md:py-32 px-6 bg-background">
-      <div className="max-w-7xl mx-auto">
-        <div 
-          ref={headerRef}
-          className={cn(
-            "text-center mb-16 transition-all duration-700",
-            headerInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          )}
-        >
-          <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground mb-4">
-            Join Us
-          </p>
-          <h2 className="text-3xl md:text-4xl lg:text-5xl font-light tracking-tight mb-6">
-            Our Community
-          </h2>
-          <p className="text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            More than just coffee lovers, we are a collective of curious minds sharing 
-            knowledge, experiences, and the perfect cup.
-          </p>
-        </div>
+    <section className="py-24 md:py-32 px-6 bg-[#1B3629] text-[#F9F4EB] font-sans relative overflow-hidden">
+      
+      {/* Decorative Blur Orbs */}
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#DC6835] rounded-full blur-[150px] opacity-20 pointer-events-none translate-x-1/3 -translate-y-1/3" />
+      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#F9F4EB] rounded-full blur-[120px] opacity-10 pointer-events-none -translate-x-1/2 translate-y-1/3" />
 
-        <div 
-          ref={cardsRef}
-          className={cn(
-            "grid grid-cols-1 md:grid-cols-3 gap-6 transition-all duration-700 delay-200",
-            cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          )}
-        >
-          {communityEvents.map((event, index) => (
-            <div 
-              key={event.id}
-              className={cn(
-                "group relative p-8 bg-secondary rounded-sm border border-border hover:border-foreground/20 transition-all duration-500",
-                cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-              )}
-              style={{ transitionDelay: `${(index + 1) * 100}ms` }}
-            >
-              <div className="w-12 h-12 bg-foreground/5 rounded-full flex items-center justify-center mb-6">
-                <Users className="h-6 w-6 text-foreground" />
-              </div>
-              <h3 className="text-xl font-medium mb-3">
-                {event.title}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                {event.description}
-              </p>
-              <p className="text-sm font-medium text-foreground">
-                {event.schedule}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div 
-          className={cn(
-            "text-center mt-12 transition-all duration-700 delay-400",
-            cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          )}
-        >
-          <Button 
-            asChild 
-            size="lg"
-            className="bg-foreground text-background hover:bg-foreground/90 rounded-none px-8"
+      <div className="max-w-7xl mx-auto relative z-10 flex flex-col xl:flex-row items-center gap-16">
+        
+        {/* Left Typography Block */}
+        <div className="flex-1 w-full relative z-20">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
           >
-            <Link href="/community" className="group">
-              Explore Community
-              <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </Link>
-          </Button>
+            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#DC6835] text-[#DC6835] font-bold text-xs tracking-[0.3em] uppercase mb-8 bg-[#1B3629]">
+              <Users size={16} />
+              <span>Not Just A "Community"</span>
+            </div>
+            
+            <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-8 leading-[1.1]">
+              The Creators' <br/>
+              <span className="text-[#DC6835]" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Canvas.</span>
+            </h2>
+            
+            <p className="text-xl md:text-2xl leading-relaxed text-[#F9F4EB]/80 font-light mb-6 max-w-xl">
+              We ditched the corporate bulletin board. You won't find boring networking events here. Instead, you'll find a living, breathing sanctuary of coders, designers, and late-night thinkers building the future in silence.
+            </p>
+
+            <p className="text-lg leading-relaxed text-[#F9F4EB]/60 font-medium mb-12 max-w-xl italic border-l-4 border-[#DC6835] pl-6">
+              "It started with a simple idea: creative minds shouldn't have to choose between exceptional single-origin coffee and an environment that actually lets them work. Every table is a designated focus zone. Every cup is brewed to keep you in 'the flow'."
+            </p>
+
+            <ul className="flex flex-col gap-6 text-lg font-medium opacity-90">
+              <li className="flex items-center gap-4">
+                <div className="p-3 bg-[#DC6835]/20 rounded-full text-[#DC6835]">
+                  <MonitorPlay size={24} />
+                </div>
+                <span>Strict 'Headphones On' zones for deep work.</span>
+              </li>
+              <li className="flex items-center gap-4">
+                <div className="p-3 bg-[#DC6835]/20 rounded-full text-[#DC6835]">
+                  <PenTool size={24} />
+                </div>
+                <span>Unlimited power outlets & gigabit wifi.</span>
+              </li>
+              <li className="flex items-center gap-4">
+                <div className="p-3 bg-[#DC6835]/20 rounded-full text-[#DC6835]">
+                  <Coffee size={24} />
+                </div>
+                <span>Endless caffeine supply drops directly to your desk.</span>
+              </li>
+            </ul>
+          </motion.div>
+        </div>
+
+        {/* Right Mood-board / Scattered Pictures Block */}
+        <div className="flex-1 w-full h-[500px] relative w-full lg:min-w-[550px] mt-12 xl:mt-0">
+          
+          <motion.div 
+            initial={{ opacity: 0, rotate: -15, scale: 0.8, x: -50 }}
+            whileInView={{ opacity: 1, rotate: -6, scale: 1, x: 0 }}
+            whileHover={{ scale: 1.05, rotate: -2, zIndex: 30 }}
+            viewport={{ once: true }}
+            transition={{ type: "spring", stiffness: 100 }}
+            className="absolute top-0 left-0 md:left-10 w-64 h-72 bg-[#F9F4EB] p-4 rounded-xl shadow-2xl shadow-black/50 rotate-[-6deg] z-10 cursor-pointer"
+          >
+            <div className="w-full h-4/5 bg-[#2A1B14] rounded-lg overflow-hidden flex items-center justify-center p-4 isolate">
+              <img src="/images/human_customer_transparent.png" alt="Creative Space" className="w-full h-full object-contain filter invert brightness-[2]" />
+            </div>
+            <p className="text-[#2A1B14] font-bold text-center mt-3" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Morning Grinds</p>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, rotate: 15, scale: 0.8, x: 50 }}
+            whileInView={{ opacity: 1, rotate: 8, scale: 1, x: 0 }}
+            whileHover={{ scale: 1.05, rotate: 2, zIndex: 30 }}
+            viewport={{ once: true }}
+            transition={{ type: "spring", stiffness: 100, delay: 0.2 }}
+            className="absolute top-20 right-0 md:right-10 w-72 h-80 bg-[#F9F4EB] p-4 pb-8 rounded-xl shadow-2xl shadow-black/50 rotate-[8deg] z-20 cursor-pointer"
+          >
+            <div className="w-full h-[85%] bg-[#1B3629] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
+               <img src="/images/human_barista_transparent.png" className="w-full h-full object-contain filter invert brightness-[2]" alt="Community Vibe" />
+            </div>
+            <p className="text-[#2A1B14] font-bold text-center mt-4 text-lg" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Midnight Epiphanies</p>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            whileHover={{ scale: 1.05, zIndex: 30 }}
+            viewport={{ once: true }}
+            transition={{ type: "spring", stiffness: 100, delay: 0.4 }}
+            className="absolute bottom-0 left-1/4 w-60 h-64 bg-[#F9F4EB] p-4 rounded-xl shadow-2xl shadow-black/50 -rotate-[2deg] z-25 cursor-pointer"
+          >
+            <div className="w-full h-4/5 bg-[#DC6835] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
+              <img src="/images/human_customer_transparent.png" className="w-full h-full object-contain scale-x-[-1] filter invert brightness-[2]" alt="Code and Coffee" />
+            </div>
+            <p className="text-[#2A1B14] font-bold text-center mt-3" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Code + Caffeine</p>
+          </motion.div>
+
         </div>
       </div>
     </section>

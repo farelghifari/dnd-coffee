@@ -1,88 +1,93 @@
-import { activities } from "@/lib/data"
-import { Calendar } from "lucide-react"
+"use client"
+
+import { shopInfo } from "@/lib/data"
+import { Calendar, Sparkles, Instagram, Send } from "lucide-react"
+import { motion } from "framer-motion"
 
 export default function ActivityPage() {
   return (
-    <div className="py-24 md:py-32">
-      {/* Header */}
-      <section className="px-6 mb-16">
-        <div className="max-w-7xl mx-auto text-center">
-          <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground mb-4">
-            What We Do
-          </p>
-          <h1 className="text-4xl md:text-5xl lg:text-6xl font-light tracking-tight mb-6">
-            Activities
+    <div className="min-h-screen bg-[#000000] text-[#F9F4EB] py-32 md:py-48 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+      
+      {/* Background Ambience */}
+      <div className="absolute top-0 left-0 w-[800px] h-[800px] bg-[#1B3629] rounded-full blur-[300px] opacity-[0.05] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[#DC6835] rounded-full blur-[250px] opacity-[0.03] pointer-events-none" />
+
+      <div className="max-w-4xl mx-auto relative z-10 text-center">
+        {/* Animated Icon */}
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-24 h-24 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-12"
+        >
+          <Sparkles className="text-[#DC6835] w-10 h-10 animate-pulse" />
+        </motion.div>
+
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#DC6835]/30 text-[#DC6835] font-bold text-xs tracking-[0.3em] uppercase mb-10">
+             <Calendar size={16} />
+             <span>THE DND JOURNAL</span>
+          </div>
+          
+          <h1 className="text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter mb-12 leading-none">
+            STAY <br/> TUNED.
           </h1>
-          <p className="text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            From hands-on workshops to cupping sessions, discover experiences 
-            that deepen your connection with coffee.
+        </motion.div>
+
+        {/* Narrative Placeholder */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="space-y-8"
+        >
+          <p className="text-2xl md:text-3xl leading-relaxed text-[#F9F4EB]/60 italic font-medium">
+            Something quietly revolutionary is brewing behind our doors in Semarang. 
           </p>
-        </div>
-      </section>
+          <div className="h-px w-24 bg-[#DC6835] mx-auto opacity-30" />
+          <p className="text-xl md:text-2xl leading-relaxed text-[#F9F4EB]/40 max-w-2xl mx-auto">
+            From hands-on brewing workshops to late-night creative takeovers, our journal will soon be filled with moments that redefine the coffee experience. 
+          </p>
+        </motion.div>
 
-      {/* Filter Tabs */}
-      <section className="px-6 mb-12">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            {["All", "Workshop", "Cupping", "Event"].map((filter) => (
-              <button
-                key={filter}
-                className={`px-6 py-2 rounded-full text-sm transition-colors ${
-                  filter === "All"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                }`}
+        {/* Social Links */}
+        <motion.div
+           initial={{ opacity: 0, y: 30 }}
+           animate={{ opacity: 1, y: 0 }}
+           transition={{ delay: 0.6 }}
+           className="mt-24 pt-16 border-t border-white/10"
+        >
+           <p className="uppercase tracking-[0.4em] text-xs font-black mb-10 opacity-30">Follow the unfolding story</p>
+           <div className="flex justify-center gap-8">
+              <a 
+                href={`https://instagram.com/${shopInfo.social?.instagram.replace('@', '')}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="group flex flex-col items-center gap-4 transition-all hover:-translate-y-2"
               >
-                {filter}
+                 <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-[#DC6835] group-hover:border-[#DC6835] transition-all">
+                    <Instagram size={24} />
+                 </div>
+                 <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">Instagram</span>
+              </a>
+              <button className="group flex flex-col items-center gap-4 transition-all hover:-translate-y-2">
+                 <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-[#F9F4EB] group-hover:text-black group-hover:border-[#F9F4EB] transition-all">
+                    <Send size={24} />
+                 </div>
+                 <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">Newsletter</span>
               </button>
-            ))}
-          </div>
-        </div>
-      </section>
+           </div>
+        </motion.div>
+      </div>
 
-      {/* Photo Grid */}
-      <section className="px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activities.map((activity) => (
-              <article 
-                key={activity.id}
-                className="group cursor-pointer"
-              >
-                <div 
-                  className="aspect-[4/3] bg-muted rounded-lg overflow-hidden relative mb-4"
-                  style={{
-                    backgroundImage: `url('${activity.image}')`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                >
-                  <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/20 transition-colors" />
-                  <div className="absolute top-4 left-4">
-                    <span className="inline-block px-3 py-1 bg-background/90 backdrop-blur-sm text-xs uppercase tracking-wider rounded-full">
-                      {activity.category}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <Calendar className="h-4 w-4" />
-                  {new Date(activity.date).toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </div>
-                <h2 className="text-xl font-medium mb-2 group-hover:text-accent transition-colors">
-                  {activity.title}
-                </h2>
-                <p className="text-muted-foreground text-sm leading-relaxed">
-                  {activity.description}
-                </p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* Decorative Text */}
+      <div className="absolute -bottom-10 -right-10 text-[15rem] font-black opacity-[0.02] select-none pointer-events-none tracking-tighter leading-none">
+        JOURNAL
+      </div>
     </div>
   )
 }
