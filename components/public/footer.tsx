@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { shopInfo } from "@/lib/data"
-import { Instagram, Linkedin, Youtube, Twitter, MessageCircle, MapPin, Clock, Mail, ExternalLink, Send } from "lucide-react"
+import { Instagram, MessageCircle, MapPin, Clock, Mail, ExternalLink, Send, Music, Globe } from "lucide-react"
+import config from "@/lib/links-config.json"
 
 export function Footer() {
   return (
@@ -133,11 +134,20 @@ export function Footer() {
             <div>
               <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-6">Stay Connected</h4>
               <div className="flex gap-3 mb-8">
-                {[Instagram, Linkedin, Youtube, Twitter].map((Icon, i) => (
-                  <a key={i} href="#" className="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center hover:bg-[#DC6835] hover:border-[#DC6835] transition-all transform hover:-translate-y-1">
-                    <Icon size={14} />
-                  </a>
-                ))}
+                {config.socials.map((social, i) => {
+                  const platformIcons: Record<string, any> = {
+                    Instagram,
+                    TikTok: Music,
+                    WhatsApp: MessageCircle,
+                    Website: Globe
+                  };
+                  const Icon = platformIcons[social.platform] || Instagram;
+                  return (
+                    <a key={i} href={social.url} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center hover:bg-[#DC6835] hover:border-[#DC6835] transition-all transform hover:-translate-y-1">
+                      <Icon size={14} />
+                    </a>
+                  );
+                })}
               </div>
               <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-4">Newsletter</h4>
               <div className="relative max-w-[180px]">

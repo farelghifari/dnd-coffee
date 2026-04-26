@@ -617,14 +617,13 @@ export const shopInfo = {
   tagline: "Specialty Coffee & Creative Space",
   address: "Jl. Indraprasta No.76, Pendrikan Kidul, Kec. Semarang Tengah, Kota Semarang, Jawa Tengah 50131",
   phone: "08817801926",
-  email: "hello@donotdisturb.coffee",
+  email: "donotdisturb.coffee@gmail.com",
   hours: {
     weekday: "09:00 - 00:00",
     weekend: "09:00 - 00:00",
   },
   social: {
     instagram: "@donotdisturb.coffee",
-    twitter: "@dndcoffee",
   },
   mapsUrl: "https://maps.app.goo.gl/UPDFyDJ3YWEDNQWE7",
 }

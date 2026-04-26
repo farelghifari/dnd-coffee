@@ -94,11 +94,11 @@
 }
 
 .shop-name {
-  font-size: 38px;
+  font-size: 34px;
   font-weight: 800;
   margin: 0;
-  letter-spacing: -2px;
-  line-height: 1;
+  letter-spacing: 2px;
+  line-height: 1.2;
   background: linear-gradient(to bottom, #fff, #999);
   -webkit-background-clip: text;
   background-clip: text;
@@ -259,13 +259,13 @@
   border-radius: 32px; 
   overflow: hidden; 
   border: 1px solid var(--border-color); 
-  opacity: 0.5; /* Increased from 0.3 */
+  background: var(--card-bg);
   filter: grayscale(1) invert(0.9);
-  transition: opacity 0.3s ease;
+  transition: filter 0.3s ease;
 }
 
 .map-card:hover {
-  opacity: 0.9;
+  filter: grayscale(0) invert(0.9);
 }
 
 /* Footer & Socials */

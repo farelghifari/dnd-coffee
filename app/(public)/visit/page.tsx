@@ -2,8 +2,9 @@
 
 import { motion } from "framer-motion"
 import { Navigation } from "@/components/public/navigation"
-import { MapPin, Clock, Phone, Instagram, MessageCircle, ExternalLink, ArrowLeft, Wifi, Plug, Laptop, Wind } from "lucide-react"
+import { MapPin, Clock, Phone, Instagram, MessageCircle, ExternalLink, ArrowLeft, Wifi, Plug, Laptop, Wind, Music, Globe } from "lucide-react"
 import { shopInfo } from "@/lib/data"
+import config from "@/lib/links-config.json"
 import Link from "next/link"
 
 export default function VisitPage() {
@@ -81,9 +82,20 @@ export default function VisitPage() {
                         <h3 className="font-black text-xs tracking-widest uppercase">Social</h3>
                       </div>
                       <div className="flex gap-4">
-                        <a href={`https://instagram.com/${shopInfo.social.instagram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="text-[#2A1B14] hover:text-[#DC6835] transition-colors">
-                          <Instagram size={20} />
-                        </a>
+                        {config.socials.map((social, i) => {
+                          const platformIcons: Record<string, any> = {
+                            Instagram,
+                            TikTok: Music,
+                            WhatsApp: MessageCircle,
+                            Website: Globe
+                          };
+                          const Icon = platformIcons[social.platform] || Instagram;
+                          return (
+                            <a key={i} href={social.url} target="_blank" rel="noopener noreferrer" className="text-[#2A1B14] hover:text-[#DC6835] transition-colors">
+                              <Icon size={20} />
+                            </a>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

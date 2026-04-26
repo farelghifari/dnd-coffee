@@ -5,7 +5,7 @@
   "backgroundImage": "/images/background-links.jpg",
   "promos": [
     {
-      "enabled": true,
+      "enabled": false,
       "text": "🔥 Buy 1 Get 1 – Setiap Jumat",
       "bg": "linear-gradient(135deg, #634832, #3d2b1f)",
       "color": "#ffffff"
@@ -17,6 +17,7 @@
       "color": "#ffffff"
     }
   ],
+  "showFeaturedMenu": false,
   "featuredMenu": [
     {
       "name": "Butterscotch",
@@ -62,8 +63,8 @@
       "visible": true
     },
     {
-      "label": "📖 Full Menu (PDF)",
-      "url": "/menu.pdf",
+      "label": "📖 Full Menu",
+      "url": "/images/menu_dnd.jpg",
       "icon": "FileText",
       "highlight": false,
       "visible": true
@@ -79,6 +80,13 @@
       "label": "🛵 Follow Our TikTok",
       "url": "https://tiktok.com/@house.of.dnd",
       "icon": "Music",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "🌐 Official Website",
+      "url": "https://coffeedonotdisturb.com",
+      "icon": "Globe",
       "highlight": false,
       "visible": true
     }
@@ -106,6 +114,10 @@
     {
       "platform": "WhatsApp",
       "url": "https://wa.me/628817801926"
+    },
+    {
+      "platform": "Website",
+      "url": "https://coffeedonotdisturb.com"
     }
   ]
 }

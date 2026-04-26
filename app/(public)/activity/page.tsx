@@ -1,7 +1,7 @@
 "use client"
 
-import { shopInfo } from "@/lib/data"
-import { Calendar, Sparkles, Instagram, Send } from "lucide-react"
+import { Calendar, Sparkles, Instagram, Music, Globe, MessageCircle } from "lucide-react"
+import config from "@/lib/links-config.json"
 import { motion } from "framer-motion"
 
 export default function ActivityPage() {
@@ -63,23 +63,29 @@ export default function ActivityPage() {
         >
            <p className="uppercase tracking-[0.4em] text-xs font-black mb-10 opacity-30">Follow the unfolding story</p>
            <div className="flex justify-center gap-8">
-              <a 
-                href={`https://instagram.com/${shopInfo.social?.instagram.replace('@', '')}`} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="group flex flex-col items-center gap-4 transition-all hover:-translate-y-2"
-              >
-                 <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-[#DC6835] group-hover:border-[#DC6835] transition-all">
-                    <Instagram size={24} />
-                 </div>
-                 <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">Instagram</span>
-              </a>
-              <button className="group flex flex-col items-center gap-4 transition-all hover:-translate-y-2">
-                 <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-[#F9F4EB] group-hover:text-black group-hover:border-[#F9F4EB] transition-all">
-                    <Send size={24} />
-                 </div>
-                 <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">Newsletter</span>
-              </button>
+              {config.socials.map((social, i) => {
+                const platformIcons: Record<string, any> = {
+                  Instagram,
+                  TikTok: Music,
+                  WhatsApp: MessageCircle,
+                  Website: Globe
+                };
+                const Icon = platformIcons[social.platform] || Instagram;
+                return (
+                  <a 
+                    key={i}
+                    href={social.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="group flex flex-col items-center gap-4 transition-all hover:-translate-y-2"
+                  >
+                     <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center group-hover:bg-[#DC6835] group-hover:border-[#DC6835] transition-all">
+                        <Icon size={24} />
+                     </div>
+                     <span className="text-sm font-bold opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">{social.platform}</span>
+                  </a>
+                );
+              })}
            </div>
         </motion.div>
       </div>

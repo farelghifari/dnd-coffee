@@ -25,7 +25,7 @@ const iconMap: Record<string, any> = {
 };
 
 const socialIconMap: Record<string, any> = {
-  Instagram, TikTok: Music, WhatsApp: MessageCircle
+  Instagram, TikTok: Music, WhatsApp: MessageCircle, Website: Globe
 };
 
 export default function LinksPage() {
@@ -86,6 +86,7 @@ export default function LinksPage() {
         </div>
 
         {/* Menu Section */}
+        {config.showFeaturedMenu && (
         <section className="fade-in delay-2" style={{ marginTop: '24px' }}>
           <div className="section-header">
             <h3 className="section-title">Chef's Recommendations</h3>
@@ -102,9 +103,10 @@ export default function LinksPage() {
             ))}
           </div>
         </section>
+        )}
 
         {/* Quick Links */}
-        <section className="links-section fade-in delay-3">
+        <section className="links-section fade-in delay-3" style={{ marginTop: '32px' }}>
           <div className="section-header">
             <h3 className="section-title">Quick Actions</h3>
           </div>
