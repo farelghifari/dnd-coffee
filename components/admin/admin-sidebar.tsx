@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   Layers,
   FileText,
-  Wallet
+  Wallet,
+  Receipt
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -53,10 +54,22 @@ export function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false)
   
   // Build nav items based on role
-  // Payroll & Settings are ONLY visible to main_super_admin
-  const navItems = isMainSuperAdmin() 
-    ? [...baseNavItems, payrollNavItem, settingsNavItem] 
-    : baseNavItems
+  // Employees, Overtime, Outlets, and Logs are restricted for regular Admins
+  let navItems = [...baseNavItems]
+  
+  if (!isSuperAdmin()) {
+    navItems = navItems.filter(item => 
+      item.href !== "/admin/employees" && 
+      item.href !== "/admin/overtime" && 
+      item.href !== "/admin/outlets" &&
+      item.href !== "/admin/logs"
+    )
+  }
+
+  // Add sensitive items for Main Super Admin
+  if (isMainSuperAdmin()) {
+    navItems = [...navItems, { href: "/admin/expenses", label: "Expenses", icon: Receipt }, payrollNavItem, settingsNavItem]
+  }
 
   const handleLogout = () => {
     logout()

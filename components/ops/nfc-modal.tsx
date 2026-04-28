@@ -11,9 +11,10 @@ interface NFCModalProps {
   onSuccess: (employeeId: string, employeeName: string) => void
   action: string
   title: string
+  isSubmitting?: boolean
 }
 
-export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModalProps) {
+export function NFCModal({ isOpen, onClose, onSuccess, action, title, isSubmitting = false }: NFCModalProps) {
   const [nfcInput, setNfcInput] = useState("")
   const [status, setStatus] = useState<"waiting" | "success" | "error">("waiting")
   const [message, setMessage] = useState("")
@@ -215,7 +216,7 @@ export function NFCModal({ isOpen, onClose, onSuccess, action, title }: NFCModal
             className="absolute opacity-0 pointer-events-none w-1 h-1"
             aria-label="NFC card input"
             autoComplete="off"
-            disabled={isProcessing || status !== "waiting"}
+            disabled={isProcessing || status !== "waiting" || isSubmitting}
           />
 
           {/* Demo hint */}

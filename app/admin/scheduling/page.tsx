@@ -74,10 +74,10 @@ const SHIFT_COLORS = [
 ]
 
 export default function SchedulingPage() {
-  const { isSuperAdmin } = useAuth()
+  const { isSuperAdmin, user } = useAuth()
   
-  // Permission check: Super Admin = full access, Admin = read only
-  const canEdit = isSuperAdmin()
+  // Permission check: Super Admin & Admin = full access
+  const canEdit = isSuperAdmin() || user?.role === 'admin'
   
   const [employees, setEmployees] = useState<Employee[]>([])
   const [shiftAssignments, setShiftAssignments] = useState<ShiftAssignment[]>([])
@@ -120,7 +120,7 @@ export default function SchedulingPage() {
         getShiftAssignments(),
         getShiftConfigs()
       ])
-      setEmployees(employeesData)
+      setEmployees(employeesData.filter(emp => emp.position === 'barista'))
       setShiftAssignments(shiftsData)
       setShiftConfigs(configsData)
       setIsLoading(false)

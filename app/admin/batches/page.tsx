@@ -63,9 +63,11 @@ import { useAuth } from "@/lib/auth-context"
 import {
   getBatches,
   getInventory,
+  getInventoryMovements,
   addBatch,
   openBatch,
-  stockOutManual,
+  deleteBatch,
+  recordBatchMovement,
   toBaseUnit,
   fromBaseUnit,
   getDefaultDisplayUnit,
@@ -97,8 +99,9 @@ const movementTypeConfig: Record<string, { label: string; color: string; icon: R
 }
 
 export default function BatchesPage() {
-  const { isSuperAdmin } = useAuth()
-  const canEdit = isSuperAdmin()
+  const { isAdmin, user } = useAuth()
+  const canEdit = isAdmin()
+  const actorName = user?.name || user?.email || "Admin"
   
   const [batches, setBatches] = useState<(InventoryBatch & { category?: string })[]>([])
   const [movements, setMovements] = useState<BatchMovement[]>([])
@@ -110,32 +113,44 @@ export default function BatchesPage() {
   const [selectedBatch, setSelectedBatch] = useState<(InventoryBatch & { category?: string }) | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  
+  // Movement History Filters
+  const [movementSearchQuery, setMovementSearchQuery] = useState("")
+  const [movementSelectedType, setMovementSelectedType] = useState<string>("all")
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true)
-      const [fetchedBatches, fetchedInventory] = await Promise.all([
-        getBatches(),
-        getInventory()
-      ])
-      
-      const mappedBatches = fetchedBatches.map((b: any) => {
-        let status = b.status
-        const daysToExpiry = getDaysUntilExpiry(b.expiryDate)
+      try {
+        const [batchesData, inventoryData, movementsData] = await Promise.all([
+          getBatches('floor'),
+          getInventory(),
+          getInventoryMovements()
+        ])
         
-        if (b.currentQuantity <= 0) status = "depleted"
-        else if (daysToExpiry <= 0) status = "expired"
+        const mappedBatches = batchesData.map((b: any) => {
+          let status = b.status
+          const daysToExpiry = getDaysUntilExpiry(b.expiryDate)
+          
+          if (b.currentQuantity <= 0) status = "depleted"
+          else if (daysToExpiry <= 0) status = "expired"
 
-        return {
-          ...b,
-          status
-        }
-      })
-      
-      setBatches(mappedBatches)
-      setInventoryList(fetchedInventory)
-      setIsLoading(false)
+          return {
+            ...b,
+            status
+          }
+        })
+        
+        setBatches(mappedBatches)
+        setInventoryList(inventoryData)
+        setMovements(movementsData)
+      } catch (error) {
+        console.error("Failed to fetch batches:", error)
+      } finally {
+        setIsLoading(false)
+      }
     }
+    
     fetchData()
   }, [])
 
@@ -148,6 +163,24 @@ export default function BatchesPage() {
       }
     } catch (err) {
       console.error("Failed to open batch:", err)
+    }
+  }
+
+  const handleDeleteBatch = async (batchId: string) => {
+    if (!confirm("Are you sure you want to delete this batch? This will also REVERSE the stock addition in the main inventory.")) return
+    
+    setIsSubmitting(true)
+    try {
+      const success = await deleteBatch(batchId)
+      if (success) {
+        setBatches(prev => prev.filter(b => b.id !== batchId))
+      } else {
+        alert("Failed to delete batch. It might be in use or already deleted.")
+      }
+    } catch (err) {
+      console.error("Delete batch error:", err)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -200,61 +233,49 @@ export default function BatchesPage() {
     setMovementError("")
     setIsSubmitting(true)
     
-    const batch = batches.find(b => b.id === movementForm.batchId)
-    if (!batch) {
-      setMovementError("Batch not found")
-      setIsSubmitting(false)
-      return
-    }
-    
-    const quantity = parseFloat(movementForm.quantity) || 0
-    
     try {
-      // Update batch quantity locally
-      setBatches(prev => prev.map(b => {
-        if (b.id !== movementForm.batchId) return b
-        
-        let newQuantity = b.currentQuantity
-        if (movementForm.type === "in") {
-          newQuantity += quantity
-        } else {
-          newQuantity = Math.max(0, newQuantity - quantity)
-        }
-        
-        return {
-          ...b,
-          currentQuantity: newQuantity,
-          status: newQuantity <= 0 ? "depleted" : b.status,
-          updatedAt: new Date().toISOString(),
-        }
-      }))
+      const quantity = parseFloat(movementForm.quantity) || 0
       
-      // Add movement record locally
-      const newMovement: BatchMovement = {
-        id: `bm-${Date.now()}`,
-        batchId: batch.id,
-        batchNumber: batch.batchNumber,
-        inventoryItemId: (batch.inventoryItemId as unknown) as string,
-        inventoryItemName: batch.inventoryItemName || 'Unknown',
-        type: movementForm.type,
+      // Validation: Ensure stock out doesn't exceed available stock
+      const selectedBatch = batches.find(b => b.id === movementForm.batchId)
+      if (selectedBatch && (movementForm.type === "out" || movementForm.type === "waste")) {
+        if (quantity > selectedBatch.currentQuantity) {
+          setMovementError(`Quantity exceeds available stock. Only ${selectedBatch.currentQuantity} ${selectedBatch.unit || 'pcs'} left.`)
+          setIsSubmitting(false)
+          return
+        }
+      }
+      
+      // Persist to Database
+      const success = await recordBatchMovement(
+        movementForm.batchId,
         quantity,
-        employeeId: "emp-admin",
-        employeeName: "Admin",
-        reason: movementForm.reason,
-        notes: movementForm.notes,
-        timestamp: new Date().toISOString(),
+        movementForm.type,
+        actorName,
+        movementForm.reason,
+        movementForm.notes
+      )
+
+      if (!success) {
+        throw new Error("Database update failed")
       }
-      setMovements(prev => [newMovement, ...prev])
       
-      // Also call stockOutManual for OUT/waste types to update inventory
-      if (movementForm.type === "out" || movementForm.type === "waste") {
-        const quantityConverted = toBaseUnit(quantity, movementForm.unit)
-        await stockOutManual(
-          batch.inventoryItemId,
-          quantityConverted,
-          movementForm.reason || movementForm.notes || "Batch movement"
-        )
-      }
+      // Refresh all data from server to ensure sync
+      const [batchesData, movementsData] = await Promise.all([
+        getBatches('floor'),
+        getInventoryMovements()
+      ])
+      
+      const mappedBatches = batchesData.map((b: any) => {
+        let status = b.status
+        const daysToExpiry = getDaysUntilExpiry(b.expiryDate)
+        if (b.currentQuantity <= 0) status = "depleted"
+        else if (daysToExpiry <= 0) status = "expired"
+        return { ...b, status }
+      })
+      
+      setBatches(mappedBatches)
+      setMovements(movementsData)
       
       // Reset form and close modal
       setMovementForm({
@@ -268,7 +289,8 @@ export default function BatchesPage() {
       })
       setIsMovementModalOpen(false)
     } catch (error) {
-      setMovementError("An error occurred")
+      console.error("Movement error:", error)
+      setMovementError("Failed to record movement. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -285,22 +307,44 @@ export default function BatchesPage() {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("id-ID", {
+  const formatDate = (dateString: string | null | undefined) => {
+    if (!dateString || dateString.trim() === "") return "-"
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return "-"
+    return date.toLocaleDateString("id-ID", {
       year: "numeric",
       month: "short",
       day: "numeric",
     })
   }
 
-  const formatDateTime = (dateString: string) => {
-    return new Date(dateString).toLocaleString("id-ID", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
+  const formatDateTime = (dateString: string | null | undefined) => {
+    if (!dateString || dateString.trim() === "") return "-"
+    
+    // Ensure the string is treated as UTC if it doesn't have a timezone
+    let normalized = dateString;
+    if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
+    if (!normalized.includes('Z') && !normalized.includes('+') && !normalized.slice(-6).match(/[+-]\d{2}:\d{2}/)) {
+      normalized += 'Z';
+    }
+    
+    const date = new Date(normalized)
+    if (isNaN(date.getTime())) return "-"
+    
+    try {
+      return new Intl.DateTimeFormat('id-ID', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Jakarta'
+      }).format(date).replace(/\./g, ':');
+    } catch (e) {
+      // Fallback
+      return date.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    }
   }
 
   const formatCurrency = (value: number) => {
@@ -483,8 +527,8 @@ export default function BatchesPage() {
           </div>
 
           {/* Batches Table */}
-          <Card className="rounded-sm">
-            <Table>
+          <Card className="rounded-sm overflow-x-auto">
+            <Table className="min-w-[800px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Batch Number</TableHead>
@@ -607,6 +651,16 @@ export default function BatchesPage() {
                                     className="text-red-600"
                                     onClick={(e) => {
                                       e.stopPropagation()
+                                      handleDeleteBatch(batch.id)
+                                    }}
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Delete Batch
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    className="text-amber-600"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
                                       setBatches(prev => prev.map(b => 
                                         b.id === batch.id ? { ...b, status: "quarantined" } : b
                                       ))
@@ -629,8 +683,34 @@ export default function BatchesPage() {
         </TabsContent>
 
         <TabsContent value="movements" className="mt-4">
-          <Card className="rounded-sm">
-            <Table>
+          {/* Movement History Filters */}
+          <div className="flex flex-col gap-4 mb-4 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search item or batch..."
+                value={movementSearchQuery}
+                onChange={(e) => setMovementSearchQuery(e.target.value)}
+                className="pl-9 rounded-sm"
+              />
+            </div>
+            <Select value={movementSelectedType} onValueChange={setMovementSelectedType}>
+              <SelectTrigger className="w-full sm:w-48 rounded-sm">
+                <SelectValue placeholder="Movement Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="in">Stock In</SelectItem>
+                <SelectItem value="out">Stock Out</SelectItem>
+                <SelectItem value="waste">Waste</SelectItem>
+                <SelectItem value="adjustment">Adjustment</SelectItem>
+                <SelectItem value="transfer">Transfer</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Card className="rounded-sm overflow-x-auto">
+            <Table className="min-w-[900px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Timestamp</TableHead>
@@ -643,7 +723,16 @@ export default function BatchesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {movements.slice(0, 50).map((movement) => {
+                {movements
+                  .filter(m => {
+                    const matchesSearch = 
+                      (m.inventoryItemName || "").toLowerCase().includes(movementSearchQuery.toLowerCase()) ||
+                      (m.batchNumber || "").toLowerCase().includes(movementSearchQuery.toLowerCase())
+                    const matchesType = movementSelectedType === "all" || m.type === movementSelectedType
+                    return matchesSearch && matchesType
+                  })
+                  .slice(0, 100)
+                  .map((movement) => {
                   const typeConfig = movementTypeConfig[movement.type]
                   return (
                     <TableRow key={movement.id}>
@@ -662,7 +751,7 @@ export default function BatchesPage() {
                         {movement.type === "in" ? "+" : "-"}{movement.quantity.toLocaleString()}
                       </TableCell>
                       <TableCell>{movement.employeeName}</TableCell>
-                      <TableCell className="text-muted-foreground max-w-[200px] truncate">
+                      <TableCell className="text-muted-foreground break-words">
                         {movement.reason || movement.notes || "-"}
                       </TableCell>
                     </TableRow>
@@ -700,8 +789,17 @@ export default function BatchesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {batches.filter(b => b.status === "active").map((batch) => (
-                    <SelectItem key={batch.id} value={batch.id}>
-                      {batch.batchNumber} - {batch.inventoryItemName} ({batch.currentQuantity} remaining)
+                    <SelectItem key={batch.id} value={batch.id} className="py-2">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium text-sm truncate max-w-[320px]">
+                          {batch.inventoryItemName}
+                        </span>
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground uppercase font-mono tracking-tight">
+                          <span className="bg-muted px-1 rounded-sm">{batch.batchNumber}</span>
+                          <span>•</span>
+                          <span className="font-bold text-foreground/70">{batch.currentQuantity} {(batch as any).unit || 'pcs'} left</span>
+                        </div>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>

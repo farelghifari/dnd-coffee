@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { startOfMonth, endOfMonth } from "date-fns"
 import type { InventoryItem, InventoryBatch, BatchStatus } from '@/lib/data'
 export type { InventoryItem, InventoryBatch, BatchStatus }
 
@@ -96,17 +97,37 @@ export function getConversionRate(displayUnit: string, baseUnit: string): number
 
 
 // Convert display unit to base unit
-export function toBaseUnit(value: number, unit: DisplayUnit): number {
-  const conversion = UNIT_CONVERSIONS[unit]
-  if (!conversion) return value
-  return value * conversion.multiplier
+export function toBaseUnit(value: number, unit: string, item?: Partial<InventoryItem>): number {
+  const normalizedUnit = unit.toLowerCase()
+  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
+  
+  if (conversion) {
+    return value * conversion.multiplier
+  }
+  
+  // If it's a custom unit (like 'batch') and matches the item's display unit
+  if (item && item.display_unit && normalizedUnit === item.display_unit.toLowerCase()) {
+    return value * (item.conversion_rate || 1)
+  }
+  
+  return value
 }
 
 // Convert base unit to display unit
-export function fromBaseUnit(value: number, unit: DisplayUnit): number {
-  const conversion = UNIT_CONVERSIONS[unit]
-  if (!conversion) return value
-  return value / conversion.multiplier
+export function fromBaseUnit(value: number, unit: string, item?: Partial<InventoryItem>): number {
+  const normalizedUnit = unit.toLowerCase()
+  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
+  
+  if (conversion) {
+    return value / conversion.multiplier
+  }
+  
+  // If it's a custom unit (like 'batch') and matches the item's display unit
+  if (item && item.display_unit && normalizedUnit === item.display_unit.toLowerCase()) {
+    return value / (item.conversion_rate || 1)
+  }
+  
+  return value
 }
 
 // Get base unit name from display unit
@@ -124,11 +145,12 @@ export function getAllowedUnitsForItem(inventoryUnit: string): DisplayUnit[] {
   // Weight or Volume units - allow both for flexibility (e.g., syrup in kg or ml)
   if (normalizedUnit === 'kg' || normalizedUnit === 'gram' || normalizedUnit === 'g' || 
       normalizedUnit === 'liter' || normalizedUnit === 'ml' || normalizedUnit === 'l') {
-    return ['gram', 'kg', 'ml', 'liter']
+    return ['gram', 'kg', 'ml', 'liter'] as DisplayUnit[]
   }
   
-  // Piece units - only pcs allowed
-  return ['pcs']
+  // Custom or Piece units - return the unit itself as the allowed option
+  // This covers 'pcs', 'batch', 'loyang', 'box', 'botol', etc.
+  return [inventoryUnit] as DisplayUnit[]
 }
 
 // Get default display unit based on inventory item's stored unit
@@ -926,44 +948,62 @@ export function getOpsSession() {
 
 export async function getInventory(): Promise<InventoryItem[]> {
   if (isSupabaseConfigured()) {
-    const { data, error } = await supabase
+    const { data: items, error: itemsError } = await supabase
       .from('inventory_items')
       .select('*')
       .order('name', { ascending: true })
     
-    console.log("DATA (getInventory):", data)
-    console.log("ERROR (getInventory):", error)
-    
-    if (error) {
+    if (itemsError) {
+      console.error("ERROR (getInventory items):", itemsError)
       return []
     }
+
+    // Fetch warehouse batches to guarantee perfectly accurate stock
+    const { data: batches, error: batchesError } = await supabase
+      .from('inventory_batches')
+      .select('item_id, remaining_quantity')
+      .eq('location', 'warehouse');
+
+    if (batchesError) {
+      console.error("ERROR (getInventory batches):", batchesError)
+    }
+
     // Map database fields to application fields carefully
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      category: row.category,
-      unit: row.unit || 'pcs',
-      displayUnit: row.display_unit || row.unit || 'pcs',
-      currentStock: row.stock ?? 0,
-      stock: row.stock ?? 0,
-      current_stock: row.stock ?? 0,
-      minStock: row.min_stock ?? 10,
-      min_stock: row.min_stock ?? 10,
-      maxStock: row.max_stock ?? 100,
-      max_stock: row.max_stock ?? 100,
-      dailyUsage: row.daily_usage ?? 0,
-      daily_usage: row.daily_usage ?? 0,
-      unitCost: row.unit_cost ?? 0,
-      unit_cost: row.unit_cost ?? 0,
-      lastUpdated: row.last_updated || row.updated_at || new Date().toISOString(),
-      last_updated: row.last_updated || row.updated_at || new Date().toISOString(),
-      conversionRate: row.conversion_rate ?? 1,
-      conversion_rate: row.conversion_rate ?? 1,
-      display_unit: row.display_unit || row.unit || 'pcs',
-      expiryDate: row.expiry_date,
-      expiry_date: row.expiry_date,
-      status: row.status || 'active'
-    }))
+    return (items || []).map((row: any) => {
+      // Calculate true warehouse stock from batches
+      const itemBatches = (batches || []).filter(b => b.item_id === row.id);
+      const batchTotal = itemBatches.reduce((sum, b) => sum + (Number(b.remaining_quantity) || 0), 0);
+      
+      // Source of truth: use batchTotal if batches were successfully fetched, otherwise fallback to row.stock
+      const finalStock = (batches && !batchesError) ? batchTotal : (row.stock ?? 0);
+
+      return {
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        unit: row.unit || 'pcs',
+        displayUnit: row.display_unit || row.unit || 'pcs',
+        currentStock: finalStock,
+        stock: finalStock,
+        current_stock: finalStock,
+        minStock: row.min_stock ?? 10,
+        min_stock: row.min_stock ?? 10,
+        maxStock: row.max_stock ?? 100,
+        max_stock: row.max_stock ?? 100,
+        dailyUsage: row.daily_usage ?? 0,
+        daily_usage: row.daily_usage ?? 0,
+        unitCost: row.unit_cost ?? 0,
+        unit_cost: row.unit_cost ?? 0,
+        lastUpdated: row.last_updated || row.updated_at || new Date().toISOString(),
+        last_updated: row.last_updated || row.updated_at || new Date().toISOString(),
+        conversionRate: row.conversion_rate ?? 1,
+        conversion_rate: row.conversion_rate ?? 1,
+        display_unit: row.display_unit || row.unit || 'pcs',
+        expiryDate: row.expiry_date,
+        expiry_date: row.expiry_date,
+        status: row.status || 'active'
+      }
+    })
   }
   
   const stored = getStoredData(STORAGE_KEYS.inventory, mockInventory)
@@ -1108,72 +1148,116 @@ export async function deleteInventoryItem(id: string): Promise<boolean> {
   return true
 }
 
-// Update inventory stock and create transaction
-export async function updateInventoryStock(itemId: string, quantity: number, type: "in" | "out" | "waste" | "opname", employeeId: string | null, actorName: string = 'System') {
-  const item = await getInventoryItem(itemId)
-  if (!item) return null
-  
-  let newStock = item.stock || item.current_stock || 0
-  switch (type) {
-    case "in":
-      newStock += quantity
-      break
-    case "out":
-    case "waste":
-      newStock = Math.max(0, newStock - quantity)
-      break
-    case "opname":
-      newStock = quantity
-      break
-  }
-  
-  let updatedItemResult: any = null
+export async function updateInventoryStock(itemId: string, quantity: number, type: "in" | "out" | "waste" | "opname", employeeId: string | null, actorName: string = 'System', notes?: string) {
+  if (!isSupabaseConfigured()) return null;
 
-  if (isSupabaseConfigured()) {
-    // Update inventory_items.stock
-    const { data: updatedItem, error: updateError } = await supabase
-      .from('inventory_items')
-      .update({ stock: newStock })
-      .eq('id', itemId)
-      .select()
-      .single()
-    
-    console.log("DATA (updateInventoryStock):", updatedItem)
-    console.log("ERROR (updateInventoryStock):", updateError)
-    
-    if (updateError) {
-      return null
-    }
-    
-    updatedItemResult = updatedItem ? { ...updatedItem, current_stock: updatedItem.stock } : null
-    
-    // Insert into inventory_transactions
-    const { data: transaction, error: transError } = await supabase
-      .from('inventory_transactions')
-      .insert([{
+  try {
+    const item = await getInventoryItem(itemId);
+    if (!item) return null;
+
+    if (type === 'in') {
+      // Fetch most recent cost for this item
+      const { data: lastBatch } = await supabase
+        .from('inventory_batches')
+        .select('cost_per_unit')
+        .eq('item_id', itemId)
+        .order('received_date', { ascending: false })
+        .limit(1);
+      
+      const lastCost = (lastBatch && lastBatch.length > 0) ? lastBatch[0].cost_per_unit : 0;
+
+      // Create a default batch for Ops Stock In
+      const result = await addBatch({
         item_id: itemId,
-        employee_id: employeeId,
-        actor_name: actorName,
-        type: type,
-        quantity: quantity
-      }])
-      .select()
-      .single()
-    
-    console.log("DATA (inventory_transaction insert):", transaction)
-    console.log("ERROR (inventory_transaction insert):", transError)
-  } else {
-    updatedItemResult = await updateInventoryItem(itemId, { stock: newStock, current_stock: newStock })
-  }
+        quantity: quantity,
+        unit: item.unit as any,
+        unit_cost: lastCost,
+        supplier_name: 'Unknown',
+        received_date: new Date().toISOString().split('T')[0],
+        expired_date: null,
+        notes: notes || `Input via Ops Device by ${actorName}. Price auto-filled (Rp ${lastCost})`,
+        is_opened: false
+      }, actorName);
+      
+      if (!result) {
+        throw new Error("Database rejected the stock entry. Please try again.");
+      }
 
-  // Log activity
-  if (updatedItemResult && item) {
-    const typeLabel = type === 'in' ? 'Stock In' : type === 'out' ? 'Stock Out' : type === 'waste' ? 'Waste' : 'Opname'
-    const detail = `${typeLabel}: ${quantity} ${item.unit} for ${item.name}`
-    await logActivity('inventory_change', actorName, item.name, detail)
+      return result;
+    } else if (type === 'out' || type === 'waste') {
+      let remainingToDeduct = quantity;
+      const { data: batches } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('item_id', itemId)
+        .eq('location', 'warehouse')
+        .gt('remaining_quantity', 0)
+        .order('received_date', { ascending: true })
+        .order('batch_number', { ascending: true });
+
+      for (const batch of batches || []) {
+        if (remainingToDeduct <= 0) break;
+        const available = Number(batch.remaining_quantity);
+        const amountFromThisBatch = Math.min(available, remainingToDeduct);
+        
+        if (type === 'out') {
+          // Use specialized transfer function to ensure it appears in Batch Tracking (Floor)
+          // We use conversion_rate as split_size to create multiple rows if multiple units are moved
+          await transferToFloor(
+            batch.id, 
+            amountFromThisBatch, 
+            actorName, 
+            notes || `Ops Stock Out by ${actorName}`, 
+            item.conversion_rate || 1
+          );
+        } else {
+          // Waste: Simple deduction from warehouse
+          if (available >= amountFromThisBatch) {
+            await supabase.from('inventory_batches').update({ remaining_quantity: available - amountFromThisBatch }).eq('id', batch.id);
+          } else {
+            await supabase.from('inventory_batches').update({ remaining_quantity: 0 }).eq('id', batch.id);
+          }
+          
+          // Also decrement the master stock column for consistency
+          await supabase.rpc('decrement_inventory_stock', { p_item_id: itemId, p_quantity: amountFromThisBatch });
+
+          // Record individual transaction log for this batch to keep the batch info visible
+          if (type === 'waste') {
+            await supabase.from('inventory_transactions').insert({
+              item_id: itemId,
+              type: type,
+              quantity: amountFromThisBatch,
+              actor_name: actorName,
+              waste_reason: notes ? `${notes} (Batch: ${batch.batch_number})` : `Recorded via Ops (Batch: ${batch.batch_number})`,
+              created_at: new Date().toISOString()
+            });
+          }
+        }
+        
+        remainingToDeduct -= amountFromThisBatch;
+      }
+    } else if (type === 'opname') {
+      const theoretical = await getInventory().then(items => items.find(i => i.id === itemId)?.stock || 0);
+      return await addInventoryOpname({
+        item_id: itemId,
+        theoretical_stock: theoretical,
+        actual_stock: quantity,
+        difference: quantity - theoretical,
+        reason: notes || `Ops Opname by ${actorName}`,
+        actor_name: actorName
+      });
+    }
+
+    // Update master stock for legacy (only reached for 'out' or 'waste' types)
+    const currentStock = item.stock || 0;
+    const newStock = Math.max(0, currentStock - quantity);
+    await supabase.from('inventory_items').update({ stock: newStock }).eq('id', itemId);
+
+    return { success: true };
+  } catch (err) {
+    console.error("CRITICAL ERROR (updateInventoryStock):", err);
+    return null;
   }
-  
-  return updatedItemResult
 }
 
 
@@ -1405,54 +1489,6 @@ export async function stockOut(itemId: string, quantity: number): Promise<boolea
   return true
 }
 
-// ========== STOCK OUT MANUAL ==========
-// For manual stock removal (waste, damage, etc)
-// INPUT: item_id, quantity, reason (optional)
-// Calls RPC: stock_out_manual(item_id, quantity, reason)
-
-export async function stockOutManual(itemId: string, quantity: number, reason?: string, actorName: string = 'System', batchCount: number = 1): Promise<boolean> {
-  // Get item name for logging
-  const item = await getInventoryItem(itemId)
-  
-  if (isSupabaseConfigured()) {
-    const { error } = await supabase.rpc('stock_out_v2', {
-      p_item_id: itemId,
-      p_quantity: quantity,
-      p_reason: reason || 'manual',
-      p_actor_name: actorName,
-      p_batch_count: batchCount
-    })
-    
-    if (error) {
-      console.error("ERROR (stockOutManual RPC):", error)
-      throw new Error(error.message || "Database rejected the request")
-    }
-
-    if (item) {
-      await logActivity(
-        'inventory_change', 
-        actorName, 
-        item.name, 
-        `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
-      )
-    }
-    
-    return true
-  }
-  
-  // Fallback to stockOut for localStorage
-  const success = await stockOut(itemId, quantity)
-  if (success && item) {
-    await logActivity(
-      'inventory_change', 
-      actorName, 
-      item.name, 
-      `Stock Out (Manual): ${quantity} ${item.unit} removed from ${item.name}. Reason: ${reason || 'manual'}`
-    )
-  }
-  return success
-}
-
 
 // ========== SELL MENU (FLOW 3 - AUTO INVENTORY DEDUCT) ==========
 // INPUT: menu_id, quantity
@@ -1594,13 +1630,14 @@ export interface MonthlyTarget {
 export interface FinancialSummary {
   revenue: number
   cogs: number
-  waste: number
-  opex: number
   grossProfit: number
+  opex: number
+  waste: number
+  payroll: number
   netProfit: number
+  totalTransactions: number
   aov: number
   salesPerHour: Record<string, number>
-  totalTransactions: number
 }
 
 export interface SalesReport {
@@ -1626,7 +1663,29 @@ export async function getSalesLogs(): Promise<SalesLog[]> {
     
     if (error) {
       console.log("ERROR (getSalesLogs):", error)
-      return []
+      
+      // Fallback: fetch without join, then manually map names
+      const { data: rawData, error: rawError } = await supabase
+        .from('sales_logs')
+        .select('id, menu_id, quantity, total_price, created_at')
+        .order('created_at', { ascending: false })
+      
+      console.log("[DEBUG getSalesLogs FALLBACK] rawData length:", rawData?.length, "rawError:", rawError)
+      
+      if (rawError || !rawData) return []
+      
+      // Fetch menu names manually
+      const { data: menuItems } = await supabase.from('menu_items').select('id, name')
+      const nameMap = new Map((menuItems || []).map((m: any) => [m.id, m.name]))
+      
+      return rawData.map((log: any) => ({
+        id: log.id,
+        menu_id: log.menu_id,
+        menu_name: nameMap.get(log.menu_id) || 'Unknown',
+        quantity: log.quantity,
+        total_price: log.total_price,
+        created_at: log.created_at
+      }))
     }
     
     // Map menu_items.name to menu_name
@@ -1643,17 +1702,23 @@ export async function getSalesLogs(): Promise<SalesLog[]> {
   return []
 }
 
-export async function getSalesReport(): Promise<SalesReport[]> {
+export async function getSalesReport(month?: string): Promise<SalesReport[]> {
   if (isSupabaseConfigured()) {
-    // Try the direct join first
-    let { data, error } = await supabase
-      .from('sales_logs')
-      .select(`
-        menu_id,
-        quantity,
-        total_price,
-        menu_items(name)
-      `)
+    let query = supabase.from('sales_logs').select(`
+      menu_id,
+      quantity,
+      total_price,
+      created_at,
+      menu_items(name)
+    `)
+
+    if (month) {
+      const start = startOfMonth(new Date(month + "-01"))
+      const end = endOfMonth(new Date(month + "-01"))
+      query = query.gte('created_at', start.toISOString()).lte('created_at', end.toISOString())
+    }
+
+    let { data, error } = await query
     
     // If foreign key relation isn't mapped, fallback to manual join
     if (error) {
@@ -1960,7 +2025,8 @@ export async function addStockLog(log: Omit<StockLog, 'id' | 'timestamp'>): Prom
     log.amount, 
     log.type, 
     log.employee_id || null, 
-    log.employee_name || 'System'
+    log.employee_name || 'System',
+    log.notes
   )
 
   
@@ -2245,7 +2311,7 @@ export function calculateRegulatedSession(
   shift?: ShiftAssignment,
   otStatus: string = "none",
   approvedOtMins: number = 0,
-  allDayOts: OvertimeRequest[] = [] // New parameter for smarter splitting
+  allDayOts: OvertimeRequest[] = []
 ) {
   const clockIn = clockInLog.timestamp
   let clockOut = clockOutLog?.timestamp || null
@@ -2272,18 +2338,10 @@ export function calculateRegulatedSession(
 
   let maxEnd: Date | null = null
   if (shift && shiftEnd) {
-    // Base max is shift end + 15m grace
     maxEnd = new Date(shiftEnd.getTime() + 15 * 60000)
-    
-    // If there's also approved OT, extend maxEnd to cover the OT duration
-    // e.g., shift ends at 14:00, OT starts at 14:00 for 3 hours → maxEnd should be 17:00
     if (effectiveOtStatus === 'approved' && approvedOtMins > 0) {
-      // For pre-shift OT: OT starts at clockIn, could end after shift starts
-      // For post-shift OT: OT starts at shift end, ends at shift end + approvedOtMins
       const otEnd = new Date(Math.max(cIn.getTime(), shiftEnd.getTime()) + approvedOtMins * 60000)
-      if (otEnd > maxEnd) {
-        maxEnd = otEnd
-      }
+      if (otEnd > maxEnd) maxEnd = otEnd
     }
   } else if (effectiveOtStatus === 'approved' && approvedOtMins > 0) {
     maxEnd = new Date(cIn.getTime() + approvedOtMins * 60000)
@@ -2305,9 +2363,7 @@ export function calculateRegulatedSession(
   let lateMinutes = 0
   let isPenalty = false
 
-  // 1. Calculate Regular Minutes (strictly within shift bounds)
   if (shift && shiftStart && shiftEnd) {
-    // Late detection
     const delay = Math.round((cIn.getTime() - shiftStart.getTime()) / 60000)
     if (delay > 0) {
       isLate = true
@@ -2323,13 +2379,10 @@ export function calculateRegulatedSession(
       regMins = Math.min(regMins, 480)
     }
 
-    // 2. Calculate Overtime Minutes (Time outside shift bounds)
-    // Check if any approved overtime covers the pre-shift or post-shift periods
     const preShiftStart = cIn
     const preShiftEnd = new Date(Math.min(cOut.getTime(), shiftStart.getTime()))
     if (preShiftEnd > preShiftStart) {
       const preMins = Math.round((preShiftEnd.getTime() - preShiftStart.getTime()) / 60000)
-      // Only count as OT if this specific session is approved
       if (effectiveOtStatus === 'approved') otMins += preMins
     }
 
@@ -2337,14 +2390,10 @@ export function calculateRegulatedSession(
     const postShiftEnd = cOut
     if (postShiftEnd > postShiftStart) {
       const postMins = Math.round((postShiftEnd.getTime() - postShiftStart.getTime()) / 60000)
-      // Only count as OT if this specific session is approved
       if (effectiveOtStatus === 'approved') otMins += postMins
     }
   } else {
-    // No shift - entire session is overtime ONLY if approved
-    if (effectiveOtStatus === 'approved') {
-      otMins = totalMins
-    }
+    if (effectiveOtStatus === 'approved') otMins = totalMins
   }
 
   return {
@@ -2358,7 +2407,7 @@ export function calculateRegulatedSession(
     isPenalty,
     isAutoClockOut,
     otStatus: effectiveOtStatus,
-    shift: shift, // Return the matched shift object
+    shift: shift,
     method: clockInLog?.method || clockOutLog?.method,
     deviceInfo: clockInLog?.device_info || clockOutLog?.device_info,
     ipAddress: clockInLog?.ip_address || clockOutLog?.ip_address,
@@ -3998,24 +4047,115 @@ export interface BulkSaleItem {
   total_price?: number // Optional custom price override for bundles/discounts
 }
 
-export async function bulkSellMenu(items: BulkSaleItem[]): Promise<boolean> {
-  if (isSupabaseConfigured()) {
-    const { error: processError } = await supabase.rpc('process_menu_sales_fifo', {
-      p_menu_ids: items.map(i => i.menu_id),
-      p_quantities: items.map(i => i.quantity),
-      p_total_prices: items.map(i => i.total_price ?? null),
-      p_actor_name: 'Report'
-    })
+export async function bulkSellMenu(items: BulkSaleItem[], customDate?: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  
+  try {
+    console.log("Executing manual JS bulk sell menu...");
     
-    if (processError) {
-      console.error("DEDUCTION ENGINE ERROR:", processError.message)
-      return false
+    // Determine if we should skip inventory deduction (if it's a past date)
+    // IMPORTANT: Use LOCAL date, not UTC, to correctly handle post-midnight sales in WIB (UTC+7)
+    const now2 = new Date();
+    const today = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-${String(now2.getDate()).padStart(2, '0')}`;
+    const isPastDate = customDate && customDate !== today;
+    
+    // For TODAY's sales: use current timestamp as-is (correct local date)
+    // For PAST sales: use noon local time to avoid timezone day-boundary shifts
+    let finalTimestamp = new Date().toISOString();
+    if (isPastDate && customDate) {
+      const [year, month, day] = customDate.split('-').map(Number);
+      const d = new Date(year, month - 1, day, 12, 0, 0); // noon local time
+      finalTimestamp = d.toISOString();
     }
     
-    return true
+    for (const item of items) {
+      // ... same finalPrice logic ...
+      let finalPrice = item.total_price;
+      if (finalPrice === undefined || finalPrice === null) {
+        const { data: menuData } = await supabase
+          .from('menu_items')
+          .select('price')
+          .eq('id', item.menu_id)
+          .single();
+        finalPrice = (menuData?.price || 0) * item.quantity;
+      }
+
+      // 1. Insert into sales_logs
+      const { error: logErr } = await supabase.from('sales_logs').insert({
+        menu_id: item.menu_id,
+        menu_item_id: item.menu_id,
+        quantity: item.quantity,
+        total_price: finalPrice,
+        created_at: finalTimestamp
+      });
+      
+      if (logErr) {
+        console.error("Failed to insert sales_log:", logErr);
+        continue;
+      }
+
+      // 2. SKIP inventory deduction if it's a past date
+      if (isPastDate) {
+        console.log(`Skipping inventory deduction for historical sale of item ${item.menu_id}`);
+        continue;
+      }
+
+      // 3. Fetch recipes for this menu item (ONLY for current sales)
+      const { data: ingredients } = await supabase
+        .from('menu_recipes')
+        .select('*')
+        .eq('menu_item_id', item.menu_id);
+        
+      if (!ingredients || ingredients.length === 0) {
+        console.warn(`No recipe found for menu item ${item.menu_id}`);
+        continue;
+      }
+
+      // 3. Deduct from floor batches (FIFO: oldest expiry first)
+      for (const ing of ingredients) {
+        let neededQty = Number(ing.quantity) * item.quantity;
+        if (neededQty <= 0) continue;
+
+        const { data: batches } = await supabase
+          .from('inventory_batches')
+          .select('*')
+          .eq('item_id', ing.inventory_item_id)
+          .eq('location', 'floor')
+          .gt('remaining_quantity', 0)
+          .order('received_date', { ascending: true })
+          .order('batch_number', { ascending: true });
+
+        if (!batches || batches.length === 0) {
+          console.warn(`No floor batch found for ingredient ${ing.inventory_item_id}`);
+          continue;
+        }
+
+        for (const batch of batches) {
+          if (neededQty <= 0) break;
+
+          const available = Number(batch.remaining_quantity);
+          if (available >= neededQty) {
+            // Deduct fully
+            await supabase.from('inventory_batches')
+              .update({ remaining_quantity: available - neededQty })
+              .eq('id', batch.id);
+            neededQty = 0;
+          } else {
+            // Deplete this batch and continue needing more
+            await supabase.from('inventory_batches')
+              .update({ remaining_quantity: 0 })
+              .eq('id', batch.id);
+            neededQty -= available;
+          }
+        }
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.error("CRITICAL ERROR (bulkSellMenu JS):", err);
+    return false;
   }
-  
-  return false
 }
 
 // ========== SALES LOGS WITH DATE GROUPING ==========
@@ -4034,7 +4174,13 @@ export async function getSalesLogsGroupedByDate(): Promise<SalesLogGrouped[]> {
   const grouped: Record<string, SalesLog[]> = {}
   
   for (const log of logs) {
-    const date = getLocalYYYYMMDD(new Date(log.created_at))
+    // Ensure the date string is treated as UTC if it doesn't specify a timezone
+    let dateStr = log.created_at;
+    if (dateStr && !dateStr.includes('Z') && !dateStr.includes('+')) {
+      dateStr = dateStr.replace(' ', 'T') + 'Z';
+    }
+    
+    const date = getLocalYYYYMMDD(new Date(dateStr))
     if (!grouped[date]) {
       grouped[date] = []
     }
@@ -4069,7 +4215,7 @@ export interface AddBatchData {
   unit_cost: number
   supplier_name: string
   received_date: string
-  expired_date: string
+  expired_date: string | null
   notes?: string
   is_opened?: boolean
 }
@@ -4112,17 +4258,19 @@ export async function openBatch(batchId: string): Promise<boolean> {
 // Generate batch number: CATEGORY-YYYYMMDD-HHMMSS
 function generateBatchNumber(category: string): string {
   const now = new Date()
-  const date = getLocalYYYYMMDD(now).replace(/-/g, '')
-  const time = now.toTimeString().split(' ')[0].replace(/:/g, '')
-  return `${category.toUpperCase()}-${date}-${time}`
+  // Use YYMMDD (6 chars) + HHMMSS (6 chars) + Prefix (3 chars) + separators = ~18 chars
+  const date = getLocalYYYYMMDD(now).replace(/-/g, '').substring(2) // YYMMDD
+  const time = now.toTimeString().split(' ')[0].replace(/:/g, '') // HHMMSS
+  const prefix = (category || 'INV').substring(0, 3).toUpperCase()
+  return `${prefix}-${date}-${time}`
 }
 
 export async function addBatch(data: AddBatchData, actorName: string = 'System'): Promise<InventoryBatch | null> {
-  // Convert to base unit before saving
-  const quantityInBaseUnit = toBaseUnit(data.quantity, data.unit)
-  
+  // We assume the caller (Admin/Ops) already converted quantity to base unit
+  const quantityInBaseUnit = data.quantity;
+
   if (isSupabaseConfigured()) {
-    // First get the item to get its category for batch number generation
+    // First get the item to get its category for batch number generation and unit conversion
     const item = await getInventoryItem(data.item_id)
     if (!item) {
       console.log("ERROR (addBatch): Item not found")
@@ -4130,105 +4278,91 @@ export async function addBatch(data: AddBatchData, actorName: string = 'System')
     }
     
     const batchNumber = generateBatchNumber(item.category)
-    let finalBatch: InventoryBatch | null = null
+    let finalBatch: InventoryBatch | null = null;
     
-    // Try RPC first: add_batch
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('add_batch', {
-      p_item_id: data.item_id,
-      p_quantity: quantityInBaseUnit,
-      p_unit_cost: data.unit_cost,
-      p_supplier_name: data.supplier_name || null,
-      p_received_date: data.received_date,
-      p_expired_date: data.expired_date || null,
-      p_notes: data.notes || null,
-      p_actor_name: actorName
-    })
+    // Aggressive Debug: Bypass RPC and use direct inserts for perfect control
+    console.log("BYPASSING RPC for addBatch - using direct inserts for item:", data.item_id);
     
-    if (!rpcError && rpcResult) {
-      console.log("DATA (addBatch RPC) - batch ID:", rpcResult)
-      // RPC returns UUID, fetch the full batch record
-      const { data: batchRecord } = await supabase
-        .from('inventory_batches')
-        .select('*')
-        .eq('id', rpcResult)
-        .single()
-      finalBatch = batchRecord
-    } else {
-      console.log("RPC add_batch not found or failed, using direct inserts:", rpcError)
-      
-      // Fallback: Manual transaction
-      // 1. INSERT into inventory_batches
-      const insertData: any = {
+    // 1. INSERT into inventory_batches
+    const insertData: any = {
+      item_id: data.item_id,
+      batch_number: batchNumber,
+      quantity: Number(quantityInBaseUnit) || 0,
+      remaining_quantity: Number(quantityInBaseUnit) || 0,
+      cost_per_unit: Number(data.unit_cost) || 0,
+      supplier_name: data.supplier_name || 'Unknown',
+      received_date: data.received_date || new Date().toISOString().split('T')[0],
+      expired_date: data.expired_date && data.expired_date.trim() !== "" ? data.expired_date : null,
+      notes: data.notes || '',
+      is_opened: data.is_opened || false,
+      location: 'warehouse'
+    }
+    
+    if (data.is_opened) {
+      insertData.opened_at = new Date().toISOString()
+    }
+
+    console.log("STEP 1: Inserting batch...", JSON.stringify(insertData));
+    const { data: batchData, error: batchError } = await supabase
+      .from('inventory_batches')
+      .insert([insertData])
+      .select()
+      .single()
+    
+    if (batchError) {
+      console.error("ERROR (addBatch insert):", JSON.stringify(batchError))
+      return null
+    }
+    
+    finalBatch = batchData
+    console.log("STEP 2: Updating master stock...");
+    
+    // 2. UPDATE inventory_items: stock = stock + quantity
+    const currentStock = Number(item.stock) || 0
+    const { error: updateError } = await supabase
+      .from('inventory_items')
+      .update({ 
+        stock: currentStock + (Number(quantityInBaseUnit) || 0)
+        // Removed updated_at as it doesn't exist in schema
+      })
+      .eq('id', data.item_id)
+    
+    if (updateError) {
+      console.error("ERROR (addBatch update stock):", JSON.stringify(updateError))
+    }
+    
+    console.log("STEP 3: Recording transaction...");
+    // 3. INSERT into inventory_transactions: type = 'IN'
+    const { error: txError } = await supabase
+      .from('inventory_transactions')
+      .insert([{
         item_id: data.item_id,
-        batch_number: batchNumber,
-        quantity: quantityInBaseUnit,
-        remaining_quantity: quantityInBaseUnit,
-        cost_per_unit: data.unit_cost,
-        supplier_name: data.supplier_name,
-        received_date: data.received_date,
-        expired_date: data.expired_date,
-        notes: data.notes || '',
-        is_opened: data.is_opened || false
-      }
-      
-      if (data.is_opened) {
-        insertData.opened_at = new Date().toISOString()
-      }
-
-      const { data: batchData, error: batchError } = await supabase
-        .from('inventory_batches')
-        .insert([insertData])
-        .select()
-        .single()
-      
-      if (batchError) {
-        console.log("ERROR (addBatch insert):", batchError)
-        return null
-      }
-      
-      finalBatch = batchData
-      
-      // 2. UPDATE inventory_items: stock = stock + quantity
-      const currentStock = item.stock || item.current_stock || 0
-      const { error: updateError } = await supabase
-        .from('inventory_items')
-        .update({ stock: currentStock + quantityInBaseUnit })
-        .eq('id', data.item_id)
-      
-      if (updateError) {
-        console.log("ERROR (addBatch update stock):", updateError)
-      }
-      
-      // 3. INSERT into inventory_transactions: type = 'IN'
-      const { error: txError } = await supabase
-        .from('inventory_transactions')
-        .insert([{
-          item_id: data.item_id,
-          type: 'in',
-          quantity: quantityInBaseUnit,
-          employee_id: null,
-          actor_name: actorName
-        }])
-
-      
-      if (txError) {
-        console.log("ERROR (addBatch transaction):", txError)
-      }
+        type: 'in',
+        quantity: Number(quantityInBaseUnit) || 0,
+        employee_id: null,
+        actor_name: actorName
+        // Removed notes as it doesn't exist in schema
+      }])
+    
+    if (txError) {
+      console.error("ERROR (addBatch transaction):", JSON.stringify(txError))
     }
 
     if (finalBatch) {
-      await logActivity(
+      console.log("FINALIZING Stock In: logging activity...");
+      // Make logging non-blocking
+      logActivity(
         'inventory_change', 
         actorName, 
         item.name, 
-        `Stock In: ${data.quantity} ${data.unit} added for ${item.name} (Batch: ${batchNumber})`
-      )
+        `Stock In: ${data.quantity} ${data.unit} added for ${item.name}`
+      ).catch(e => console.error("Log Activity failed:", JSON.stringify(e)));
     }
     
+    console.log("Stock In SUCCESSFUL for:", item.name);
     return finalBatch
   }
 
-  
   // Fallback for localStorage - simplified
   const inventory = await getInventory()
   const item = inventory.find(i => i.id === data.item_id)
@@ -4287,63 +4421,69 @@ export async function updateBatch(batchId: string, updates: Partial<InventoryBat
 
 
 
-// ========== GET BATCHES ==========
-// Get all batches for display in Batch Tracking page
 
-export async function getBatches(): Promise<InventoryBatch[]> {
+// ========== DELETE BATCH ==========
+// Completely remove a batch and reverse its impact on master stock
+export async function deleteBatch(batchId: string): Promise<boolean> {
   if (isSupabaseConfigured()) {
-    // Fetch batches
-    const { data: batchesData, error: batchesError } = await supabase
-      .from('inventory_batches')
-      .select('*')
-      .order('created_at', { ascending: false })
-    
-    if (batchesError || !batchesData) {
-      console.log("ERROR (getBatches):", batchesError)
-      return []
-    }
-    
-    // Fetch inventory items to join their names
-    const { data: itemsData } = await supabase
-      .from('inventory_items')
-      .select('id, name, category, unit')
+    try {
+      // 1. Get batch details first to know item_id and quantity
+      const { data: batch, error: getError } = await supabase
+        .from('inventory_batches')
+        .select('item_id, quantity, remaining_quantity')
+        .eq('id', batchId)
+        .single()
       
-    // Join manually
-    const itemMap = new Map()
-    if (itemsData) {
-      itemsData.forEach(item => itemMap.set(item.id, item))
-    }
-    
-    const mapped = batchesData.map(batch => {
-      const item = itemMap.get(batch.item_id)
-      return {
-        id: batch.id,
-        inventoryItemId: batch.item_id,
-        inventoryItemName: item?.name || 'Unknown',
-        batchNumber: batch.batch_number,
-        supplier: batch.supplier_name || batch.supplier || 'Unknown',
-        receivedDate: batch.received_date || batch.created_at,
-        expiryDate: batch.expired_date || batch.expiry_date,
-        initialQuantity: batch.quantity,
-        currentQuantity: batch.remaining_quantity,
-        unitCost: batch.cost_per_unit,
-        status: batch.status || 'active',
-        notes: batch.notes,
-        is_opened: batch.is_opened,
-        opened_at: batch.opened_at,
-        createdAt: batch.created_at,
-        updatedAt: batch.updated_at,
-        unit: item?.unit || 'pcs', // Using base unit from inventory item
-        category: item?.category || 'General'
+      if (getError || !batch) {
+        console.error("ERROR (deleteBatch - fetch):", getError)
+        return false
       }
-    })
-    
-    return mapped
+
+      // 2. Delete the batch
+      const { error: deleteError } = await supabase
+        .from('inventory_batches')
+        .delete()
+        .eq('id', batchId)
+      
+      if (deleteError) {
+        console.error("ERROR (deleteBatch - delete):", deleteError)
+        return false
+      }
+
+      // 3. Reverse the stock in master inventory
+      // We reverse the INITIAL quantity because that's what was added to the master stock
+      const { data: item } = await supabase
+        .from('inventory_items')
+        .select('stock')
+        .eq('id', batch.item_id)
+        .single()
+      
+      if (item) {
+        const { error: updateError } = await supabase
+          .from('inventory_items')
+          .update({ stock: (item.stock || 0) - batch.quantity })
+          .eq('id', batch.item_id)
+        
+        if (updateError) {
+          console.error("ERROR (deleteBatch - update stock):", updateError)
+        }
+      }
+
+      // 4. Log the deletion
+      await logActivity(
+        'inventory_change',
+        'Admin',
+        'Batch Deletion',
+        `Batch ${batchId} deleted. Stock reversed by ${batch.quantity}`
+      )
+
+      return true
+    } catch (err) {
+      console.error("CRITICAL ERROR (deleteBatch):", err)
+      return false
+    }
   }
-  
-  
-  // Fallback - return empty for localStorage
-  return []
+  return false
 }
 
 // ========== PAYROLL ==========
@@ -4475,42 +4615,440 @@ export async function getEmployeePayrolls(employeeId: string): Promise<PayrollRe
   return []
 }
 
-// ========== GET BATCHES BY ITEM ==========
-export async function getBatchesByItem(itemId: string): Promise<InventoryBatch[]> {
+// ========== BATCHES ==========
+
+export async function getBatches(location?: 'warehouse' | 'floor'): Promise<InventoryBatch[]> {
   if (isSupabaseConfigured()) {
-    const { data, error } = await supabase
+    const { data: batches, error } = await supabase
       .from('inventory_batches')
       .select('*')
-      .eq('item_id', itemId)
-      .order('expired_date', { ascending: true }) // FIFO by expiry
-    
+      .order('created_at', { ascending: false })
+
     if (error) {
-      console.log("ERROR (getBatchesByItem):", error)
+      console.error("ERROR (getBatches):", JSON.stringify(error))
       return []
     }
     
-    return (data || []).map(batch => ({
-      id: batch.id,
-      inventoryItemId: batch.item_id,
-      inventoryItemName: 'Syncing...', // Will be updated by the UI or fetched
-      batchNumber: batch.batch_number,
-      supplier: batch.supplier_name || batch.supplier,
-      receivedDate: batch.received_date,
-      expiryDate: batch.expired_date,
-      initialQuantity: batch.quantity || batch.initial_quantity || 0,
-      currentQuantity: batch.remaining_quantity || 0,
-      unitCost: batch.cost_per_unit || 0,
-      status: batch.status,
-      notes: batch.notes,
-      is_opened: batch.is_opened,
-      opened_at: batch.opened_at,
-      createdAt: batch.created_at,
-      updatedAt: batch.updated_at,
-      unit: 'ml' // Overwritten by UI join but defaulting to ml for milk items
-    }))
+    // Filter by location if specified
+    const filteredBatches = location 
+      ? batches.filter(b => b.location === location) 
+      : batches
+
+    // Fetch items for mapping
+    const { data: items } = await supabase.from('inventory_items').select('id, name, category, unit')
+    
+    // Map to camelCase for the app
+    return (filteredBatches || []).map(b => {
+      const item = (items || []).find(i => i.id === b.item_id);
+      return {
+        id: b.id,
+        batchNumber: b.batch_number,
+        inventoryItemId: b.item_id,
+        inventoryItemName: item?.name || 'Unknown Item',
+        category: item?.category || '',
+        unit: item?.unit || 'pcs',
+        initialQuantity: Number(b.quantity),
+        currentQuantity: Number(b.remaining_quantity),
+        receivedDate: b.received_date,
+        expiryDate: b.expired_date,
+        unitCost: Number(b.cost_per_unit),
+        supplier: b.supplier_name || '',
+        status: b.remaining_quantity <= 0 ? 'depleted' : 'active',
+        is_opened: b.is_opened,
+        location: b.location,
+        createdAt: b.created_at || new Date().toISOString()
+      };
+    }) as InventoryBatch[];
   }
-  
   return []
+}
+
+export async function getBatchesByItem(itemId: string, location?: 'warehouse' | 'floor'): Promise<InventoryBatch[]> {
+  if (isSupabaseConfigured()) {
+    let query = supabase
+      .from('inventory_batches')
+      .select('*')
+      .eq('item_id', itemId)
+    
+    if (location) {
+      query = query.eq('location', location)
+    }
+    
+    const { data, error } = await query.order('received_date', { ascending: true }).order('created_at', { ascending: true })
+
+    if (error) {
+      console.error("ERROR (getBatchesByItem):", error)
+      return []
+    }
+
+    return (data || []).map(b => ({
+      id: b.id,
+      batchNumber: b.batch_number,
+      inventoryItemId: b.item_id,
+      initialQuantity: Number(b.quantity),
+      currentQuantity: Number(b.remaining_quantity),
+      receivedDate: b.received_date,
+      expiryDate: b.expired_date,
+      unitCost: Number(b.cost_per_unit),
+      supplier: b.supplier_name || '',
+      status: b.remaining_quantity <= 0 ? 'depleted' : 'active',
+      is_opened: b.is_opened,
+      location: b.location,
+      notes: b.notes,
+      createdAt: b.created_at || new Date().toISOString()
+    })) as InventoryBatch[]
+  }
+  return []
+}
+
+// Get Inventory Movement History from inventory_transactions table
+export async function getInventoryMovements(): Promise<any[]> {
+  if (!isSupabaseConfigured()) return [];
+
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(500); // Increased limit
+
+  if (error) {
+    console.error("ERROR (getInventoryMovements):", error);
+    return [];
+  }
+
+  // Join with item names
+  const { data: items } = await supabase.from('inventory_items').select('id, name');
+  const itemMap = new Map((items || []).map(i => [i.id, i.name]));
+  return (data || []).map(t => {
+    // Try to extract batch number from waste_reason if it follows our patterns
+    let batchNumber = '-';
+    if (t.waste_reason) {
+      const match = t.waste_reason.match(/batch\s*[:\s]\s*([A-Z0-9-]{4,})/i) || t.waste_reason.match(/Transfer\s*[:\s]\s*([A-Z0-9-]{4,})/i);
+      if (match) batchNumber = match[1];
+    }
+
+    return {
+      id: t.id,
+      timestamp: t.created_at,
+      batchNumber: batchNumber,
+      inventoryItemId: t.item_id,
+      inventoryItemName: itemMap.get(t.item_id) || 'Unknown',
+      type: t.type || 'out',
+      quantity: Number(t.quantity) || 0,
+      employeeName: t.actor_name || '-',
+      reason: t.waste_reason || '',
+      notes: ''
+    };
+  });
+}
+
+// Transfer from Warehouse to Floor (Stock Out to Bar)
+export async function transferToFloor(batchIdOrIds: string | string[], quantity: number, actorName: string, reason?: string, splitSize?: number, itemId?: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  
+  try {
+    const batchIds = Array.isArray(batchIdOrIds) ? batchIdOrIds : [batchIdOrIds];
+    const firstBatchId = batchIds[0];
+
+    let derivedItemId = itemId;
+    let initialBatch = null;
+    
+    if (firstBatchId && firstBatchId !== '') {
+      const { data } = await supabase.from('inventory_batches').select('*').eq('id', firstBatchId).single();
+      initialBatch = data;
+    }
+
+    if (!derivedItemId) {
+      if (!initialBatch) return false;
+      derivedItemId = initialBatch.item_id;
+    }
+    const finalItemId = derivedItemId;
+
+    // 2. Get the target batches to deduct from
+    let targetBatches = [];
+    if (Array.isArray(batchIdOrIds)) {
+      // Explicitly selected batches
+      const { data } = await supabase.from('inventory_batches').select('*').in('id', batchIds);
+      // Sort them in the order they were selected or by date
+      targetBatches = (data || []).sort((a, b) => batchIds.indexOf(a.id) - batchIds.indexOf(b.id));
+    } else {
+      // FIFO Overflow logic starting from batchId
+      const { data: allWarehouse } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('item_id', finalItemId)
+        .eq('location', 'warehouse')
+        .gt('remaining_quantity', 0)
+        .order('received_date', { ascending: true })
+        .order('batch_number', { ascending: true });
+      
+      const startIndex = (allWarehouse || []).findIndex(b => b.id === firstBatchId);
+      targetBatches = (allWarehouse || []).slice(startIndex === -1 ? 0 : startIndex);
+    }
+
+    let remainingToTransfer = quantity;
+    let totalDeducted = 0;
+    const sourceBatches = [];
+
+    for (const b of targetBatches) {
+      if (remainingToTransfer <= 0) break;
+      const deduct = Math.min(b.remaining_quantity, remainingToTransfer);
+      
+      await supabase.from('inventory_batches').update({ remaining_quantity: b.remaining_quantity - deduct }).eq('id', b.id);
+      
+      remainingToTransfer -= deduct;
+      totalDeducted += deduct;
+      sourceBatches.push({ ...b, deducted: deduct });
+    }
+
+    // 3. Smart Auto-Waste: Only waste existing floor batches if they are older than 5 minutes
+    // This allows multiple transfers in a single 'session' to stay active together.
+    const { data: floorBatches } = await supabase
+      .from('inventory_batches')
+      .select('*')
+      .eq('item_id', finalItemId)
+      .eq('location', 'floor')
+      .gt('remaining_quantity', 0);
+      
+    if (floorBatches && floorBatches.length > 0) {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
+      for (const old of floorBatches) {
+        // Only waste if the batch was created more than 5 minutes ago
+        if (old.created_at < fiveMinutesAgo) {
+          await supabase.from('inventory_transactions').insert({
+            item_id: finalItemId,
+            type: 'waste',
+            quantity: old.remaining_quantity,
+            waste_reason: `Auto-waste (Stale stock): ${reason || 'Diganti stok baru'}`,
+            actor_name: actorName,
+            created_at: new Date().toISOString()
+          });
+          await supabase.from('inventory_batches').update({ remaining_quantity: 0 }).eq('id', old.id);
+        }
+      }
+    }
+
+    // 4. Update master stock
+    await supabase.rpc('decrement_inventory_stock', { p_item_id: finalItemId, p_quantity: totalDeducted });
+
+    // 5. Create new floor batch(es)
+    const mainBatch = sourceBatches[0] || initialBatch;
+    let chunks = [];
+    const sSize = splitSize || 1;
+    if (sSize > 0 && totalDeducted > sSize) {
+      const numFullChunks = Math.floor(totalDeducted / sSize);
+      const remainder = totalDeducted % sSize;
+      for (let i = 0; i < numFullChunks; i++) chunks.push(sSize);
+      if (remainder > 0) chunks.push(remainder);
+    } else {
+      chunks.push(totalDeducted);
+    }
+
+    for (let i = 0; i < chunks.length; i++) {
+      await supabase.from('inventory_batches').insert({
+        item_id: finalItemId,
+        quantity: chunks[i],
+        remaining_quantity: chunks[i],
+        cost_per_unit: mainBatch.cost_per_unit,
+        supplier_name: (mainBatch.supplier_name && !mainBatch.supplier_name.includes('General Supplier')) ? mainBatch.supplier_name : 'Unknown',
+        received_date: mainBatch.received_date,
+        expired_date: mainBatch.expired_date,
+        batch_number: (mainBatch.batch_number || '').substring(0, 16) + (chunks.length > 1 ? `-${i+1}` : 'F'),
+        is_opened: true,
+        location: 'floor'
+      });
+    }
+
+    // 6. Log transaction
+    await supabase.from('inventory_transactions').insert({
+      item_id: finalItemId,
+      type: 'out',
+      quantity: totalDeducted,
+      actor_name: actorName,
+      waste_reason: reason ? `${reason} (Transfer: ${mainBatch.batch_number})` : `Transfer to Bar: ${mainBatch.batch_number} (Used ${sourceBatches.length} batches)`,
+      created_at: new Date().toISOString()
+    });
+
+    return true;
+  } catch (err) {
+    console.error("CRITICAL ERROR (transferToFloor):", err);
+    return false;
+  }
+}
+
+// Manual Stock Out (Waste, Damage, etc.) with Multi-Batch support
+export async function stockOutManual(
+  batchIdOrIds: string | string[], 
+  quantity: number, 
+  reason: string,
+  actorName: string = 'System',
+  itemId?: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  
+  try {
+    const batchIds = Array.isArray(batchIdOrIds) ? batchIdOrIds : [batchIdOrIds];
+    const firstBatchId = batchIds[0];
+
+    let derivedItemId = itemId;
+    if (!derivedItemId) {
+      const { data: initialBatch } = await supabase.from('inventory_batches').select('item_id').eq('id', firstBatchId).single();
+      if (!initialBatch) return false;
+      derivedItemId = initialBatch.item_id;
+    }
+    const finalItemId = derivedItemId;
+
+    let targetBatches = [];
+    const isArrayOfIds = Array.isArray(batchIdOrIds) && batchIdOrIds.length > 0 && batchIdOrIds[0] !== '';
+    
+    if (isArrayOfIds) {
+      const batchIds = Array.isArray(batchIdOrIds) ? batchIdOrIds : [batchIdOrIds];
+      const { data } = await supabase.from('inventory_batches').select('*').in('id', batchIds);
+      targetBatches = (data || []).sort((a, b) => batchIds.indexOf(a.id) - batchIds.indexOf(b.id));
+    } else {
+      // FIFO Fallback
+      const startId = Array.isArray(batchIdOrIds) ? batchIdOrIds[0] : batchIdOrIds;
+      const { data: allWarehouse } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('item_id', finalItemId)
+        .eq('location', 'warehouse')
+        .gt('remaining_quantity', 0)
+        .order('received_date', { ascending: true })
+        .order('batch_number', { ascending: true });
+      
+      if (startId && startId !== '') {
+        const startIndex = (allWarehouse || []).findIndex(b => b.id === startId);
+        targetBatches = (allWarehouse || []).slice(startIndex === -1 ? 0 : startIndex);
+      } else {
+        targetBatches = allWarehouse || [];
+      }
+    }
+
+    let remainingToDeduct = quantity;
+    let totalDeducted = 0;
+
+    for (const b of targetBatches) {
+      if (remainingToDeduct <= 0) break;
+      const deduct = Math.min(b.remaining_quantity, remainingToDeduct);
+      await supabase.from('inventory_batches').update({ remaining_quantity: b.remaining_quantity - deduct }).eq('id', b.id);
+      await supabase.from('inventory_transactions').insert({
+        item_id: finalItemId,
+        type: 'waste',
+        quantity: deduct,
+        waste_reason: reason ? `${reason} (Batch: ${b.batch_number})` : `Deducted from batch ${b.batch_number}`,
+        actor_name: actorName,
+        created_at: new Date().toISOString()
+      });
+      remainingToDeduct -= deduct;
+      totalDeducted += deduct;
+    }
+
+    if (totalDeducted > 0) {
+      await supabase.rpc('decrement_inventory_stock', { p_item_id: finalItemId, p_quantity: totalDeducted });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error("CRITICAL ERROR (stockOutManual):", err);
+    return false;
+  }
+}
+
+// Update existing batch details (Edit Sub-item)
+export async function updateBatchDetails(batchId: string, details: Partial<InventoryBatch>): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    try {
+      // Map back to snake_case
+      const dbDetails: any = {}
+      if (details.unitCost !== undefined) dbDetails.cost_per_unit = details.unitCost
+      if (details.supplier !== undefined) dbDetails.supplier_name = details.supplier
+      if (details.receivedDate !== undefined) dbDetails.received_date = details.receivedDate
+      if (details.expiryDate !== undefined) dbDetails.expired_date = details.expiryDate
+      // @ts-ignore
+      if (details.notes !== undefined) dbDetails.notes = details.notes
+      if (details.currentQuantity !== undefined) dbDetails.remaining_quantity = details.currentQuantity
+
+      const { error } = await supabase
+        .from('inventory_batches')
+        .update(dbDetails)
+        .eq('id', batchId)
+      
+      if (error) {
+        console.error("ERROR (updateBatchDetails):", error)
+        return false
+      }
+      return true
+    } catch (err) {
+      console.error("CRITICAL ERROR (updateBatchDetails):", err)
+      return false
+    }
+  }
+  return false
+}
+
+// Record manual batch movement and persist to DB
+export async function recordBatchMovement(
+  batchId: string, 
+  quantity: number, 
+  type: 'in' | 'out' | 'waste' | 'adjustment', 
+  actorName: string, 
+  reason?: string, 
+  notes?: string
+): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+
+  try {
+    // 1. Get batch info
+    const { data: batch, error: batchError } = await supabase
+      .from('inventory_batches')
+      .select('batch_number, remaining_quantity, item_id')
+      .eq('id', batchId)
+      .single();
+
+    if (batchError || !batch) throw new Error("Batch not found");
+
+    // 2. Calculate new quantity
+    let newQuantity = Number(batch.remaining_quantity);
+    if (type === 'in') {
+      newQuantity += quantity;
+    } else {
+      newQuantity = Math.max(0, newQuantity - quantity);
+    }
+
+    // 3. Update batch quantity
+    const { error: updateError } = await supabase
+      .from('inventory_batches')
+      .update({ 
+        remaining_quantity: newQuantity
+      })
+      .eq('id', batchId);
+
+    if (updateError) throw updateError;
+
+    // 4. Log to inventory_transactions
+    // Format reason to include batch number for parsing in getInventoryMovements
+    const fullReason = `${reason || 'Manual Adjustment'}${notes ? ` - ${notes}` : ''} (Batch: ${batch.batch_number})`;
+    
+    const { error: logError } = await supabase
+      .from('inventory_transactions')
+      .insert({
+        item_id: batch.item_id,
+        type: type === 'in' ? 'in' : (type === 'waste' ? 'waste' : 'out'),
+        quantity: quantity,
+        actor_name: actorName,
+        waste_reason: fullReason,
+        created_at: new Date().toISOString()
+      });
+
+    if (logError) throw logError;
+
+    return true;
+  } catch (err) {
+    console.error("CRITICAL ERROR (recordBatchMovement):", err);
+    return false;
+  }
 }
 
 // ========== MONTHLY OPEX (OVERHEAD/BOP) ==========
@@ -4530,6 +5068,34 @@ export async function getMonthlyOpex(month?: string): Promise<MonthlyOpex[]> {
     return data || []
   }
   return [] // Not supporting local fallback for Opex yet
+}
+
+export async function lockPayrollToAnalytics(month: string, amount: number): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    // 1. Delete any existing locked payroll for this month to avoid duplicates
+    await supabase
+      .from('monthly_opex')
+      .delete()
+      .eq('month', month)
+      .eq('category', 'Staff Payroll (Locked)')
+    
+    // 2. Insert new one
+    const { error } = await supabase
+      .from('monthly_opex')
+      .insert([{
+        month,
+        category: 'Staff Payroll (Locked)',
+        amount,
+        notes: `Locked from Payroll Module on ${new Date().toLocaleString()}`
+      }])
+    
+    if (error) {
+      console.error("ERROR (lockPayrollToAnalytics):", error)
+      return false
+    }
+    return true
+  }
+  return false
 }
 
 export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id' | 'created_at'>): Promise<MonthlyOpex | null> {
@@ -4584,52 +5150,88 @@ export async function getInventoryOpnames(): Promise<InventoryOpname[]> {
 }
 
 export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'created_at'>): Promise<InventoryOpname | null> {
-  if (isSupabaseConfigured()) {
+  if (!isSupabaseConfigured()) return null;
+
+  try {
     // 1. Insert Opname Record
     const { data: result, error } = await supabase
       .from('inventory_opname')
       .insert([data])
       .select()
-      .single()
+      .single();
     
     if (error) {
-      console.error("ERROR (addInventoryOpname):", error)
-      return null
+      console.error("ERROR (addInventoryOpname):", error);
+      return null;
     }
 
-    // 2. Update Inventory Batches and Master Stock via RPC
-    const { error: adjustError } = await supabase.rpc('adjust_stock_from_opname', {
-      p_item_id: data.item_id,
-      p_difference: data.difference,
-      p_actor_name: data.actor_name
-    })
+    const difference = data.difference;
+    const itemId = data.item_id;
 
-    if (adjustError) {
-      console.error("ERROR (adjusting batches via opname):", adjustError)
+    if (difference < 0) {
+      // CASE: Shrinkage (Missing stock)
+      // Deduct from ALL active batches using FIFO (Warehouse first, then Floor)
+      let neededToDeduct = Math.abs(difference);
       
-      // Fallback: Just update master stock if RPC fails
-      await supabase
-        .from('inventory_items')
-        .update({ stock: data.actual_stock })
-        .eq('id', data.item_id)
+      // Fetch all batches with stock, prioritize warehouse for audit deductions
+      const { data: batches } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('item_id', itemId)
+        .gt('remaining_quantity', 0)
+        .order('location', { ascending: false }) // 'warehouse' comes after 'floor' alphabetically, but we want warehouse first? 
+        // Wait, 'warehouse' > 'floor'. Ascending=false puts warehouse first.
+        .order('received_date', { ascending: true });
+
+      for (const batch of batches || []) {
+        if (neededToDeduct <= 0) break;
+        
+        const available = Number(batch.remaining_quantity);
+        const deduct = Math.min(available, neededToDeduct);
+        
+        await supabase.from('inventory_batches')
+          .update({ remaining_quantity: available - deduct })
+          .eq('id', batch.id);
+          
+        neededToDeduct -= deduct;
+      }
+    } else if (difference > 0) {
+      // CASE: Extra stock found
+      // Create a new adjustment batch with a unique ID
+      const timestamp = new Date().getTime().toString().slice(-4);
+      await supabase.from('inventory_batches').insert({
+        item_id: itemId,
+        quantity: difference,
+        remaining_quantity: difference,
+        batch_number: `ADJ-${new Date().toISOString().split('T')[0]}-${timestamp}`,
+        location: 'warehouse',
+        notes: `Opname Adjustment: ${data.reason || 'Found extra stock'}`
+      });
     }
 
-    // 3. Log as Waste in transactions if difference is negative (or just log the adjustment)
-    if (data.difference !== 0) {
-      const type = data.difference < 0 ? 'waste' : 'in'
-      await supabase.from('inventory_transactions').insert([{
-        item_id: data.item_id,
+    // 2. Update master stock column (legacy support, though UI uses batches)
+    await supabase.from('inventory_items')
+      .update({ stock: data.actual_stock, last_updated: new Date().toISOString() })
+      .eq('id', itemId);
+
+    // 3. Log transaction
+    if (difference !== 0) {
+      const type = difference < 0 ? 'waste' : 'in';
+      await supabase.from('inventory_transactions').insert({
+        item_id: itemId,
         type: type,
-        quantity: Math.abs(data.difference),
+        quantity: Math.abs(difference),
         actor_name: data.actor_name,
-        waste_reason: type === 'waste' ? data.reason : null,
+        waste_reason: `Stock Opname Adjustment: ${data.reason || (difference < 0 ? 'Shrinkage' : 'Found extra')}`,
         created_at: new Date().toISOString()
-      }])
+      });
     }
 
-    return result
+    return result;
+  } catch (err) {
+    console.error("CRITICAL ERROR (addInventoryOpname JS):", err);
+    return null;
   }
-  return null
 }
 
 // ========== STORAGE (OPEX ATTACHMENTS) ==========
@@ -4797,41 +5399,84 @@ async function calculateAutoTarget(month: string): Promise<MonthlyTarget | null>
 
 export async function getFinancialSummary(month: string): Promise<FinancialSummary> {
   const [year, monthNum] = month.split('-')
-  const startDate = `${month}-01T00:00:00.000Z`
-  const endDate = getLocalYYYYMMDD(new Date(parseInt(year), parseInt(monthNum), 0)) + 'T23:59:59.999Z'
+  const startDate = `${month}-01`
+  const endDate = getLocalYYYYMMDD(new Date(parseInt(year), parseInt(monthNum), 0))
+  
+  // For queries requiring full ISO timestamps (like sales_logs)
+  const startDateISO = `${startDate}T00:00:00.000Z`
+  const endDateISO = `${endDate}T23:59:59.999Z`
 
   if (isSupabaseConfigured()) {
     // 1. Revenue & COGS from sales_logs
     const { data: salesData } = await supabase
       .from('sales_logs')
       .select('total_price, total_cost, created_at')
-      .gte('created_at', startDate)
-      .lte('created_at', endDate)
+      .gte('created_at', startDateISO)
+      .lte('created_at', endDateISO)
     
     const revenue = (salesData || []).reduce((sum, s) => sum + s.total_price, 0)
     const cogs = (salesData || []).reduce((sum, s) => sum + (s.total_cost || 0), 0)
     
     // 2. OPEX from monthly_opex
     const opexData = await getMonthlyOpex(month)
-    const opex = opexData.reduce((sum, o) => sum + o.amount, 0)
+    const opex = opexData
+      .filter(o => o.category !== 'Staff Payroll (Locked)')
+      .reduce((sum, o) => sum + o.amount, 0)
+    
+    // Check for locked payroll in OPEX table
+    const lockedPayroll = opexData.find(o => o.category === 'Staff Payroll (Locked)')
     
     // 3. Waste from inventory_transactions
     const { data: wasteData } = await supabase
       .from('inventory_transactions')
       .select('quantity, item_id')
       .eq('type', 'waste')
-      .gte('created_at', startDate)
-      .lte('created_at', endDate)
+      .gte('created_at', startDateISO)
+      .lte('created_at', endDateISO)
     
-    // We need current item costs to estimate waste value
-    // (In a perfect world, we'd log cost at the time of waste too)
     const inventory = await getInventory()
     const itemCostMap = new Map(inventory.map(i => [i.id, i.unit_cost || 0]))
     const waste = (wasteData || []).reduce((sum, w) => sum + (w.quantity * (itemCostMap.get(w.item_id) || 0)), 0)
     
-    // 4. Calculations
+    // 4. Payroll - Live Estimation or Locked Value
+    let payrollCosts = 0
+    let isPayrollLocked = false
+
+    if (lockedPayroll) {
+      payrollCosts = lockedPayroll.amount
+      isPayrollLocked = true
+    } else {
+      // Fallback to Live Estimation if not locked
+      const [attendanceRows, payrollRecords] = await Promise.all([
+        getAttendanceReportData(startDate, endDate),
+        getPayrolls(startDate, endDate)
+      ])
+      
+      const empStats = new Map<string, { mins: number, rate: number, adj: number }>()
+      const sortedPayrolls = [...payrollRecords].sort((a, b) => 
+        new Date(a.updated_at || 0).getTime() - new Date(b.updated_at || 0).getTime()
+      )
+
+      sortedPayrolls.forEach(p => {
+        empStats.set(p.employee_id, { mins: 0, rate: p.salary_hourly || 0, adj: p.adjustment || 0 })
+      })
+      
+      attendanceRows.forEach(row => {
+        if (!empStats.has(row.employee_id)) {
+          empStats.set(row.employee_id, { mins: 0, rate: 0, adj: 0 })
+        }
+        const stats = empStats.get(row.employee_id)!
+        stats.mins += (row.regularMinutes || 0) + (row.overtimeMinutes || 0)
+      })
+      
+      payrollCosts = Array.from(empStats.values()).reduce((sum, s) => {
+        return sum + ((s.mins / 60) * s.rate) + s.adj
+      }, 0)
+    }
+    
+    // 5. Calculations
     const grossProfit = revenue - cogs
-    const netProfit = grossProfit - opex - waste
+    const netProfit = grossProfit - opex - waste - payrollCosts
     const totalTransactions = (salesData || []).length
     const aov = totalTransactions > 0 ? revenue / totalTransactions : 0
     
@@ -4846,21 +5491,29 @@ export async function getFinancialSummary(month: string): Promise<FinancialSumma
     return {
       revenue,
       cogs,
-      waste,
-      opex,
       grossProfit,
+      opex,
+      waste,
+      payroll: payrollCosts,
       netProfit,
+      totalTransactions,
       aov,
-      salesPerHour,
-      totalTransactions
+      salesPerHour
     }
   }
 
   // Fallback empty stats
   return {
-    revenue: 0, cogs: 0, waste: 0, opex: 0, 
-    grossProfit: 0, netProfit: 0, aov: 0, 
-    salesPerHour: {}, totalTransactions: 0
+    revenue: 0,
+    cogs: 0,
+    grossProfit: 0,
+    opex: 0,
+    waste: 0,
+    payroll: 0,
+    netProfit: 0,
+    totalTransactions: 0,
+    aov: 0,
+    salesPerHour: {}
   }
 }
 

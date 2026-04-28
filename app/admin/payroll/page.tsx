@@ -9,6 +9,7 @@ import {
   settlePayrollBatch,
   settlePayrollItems,
   cancelPayrollItems,
+  lockPayrollToAnalytics,
   type Employee,
   type PayrollRecord
 } from "@/lib/api/supabase-service"
@@ -73,6 +74,7 @@ export default function PayrollAdminPage() {
   // Local state for adjustments and hourly rates (since they might not be in DB yet)
   const [adjustments, setAdjustments] = useState<Record<string, number>>({})
   const [hourlyRates, setHourlyRates] = useState<Record<string, number>>({})
+  const [isSyncing, setIsSyncing] = useState(false)
 
   const fetchAllData = async () => {
     setIsLoading(true)
@@ -266,6 +268,27 @@ export default function PayrollAdminPage() {
     setIsSaving(false)
   }
 
+  const handleSyncToAnalytics = async () => {
+    if (!confirm("This will lock the current total payroll amount into the Analytics Report. Any future changes in this module won't affect the report unless you sync again. Continue?")) return
+    
+    setIsSyncing(true)
+    const totalEst = aggregatedData.reduce((sum, a) => {
+      const rate = hourlyRates[a.employee_id] || 0
+      const adj = adjustments[a.employee_id] || 0
+      return sum + (((a.regMins + a.otMins)/60) * rate) + adj
+    }, 0)
+    
+    const monthStr = format(dateRange.from, "yyyy-MM")
+    const success = await lockPayrollToAnalytics(monthStr, totalEst)
+    
+    if (success) {
+      alert(`Success! Rp ${totalEst.toLocaleString()} has been synced to Analytics for ${monthStr}`)
+    } else {
+      alert("Failed to sync to Analytics")
+    }
+    setIsSyncing(false)
+  }
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -350,14 +373,25 @@ export default function PayrollAdminPage() {
             </div>
           </div>
 
-          <Button 
-            className="bg-green-600 hover:bg-green-700 text-white h-10 mt-auto" 
-            onClick={handleSettleAll}
-            disabled={isLoading || isSaving || aggregatedData.length === 0}
-          >
-            <CheckCircle className="mr-2 h-4 w-4" />
-            Settle All
-          </Button>
+          <div className="flex gap-2 mt-auto">
+            <Button 
+              variant="outline"
+              className="border-primary/50 text-primary hover:bg-primary/5 h-10"
+              onClick={handleSyncToAnalytics}
+              disabled={isLoading || isSyncing || aggregatedData.length === 0}
+            >
+              <TrendingUp className="mr-2 h-4 w-4" />
+              {isSyncing ? "Syncing..." : "Sync to Analytics"}
+            </Button>
+            <Button 
+              className="bg-green-600 hover:bg-green-700 text-white h-10" 
+              onClick={handleSettleAll}
+              disabled={isLoading || isSaving || aggregatedData.length === 0}
+            >
+              <CheckCircle className="mr-2 h-4 w-4" />
+              Settle All
+            </Button>
+          </div>
         </div>
       </div>
 

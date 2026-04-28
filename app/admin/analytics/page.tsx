@@ -2,20 +2,37 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { 
-  getSalesReport, 
+  getMenuItems,
+  getSalesReport,
   getInventory,
   getFinancialSummary,
   getMonthlyTarget,
+  getAllMenuRecipes,
   subscribeToSalesLogs,
   subscribeToInventoryItems,
   type SalesReport,
   type InventoryItem,
   type FinancialSummary,
-  type MonthlyTarget
+  type MonthlyTarget,
+  type MenuItem
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { 
+  TrendingUp, 
+  DollarSign, 
+  Package, 
+  BarChart3, 
+  PieChart as PieIcon,
+  Calculator,
+  ArrowUpRight,
+  Target,
+  Clock,
+  AlertCircle,
+  ShieldCheck,
+  Wallet
+} from "lucide-react"
 import { 
   BarChart, 
   Bar, 
@@ -23,84 +40,72 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
+  Legend, 
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell
-} from "recharts"
-import {
-  DollarSign,
-  TrendingUp,
-  Coffee,
-  Package,
-  Calculator,
-  Target,
-  BarChart3,
-  Clock,
-  Wallet,
-  ArrowUpRight
-} from "lucide-react"
-import { Progress } from "@/components/ui/progress"
-import { Badge } from "@/components/ui/badge"
+  Cell,
+  LineChart,
+  Line
+} from 'recharts'
+import { format, startOfMonth, endOfMonth } from "date-fns"
 import { cn } from "@/lib/utils"
-import { format } from "date-fns"
 
 export default function AnalyticsPage() {
   // Data from Supabase
   const [salesReport, setSalesReport] = useState<SalesReport[]>([])
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [financials, setFinancials] = useState<FinancialSummary | null>(null)
   const [target, setTarget] = useState<MonthlyTarget | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   
   const currentMonth = format(new Date(), "yyyy-MM")
-  
-  // BEP Manual Input
-  const [fixedCost, setFixedCost] = useState("")
 
   const fetchData = async () => {
     setIsLoading(true)
-    const [salesData, inventoryData, finData, targetData] = await Promise.all([
-      getSalesReport(),
+    const [salesData, inventoryData, financialData, targetData, menuData] = await Promise.all([
+      getSalesReport(currentMonth),
       getInventory(),
       getFinancialSummary(currentMonth),
-      getMonthlyTarget(currentMonth)
+      getMonthlyTarget(currentMonth),
+      getMenuItems()
     ])
     setSalesReport(salesData)
     setInventory(inventoryData)
-    setFinancials(finData)
+    setFinancials(financialData)
     setTarget(targetData)
+    setMenuItems(menuData)
     setIsLoading(false)
   }
 
-  // Realtime subscriptions - update UI only, no full page reload
   useEffect(() => {
     fetchData()
     
     // Subscribe to sales_logs changes
     const unsubSalesLogs = subscribeToSalesLogs(() => {
-      getSalesReport().then(setSalesReport)
+      getSalesReport(currentMonth).then(setSalesReport)
     })
     
     // Subscribe to inventory_items changes
     const unsubInventory = subscribeToInventoryItems(() => {
       getInventory().then(setInventory)
     })
-    
+
     return () => {
       unsubSalesLogs()
       unsubInventory()
     }
   }, [])
 
-  // Calculate metrics
-  const totalRevenue = useMemo(() => {
-    return salesReport.reduce((sum, r) => sum + r.revenue, 0)
-  }, [salesReport])
+  // Basic stats
+  const totalRevenue = useMemo(() => 
+    salesReport.reduce((sum, item) => sum + item.revenue, 0)
+  , [salesReport])
 
-  const totalSalesVolume = useMemo(() => {
-    return salesReport.reduce((sum, r) => sum + r.total_sold, 0)
-  }, [salesReport])
+  const totalSalesVolume = useMemo(() => 
+    salesReport.reduce((sum, item) => sum + item.total_sold, 0)
+  , [salesReport])
 
   const topSellingMenu = useMemo(() => {
     if (salesReport.length === 0) return null
@@ -109,43 +114,66 @@ export default function AnalyticsPage() {
     )
   }, [salesReport])
 
-  // Estimated COGS (next phase - placeholder calculation based on inventory cost)
-  const estimatedCOGS = useMemo(() => {
-    // For now, calculate based on inventory unit costs
-    const totalInventoryCost = inventory.reduce((sum, item) => {
-      const cost = item.unit_cost || 0
-      const stock = item.stock || item.current_stock || 0
-      return sum + (cost * stock)
-    }, 0)
-    // Estimate COGS as a percentage of total revenue
-    return totalRevenue > 0 ? Math.round(totalRevenue * 0.35) : 0
-  }, [inventory, totalRevenue])
+  // Actual COGS calculation based on recipes and inventory costs
+  const actualCOGS = useMemo(() => {
+    let totalCost = 0
+    
+    salesReport.forEach(sale => {
+      // Find the menu item with its recipe attached
+      const menuItem = menuItems.find(m => m.id === sale.menu_id)
+      
+      let menuUnitCost = 0
+      
+      if (menuItem?.recipe?.ingredients) {
+        menuItem.recipe.ingredients.forEach(ing => {
+          const invItem = inventory.find(i => i.id === ing.inventory_item_id)
+          if (invItem) {
+            menuUnitCost += (ing.quantity || 0) * (invItem.unit_cost || 0)
+          }
+        })
+        
+        // Add packaging cost if available
+        menuUnitCost += (menuItem.packaging_cost || 0)
+      }
+      
+      // If no recipe found or cost is 0, fallback to 35% estimate as a safety measure
+      if (menuUnitCost === 0 && sale.revenue > 0) {
+        menuUnitCost = (sale.revenue / sale.total_sold) * 0.35
+      }
+      
+      totalCost += menuUnitCost * sale.total_sold
+    })
+    
+    return Math.round(totalCost)
+  }, [salesReport, menuItems, inventory])
 
   // BEP Calculation (Break-Even Point)
-  // BEP Units = Fixed Costs / (Average Price - Average Variable Cost per Unit)
+  const [fixedCost, setFixedCost] = useState("0")
   const bepAnalysis = useMemo(() => {
     const fixed = parseFloat(fixedCost) || 0
     if (fixed === 0 || totalSalesVolume === 0) return null
     
     const avgPricePerUnit = totalRevenue / totalSalesVolume
-    const avgCostPerUnit = estimatedCOGS / totalSalesVolume
+    const avgCostPerUnit = actualCOGS / totalSalesVolume
     const contributionMargin = avgPricePerUnit - avgCostPerUnit
     
     if (contributionMargin <= 0) return null
     
-    const bepUnits = Math.ceil(fixed / contributionMargin)
-    const bepRevenue = bepUnits * avgPricePerUnit
+    const units = Math.ceil(fixed / contributionMargin)
+    const revenue = units * avgPricePerUnit
     
-    return {
-      units: bepUnits,
-      revenue: bepRevenue,
-      contributionMargin,
-      avgPricePerUnit,
-      avgCostPerUnit
-    }
-  }, [fixedCost, totalRevenue, totalSalesVolume, estimatedCOGS])
+    return { units, revenue, contributionMargin }
+  }, [fixedCost, totalRevenue, totalSalesVolume, actualCOGS])
 
-  // Format price in IDR
+  // Inventory stats by category
+  const inventoryByCategory = useMemo(() => {
+    const categories: Record<string, number> = {}
+    inventory.forEach(item => {
+      categories[item.category] = (categories[item.category] || 0) + 1
+    })
+    return Object.entries(categories).map(([name, count]) => ({ name, count }))
+  }, [inventory])
+
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("id-ID", {
       style: "currency",
@@ -154,23 +182,12 @@ export default function AnalyticsPage() {
     }).format(price)
   }
 
-  // Prepare chart data
-  const menuSalesData = useMemo(() => {
+  const revenueDistribution = useMemo(() => {
     return salesReport
-      .map(r => ({ name: r.menu_name, sales: r.total_sold, revenue: r.revenue }))
-      .sort((a, b) => b.sales - a.sales)
-      .slice(0, 10) // Top 10
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5)
+      .map(s => ({ name: s.menu_name, value: s.revenue }))
   }, [salesReport])
-
-  // Inventory by category
-  const inventoryByCategory = useMemo(() => {
-    const categories = ["beans", "milk", "syrup", "cups", "food"]
-    return categories.map((cat) => {
-      const items = inventory.filter((i) => i.category === cat)
-      const totalStock = items.reduce((sum, i) => sum + (i.stock || i.current_stock || 0), 0)
-      return { name: cat.charAt(0).toUpperCase() + cat.slice(1), value: totalStock, count: items.length }
-    })
-  }, [inventory])
 
   const COLORS = ["#1a1a1a", "#404040", "#666666", "#999999", "#cccccc"]
 
@@ -183,15 +200,14 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div>
-      <header className="mb-8">
+    <div className="space-y-8">
+      <header>
         <h1 className="text-3xl font-light tracking-tight">Analytics</h1>
         <p className="text-muted-foreground">Revenue, sales, and business insights</p>
       </header>
 
       {/* Key Metrics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {/* Total Revenue */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="rounded-sm border-none bg-primary text-primary-foreground shadow-lg">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium opacity-80 flex items-center gap-2">
@@ -200,15 +216,14 @@ export default function AnalyticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatPrice(financials?.revenue || totalRevenue)}</p>
+            <p className="text-2xl font-bold">{formatPrice(totalRevenue)}</p>
             <div className="flex items-center gap-1 mt-1 opacity-80">
-              <TrendingUp className="w-3 h-3 text-[var(--status-healthy)]" />
+              <TrendingUp className="w-3 h-3 text-green-400" />
               <p className="text-[10px] font-medium">+12% from last month</p>
             </div>
           </CardContent>
         </Card>
         
-        {/* Gross Profit */}
         <Card className="rounded-sm shadow-sm border-border/50">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -217,14 +232,13 @@ export default function AnalyticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatPrice(financials?.grossProfit || totalRevenue - estimatedCOGS)}</p>
-            <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-              Margin: {financials?.revenue ? Math.round((financials.grossProfit / financials.revenue) * 100) : 0}%
+            <p className="text-2xl font-bold text-green-600">{formatPrice(totalRevenue - actualCOGS)}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Margin: {totalRevenue > 0 ? Math.round(((totalRevenue - actualCOGS) / totalRevenue) * 100) : 0}%
             </p>
           </CardContent>
         </Card>
-        
-        {/* Net Profit */}
+
         <Card className="rounded-sm shadow-sm border-border/50">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -233,14 +247,20 @@ export default function AnalyticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-primary">{formatPrice(financials?.netProfit || 0)}</p>
-            <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-              After OPEX & Waste
+            <div className={cn(
+              "text-2xl font-bold",
+              (totalRevenue - actualCOGS - (financials?.opex || 0) - (financials?.waste || 0) - (financials?.payroll || 0)) >= 0 
+                ? "text-green-600" 
+                : "text-destructive"
+            )}>
+              {formatPrice(totalRevenue - actualCOGS - (financials?.opex || 0) - (financials?.waste || 0) - (financials?.payroll || 0))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              After All Expenses
             </p>
           </CardContent>
         </Card>
         
-        {/* Average Order Value */}
         <Card className="rounded-sm shadow-sm border-border/50">
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -249,300 +269,211 @@ export default function AnalyticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatPrice(financials?.aov || 0)}</p>
+            <p className="text-2xl font-bold">
+              {formatPrice(totalSalesVolume > 0 ? totalRevenue / totalSalesVolume : 0)}
+            </p>
             <p className="text-[10px] text-muted-foreground mt-1">
-              {financials?.totalTransactions || 0} transactions
+              Across {totalSalesVolume} items
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Target & KPI Status Integration */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <Card className="lg:col-span-2 rounded-sm shadow-sm border-border/50">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="w-5 h-5 text-primary" />
-                Monthly Revenue Target
-              </CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">Status as of {format(new Date(), "MMMM yyyy")}</p>
-            </div>
-            {target && financials && target.revenue_target > 0 && (
-              <Badge className={cn("rounded-sm px-3", 
-                (financials.revenue / target.revenue_target) < 0.8 ? "bg-red-500 hover:bg-red-500" :
-                (financials.revenue / target.revenue_target) < 1.0 ? "bg-amber-500 hover:bg-amber-500" :
-                (financials.revenue / target.revenue_target) < 1.1 ? "bg-emerald-500 hover:bg-emerald-500" :
-                "bg-purple-500 hover:bg-purple-500"
-              )}>
-                {(() => {
-                  const progress = financials.revenue / target.revenue_target
-                  if (progress < 0.8) return "UNDERPERFORM"
-                  if (progress < 1.0) return "ON TRACK"
-                  if (progress < 1.1) return "ACHIEVED"
-                  return "OUTSTANDING"
-                })()}
-              </Badge>
-            )}
-          </CardHeader>
-          <CardContent>
-            {target && financials && target.revenue_target > 0 ? (
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm items-end mb-1">
-                    <span className="font-medium">Revenue Progress</span>
-                    <span className="text-muted-foreground">
-                      <span className="text-foreground font-bold">{formatPrice(financials.revenue)}</span> / {formatPrice(target.revenue_target)}
-                    </span>
-                  </div>
-                  <Progress value={Math.min(100, (financials.revenue / target.revenue_target) * 100)} className="h-2 rounded-full" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-8 py-2">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Sales Volume</p>
-                    <p className="text-xl font-bold">{totalSalesVolume} / {target.sales_target} units</p>
-                    <Progress value={Math.min(100, (totalSalesVolume / target.sales_target) * 100)} className="h-1 rounded-full opacity-60" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Upselling Index (AOV)</p>
-                    <p className="text-xl font-bold">{formatPrice(financials.aov)} / {formatPrice(target.aov_target)}</p>
-                    <Progress value={Math.min(100, (financials.aov / target.aov_target) * 100)} className="h-1 rounded-full opacity-60" />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="h-32 flex flex-col items-center justify-center border border-dashed rounded-sm gap-2 mt-4">
-                <Target className="w-6 h-6 text-muted-foreground/30" />
-                <p className="text-sm text-muted-foreground">No target has been set for this month</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-sm shadow-sm border-border/50">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Sales by Menu Chart */}
+        <Card className="rounded-sm">
           <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Clock className="w-4 h-4 text-muted-foreground" />
-              Peak Service Hours
-            </CardTitle>
+            <CardTitle className="text-sm font-medium">Sales Volume by Menu</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-[200px] w-full mt-2">
+          <CardContent className="h-[350px]">
+            {salesReport.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={Object.entries(financials?.salesPerHour || {}).map(([hour, count]) => ({ hour, count }))}>
-                  <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '12px' }}
-                    labelStyle={{ fontWeight: 'bold' }}
+                <BarChart 
+                  data={salesReport.sort((a,b) => b.total_sold - a.total_sold).slice(0, 8)} 
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} vertical={true} opacity={0.3} />
+                  <XAxis type="number" hide />
+                  <YAxis 
+                    dataKey="menu_name" 
+                    type="category" 
+                    fontSize={10} 
+                    tickLine={false} 
+                    axisLine={false}
+                    width={120}
                   />
-                  <Bar dataKey="count" fill="#1a1a1a" radius={[2, 2, 0, 0]} />
+                  <Tooltip 
+                    cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                    contentStyle={{ borderRadius: '4px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
+                  <Bar dataKey="total_sold" fill="#1a1a1a" radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
-            </div>
-            <p className="text-[10px] text-center text-muted-foreground mt-4">
-              Real-time shift efficiency based on transaction logs
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* Menu Sales Chart */}
-        <Card className="rounded-sm">
-          <CardHeader>
-            <CardTitle>Sales by Menu</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {menuSalesData.length > 0 ? (
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={menuSalesData} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                    <XAxis type="number" tick={{ fontSize: 12 }} stroke="#666" />
-                    <YAxis 
-                      dataKey="name" 
-                      type="category" 
-                      tick={{ fontSize: 11 }} 
-                      stroke="#666"
-                      width={100}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: "#fff", 
-                        border: "1px solid #e0e0e0",
-                        borderRadius: "4px"
-                      }}
-                      formatter={(value: number, name: string) => {
-                        if (name === "sales") return [value, "Quantity"]
-                        return [formatPrice(value), "Revenue"]
-                      }}
-                    />
-                    <Bar dataKey="sales" fill="#1a1a1a" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
             ) : (
-              <div className="h-[300px] flex items-center justify-center">
-                <p className="text-muted-foreground">No sales data yet</p>
-              </div>
+              <div className="flex items-center justify-center h-full text-muted-foreground">No sales data</div>
             )}
           </CardContent>
         </Card>
 
-        {/* Inventory Distribution */}
+        {/* Revenue Distribution Chart - FIXED UI */}
         <Card className="rounded-sm">
           <CardHeader>
-            <CardTitle>Inventory by Category</CardTitle>
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <PieIcon className="w-4 h-4" />
+              Revenue Distribution
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-[300px] flex items-center">
-              <ResponsiveContainer width="50%" height="100%">
+          <CardContent className="h-[350px] flex flex-col sm:flex-row items-center gap-4">
+            <div className="h-[220px] w-full sm:w-1/2">
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={inventoryByCategory}
+                    data={revenueDistribution}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
+                    outerRadius={80}
+                    paddingAngle={5}
                     dataKey="value"
                   >
-                    {inventoryByCategory.map((_, index) => (
+                    {revenueDistribution.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip 
+                    formatter={(value: number) => formatPrice(value)}
+                    contentStyle={{ borderRadius: '4px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="flex-1 space-y-2">
-                {inventoryByCategory.map((item, index) => (
-                  <div key={item.name} className="flex items-center gap-3">
-                    <div 
-                      className="w-3 h-3 rounded-sm shrink-0" 
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    />
-                    <span className="text-sm flex-1">{item.name}</span>
-                    <span className="text-sm text-muted-foreground">{item.count} items</span>
+            </div>
+            <div className="w-full sm:w-1/2 space-y-3">
+              {revenueDistribution.map((item, index) => (
+                <div key={item.name} className="flex items-center justify-between text-xs group">
+                  <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 shrink-0 rounded-sm" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                    <span className="font-medium text-muted-foreground group-hover:text-foreground transition-colors line-clamp-1">{item.name}</span>
                   </div>
-                ))}
-              </div>
+                  <span className="text-foreground font-mono font-bold ml-2">{formatPrice(item.value)}</span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* BEP Calculator */}
-      <Card className="rounded-sm">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calculator className="w-5 h-5" />
-            Break-Even Point (BEP) Calculator
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Input Section */}
-            <div>
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="fixedCost" className="flex items-center gap-2">
-                    <Target className="w-4 h-4" />
-                    Monthly Fixed Costs (IDR)
-                  </Label>
-                  <Input
-                    id="fixedCost"
-                    type="number"
-                    placeholder="e.g. 5000000"
-                    value={fixedCost}
-                    onChange={(e) => setFixedCost(e.target.value)}
-                    className="rounded-sm"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Include rent, utilities, salaries, etc.
-                  </p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Financial Breakdown - Moved down */}
+        <Card className="rounded-sm lg:col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-primary" />
+              Financial Health Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-sm text-muted-foreground">Total Revenue</span>
+                <span className="text-sm font-semibold">{formatPrice(totalRevenue)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-border/50">
+                <span className="text-sm text-muted-foreground">Actual COGS (Recipes)</span>
+                <span className="text-sm font-semibold text-destructive">-{formatPrice(actualCOGS)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-border/50 bg-muted/20 px-2 rounded-sm">
+                <span className="text-sm font-bold">Gross Profit</span>
+                <span className="text-sm font-bold text-green-600">{formatPrice(totalRevenue - actualCOGS)}</span>
+              </div>
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between items-center py-2 border-b border-border/50">
+                  <span className="text-sm text-muted-foreground">Operational Costs (OPEX)</span>
+                  <span className="text-sm font-semibold text-destructive">-{formatPrice(financials?.opex || 0)}</span>
                 </div>
-                
-                {/* Auto-calculated values */}
-                <div className="bg-muted/50 p-4 rounded-sm space-y-2">
-                  <p className="text-sm font-medium mb-3">Based on your sales data:</p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Avg. Price per Unit</span>
-                    <span className="font-mono">
-                      {totalSalesVolume > 0 ? formatPrice(totalRevenue / totalSalesVolume) : "-"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Avg. Cost per Unit (Est.)</span>
-                    <span className="font-mono">
-                      {totalSalesVolume > 0 ? formatPrice(estimatedCOGS / totalSalesVolume) : "-"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Contribution Margin</span>
-                    <span className="font-mono">
-                      {bepAnalysis ? formatPrice(bepAnalysis.contributionMargin) : "-"}
-                    </span>
-                  </div>
+                <div className="flex justify-between items-center py-2 border-b border-border/50">
+                  <span className="text-sm text-muted-foreground">Staff Payroll</span>
+                  <span className="text-sm font-semibold text-destructive">-{formatPrice(financials?.payroll || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-border/50">
+                  <span className="text-sm text-muted-foreground">Inventory Waste</span>
+                  <span className="text-sm font-semibold text-destructive">-{formatPrice(financials?.waste || 0)}</span>
+                </div>
+                <div className="flex justify-between items-center py-3 mt-1 bg-primary/5 px-2 rounded-sm border border-primary/10">
+                  <span className="font-bold">Net Profit</span>
+                  <span className={cn(
+                    "text-xl font-bold",
+                    (totalRevenue - actualCOGS - (financials?.opex || 0) - (financials?.waste || 0) - (financials?.payroll || 0)) >= 0 
+                      ? "text-green-600" 
+                      : "text-destructive"
+                  )}>
+                    {formatPrice(totalRevenue - actualCOGS - (financials?.opex || 0) - (financials?.waste || 0) - (financials?.payroll || 0))}
+                  </span>
                 </div>
               </div>
             </div>
-            
-            {/* Results Section */}
-            <div>
-              {bepAnalysis ? (
-                <div className="space-y-4">
-                  <div className="bg-foreground text-background p-6 rounded-sm text-center">
-                    <p className="text-sm opacity-80 mb-2">Break-Even Point</p>
-                    <p className="text-4xl font-bold">{bepAnalysis.units}</p>
-                    <p className="text-sm opacity-80">units to sell</p>
+          </CardContent>
+        </Card>
+
+        {/* BEP Calculator */}
+        <Card className="rounded-sm lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <Calculator className="w-4 h-4" />
+              Break-Even Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="fixedCost" className="text-xs uppercase font-bold text-muted-foreground">Monthly Fixed Costs (IDR)</Label>
+                  <Input
+                    id="fixedCost"
+                    type="number"
+                    value={fixedCost}
+                    onChange={(e) => setFixedCost(e.target.value)}
+                    className="h-10 rounded-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground italic">Include rent, total salaries, and regular bills.</p>
+                </div>
+                <div className="bg-muted/30 p-3 rounded-sm space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span>Avg. Revenue / Item</span>
+                    <span className="font-mono">{formatPrice(totalSalesVolume > 0 ? totalRevenue / totalSalesVolume : 0)}</span>
                   </div>
-                  
-                  <div className="bg-muted/50 p-4 rounded-sm">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">BEP Revenue Target</span>
-                      <span className="text-lg font-semibold">{formatPrice(bepAnalysis.revenue)}</span>
-                    </div>
+                  <div className="flex justify-between">
+                    <span>Avg. Cost / Item</span>
+                    <span className="font-mono">{formatPrice(totalSalesVolume > 0 ? actualCOGS / totalSalesVolume : 0)}</span>
                   </div>
-                  
-                  <div className="bg-muted/50 p-4 rounded-sm">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Current Sales vs BEP</span>
-                      <span className={`text-lg font-semibold ${totalSalesVolume >= bepAnalysis.units ? "text-[var(--status-healthy)]" : "text-[var(--status-warning)]"}`}>
-                        {totalSalesVolume} / {bepAnalysis.units}
-                      </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col justify-center">
+                {bepAnalysis ? (
+                  <div className="text-center space-y-3">
+                    <div className="bg-primary text-primary-foreground p-4 rounded-sm">
+                      <p className="text-[10px] uppercase opacity-70">Target Penjualan BEP</p>
+                      <p className="text-3xl font-bold">{bepAnalysis.units}</p>
+                      <p className="text-[10px] uppercase opacity-70">Porsi / Menu</p>
                     </div>
-                    <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all ${totalSalesVolume >= bepAnalysis.units ? "bg-[var(--status-healthy)]" : "bg-[var(--status-warning)]"}`}
-                        style={{ width: `${Math.min(100, (totalSalesVolume / bepAnalysis.units) * 100)}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
+                    <p className={`text-xs font-medium ${totalSalesVolume >= bepAnalysis.units ? "text-green-600" : "text-amber-600"}`}>
                       {totalSalesVolume >= bepAnalysis.units 
-                        ? "You have reached break-even!" 
-                        : `${bepAnalysis.units - totalSalesVolume} more units needed to break even`
-                      }
+                        ? "✓ Target BEP Tercapai!" 
+                        : `Kurang ${bepAnalysis.units - totalSalesVolume} porsi lagi`}
                     </p>
                   </div>
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center py-8">
-                  <Calculator className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">
-                    {totalSalesVolume === 0 
-                      ? "Requires sales data to establish average price and cost" 
-                      : "Enter your fixed costs to calculate BEP"}
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    BEP helps you understand how many items you need to sell to cover your costs
-                  </p>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-xs">Masukkan biaya tetap untuk hitung BEP</p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

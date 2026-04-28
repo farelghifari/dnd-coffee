@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { cn, getLocalYYYYMMDD, getDeviceFingerprint } from "@/lib/utils"
 import {
   getInventory,
+  getBatches,
   addAttendanceLog,
   addStockLog,
   getShiftOnDate,
@@ -28,6 +29,7 @@ import {
   addOvertimeRequest,
   getDailyWorkDuration,
   type InventoryItem,
+  type InventoryBatch,
   type OvertimeRequest
 } from "@/lib/api/supabase-service"
 
@@ -49,6 +51,7 @@ const menuItems: { id: ActionType; label: string; icon: React.ComponentType<{ cl
 
 export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [batches, setBatches] = useState<InventoryBatch[]>([])
   const [selectedAction, setSelectedAction] = useState<ActionType>(null)
   const [countdown, setCountdown] = useState(idleTimeout)
   const [lastActivity, setLastActivity] = useState(Date.now())
@@ -62,14 +65,23 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
   const [otPromptMessage, setOTPromptMessage] = useState("")
   const [pendingOTData, setPendingOTData] = useState<{ employeeId: string; employeeName: string; today: string } | null>(null)
   const [pendingStockAction, setPendingStockAction] = useState<"stock-in" | "stock-out" | "waste" | "opname" | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Load inventory on mount
   useEffect(() => {
+    let isMounted = true
     const loadInventory = async () => {
-      const data = await getInventory()
-      setInventory(data)
+      const [invData, batchData] = await Promise.all([
+        getInventory(),
+        getBatches()
+      ])
+      if (isMounted) {
+        setInventory(invData)
+        setBatches(batchData)
+      }
     }
     loadInventory()
+    return () => { isMounted = false }
   }, [])
 
   const resetCountdown = useCallback(() => {
@@ -114,67 +126,114 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     setCurrentEmployeeId(employeeId)
     setCurrentEmployeeName(employeeName)
     
-    if (selectedAction === "clock-in" || selectedAction === "clock-out") {
-      // Check if employee has a shift today for clock-in
-      const today = getLocalYYYYMMDD()
-      const todayShift = await getShiftOnDate(employeeId, today)
-      const hasShift = !!todayShift
+    setIsSubmitting(true)
+    // Capture the action type before closing the modal
+    const actionType = selectedAction
+    setSelectedAction(null)
+    
+    try {
+      if (actionType === "clock-in" || actionType === "clock-out") {
+        const today = getLocalYYYYMMDD()
+        const todayShift = await getShiftOnDate(employeeId, today)
+        const hasShift = !!todayShift
 
-      if (selectedAction === "clock-in") {
-        // 1. Check for scheduled overtime first
-        const scheduledOT = await getScheduledOvertime(employeeId, today)
-        
-        if (scheduledOT) {
-          // Pre-approved! Just clock in
-          const attendanceLog = await addAttendanceLog({
-            employee_id: employeeId,
-            employee_name: employeeName,
-            type: selectedAction,
-            method: 'nfc',
-            is_ops_device: true,
-            device_info: getDeviceFingerprint()
-          })
+        if (actionType === "clock-in") {
+          // 1. Check for scheduled overtime first
+          const scheduledOT = await getScheduledOvertime(employeeId, today)
           
-          setShowSuccessMessage(`${employeeName} clocked in for SCHEDULED overtime.`)
-          setSelectedAction(null)
-          setTimeout(() => {
-            setShowSuccessMessage(null)
-            setCurrentEmployeeId(null)
-            setCurrentEmployeeName(null)
-          }, 4000)
-          return
-        }
-
-        // 2. Check regular shift rules
-        if (todayShift) {
-          const shiftStart = new Date(`${todayShift.date}T${todayShift.start_time}`)
-          const shiftEnd = new Date(`${todayShift.date}T${todayShift.end_time}`)
-          if (todayShift.end_time < todayShift.start_time) shiftEnd.setDate(shiftEnd.getDate() + 1)
-          
-          const now = new Date()
-          const earlyMins = Math.round((shiftStart.getTime() - now.getTime()) / 60000)
-          
-          // Rule 1: Too early - show interactive prompt
-          if (earlyMins > 45) {
-            const earliestTime = new Date(shiftStart.getTime() - 45 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-            setOTPromptMessage(`Clock-in too early. ${employeeName} can only clock in from ${earliestTime} (45 mins before shift). Do you want to request overtime instead?`)
-            setPendingOTData({ employeeId, employeeName, today })
-            setShowOTPrompt(true)
-            setSelectedAction(null)
-            return
-          }
-
-          // Rule 3: Post-shift - auto-request OT
-          if (now > shiftEnd) {
-             const attendanceLog = await addAttendanceLog({
+          if (scheduledOT) {
+            // Pre-approved! Just clock in
+            await addAttendanceLog({
               employee_id: employeeId,
               employee_name: employeeName,
-              type: selectedAction,
+              type: actionType as any,
               method: 'nfc',
               is_ops_device: true,
               device_info: getDeviceFingerprint()
             })
             
+            setShowSuccessMessage(`${employeeName} clocked in for SCHEDULED overtime.`)
+            setSelectedAction(null)
+            setTimeout(() => {
+              setShowSuccessMessage(null)
+              setCurrentEmployeeId(null)
+              setCurrentEmployeeName(null)
+            }, 4000)
+            return
+          }
+
+          // 2. Check regular shift rules
+          if (todayShift) {
+            const shiftStart = new Date(`${todayShift.date}T${todayShift.start_time}`)
+            const shiftEnd = new Date(`${todayShift.date}T${todayShift.end_time}`)
+            if (todayShift.end_time < todayShift.start_time) shiftEnd.setDate(shiftEnd.getDate() + 1)
+            
+            const now = new Date()
+            const earlyMins = Math.round((shiftStart.getTime() - now.getTime()) / 60000)
+            
+            // Rule 1: Too early - show interactive prompt
+            if (earlyMins > 45) {
+              const earliestTime = new Date(shiftStart.getTime() - 45 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+              setOTPromptMessage(`Clock-in too early. ${employeeName} can only clock in from ${earliestTime} (45 mins before shift). Do you want to request overtime instead?`)
+              setPendingOTData({ employeeId, employeeName, today })
+              setShowOTPrompt(true)
+              setSelectedAction(null)
+              return
+            }
+
+            // Rule 3: Post-shift - auto-request OT
+            if (now > shiftEnd) {
+              const attendanceLog = await addAttendanceLog({
+                employee_id: employeeId,
+                employee_name: employeeName,
+                type: actionType as any,
+                method: 'nfc',
+                is_ops_device: true,
+                device_info: getDeviceFingerprint()
+              })
+              
+              if (attendanceLog) {
+                await addOvertimeRequest({
+                  employee_id: employeeId,
+                  employee_name: employeeName,
+                  attendance_log_id: attendanceLog.id,
+                  request_date: today,
+                  clock_in_time: new Date().toISOString(),
+                  status: "pending"
+                })
+              }
+              
+              setShowWarningMessage(`${employeeName} clocked in (Post-shift work — Overtime request submitted automatically)`)
+              setSelectedAction(null)
+              setTimeout(() => {
+                setShowWarningMessage(null)
+                setCurrentEmployeeId(null)
+                setCurrentEmployeeName(null)
+              }, 4000)
+              return
+            }
+          }
+
+          // 3. Normal Clock-in Flow (Regular or No-shift OT)
+          const attendanceLog = await addAttendanceLog({
+            employee_id: employeeId,
+            employee_name: employeeName,
+            type: actionType as any,
+            method: 'nfc',
+            is_ops_device: true,
+            device_info: getDeviceFingerprint()
+          })
+          
+          const duration = await getDailyWorkDuration(employeeId, today)
+          
+          if (hasShift) {
+            if (duration.isLate) {
+              setShowWarningMessage(`${employeeName} clocked in successfully — LATE (> 15 mins)`)
+            } else {
+              setShowSuccessMessage(`${employeeName} clocked in successfully — Punctual`)
+            }
+          } else {
+            // No shift - create overtime request
             if (attendanceLog) {
               await addOvertimeRequest({
                 employee_id: employeeId,
@@ -186,97 +245,65 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
               })
             }
             
-            setShowWarningMessage(`${employeeName} clocked in (Post-shift work — Overtime request submitted automatically)`)
-            setSelectedAction(null)
-            setTimeout(() => {
-              setShowWarningMessage(null)
-              setCurrentEmployeeId(null)
-              setCurrentEmployeeName(null)
-            }, 4000)
-            return
-          }
-        }
-
-        // 3. Normal Clock-in Flow (Regular or No-shift OT)
-        const attendanceLog = await addAttendanceLog({
-          employee_id: employeeId,
-          employee_name: employeeName,
-          type: selectedAction,
-          method: 'nfc',
-          is_ops_device: true,
-          device_info: getDeviceFingerprint()
-        })
-        
-        const duration = await getDailyWorkDuration(employeeId, today)
-        
-        if (hasShift) {
-          if (duration.isLate) {
-            setShowWarningMessage(`${employeeName} clocked in successfully — LATE (> 15 mins)`)
-          } else {
-            setShowSuccessMessage(`${employeeName} clocked in successfully — Punctual`)
+            setShowWarningMessage(`${employeeName} clocked in (No shift scheduled — Overtime request submitted for approval)`)
           }
         } else {
-          // No shift - create overtime request
-          if (attendanceLog) {
-            await addOvertimeRequest({
-              employee_id: employeeId,
-              employee_name: employeeName,
-              attendance_log_id: attendanceLog.id,
-              request_date: today,
-              clock_in_time: new Date().toISOString(),
-              status: "pending"
-            })
-          }
+          // Clock-out - always allowed
+          await addAttendanceLog({
+            employee_id: employeeId,
+            employee_name: employeeName,
+            type: actionType as any,
+            method: 'nfc',
+            is_ops_device: true,
+            device_info: getDeviceFingerprint()
+          })
           
-          setShowWarningMessage(`${employeeName} clocked in (No shift scheduled — Overtime request submitted for approval)`)
+          // Calculate regulated duration
+          const today = getLocalYYYYMMDD()
+          const duration = await getDailyWorkDuration(employeeId, today)
+          const regHours = Math.floor(duration.regularMinutes / 60)
+          const regMins = duration.regularMinutes % 60
+          const otHours = Math.floor(duration.overtimeMinutes / 60)
+          const otMins = duration.overtimeMinutes % 60
+          
+          if (duration.overtimeMinutes > 0) {
+            setShowWarningMessage(`${employeeName} clocked out — Regular: ${regHours}h ${regMins}m | OT: ${otHours}h ${otMins}m (Pending Approval)`)
+          } else {
+            setShowSuccessMessage(`${employeeName} clocked out — Shift Total: ${regHours}h ${regMins}m`)
+          }
         }
+        
+        setSelectedAction(null)
+        setTimeout(() => {
+          setShowSuccessMessage(null)
+          setShowWarningMessage(null)
+          setCurrentEmployeeId(null)
+          setCurrentEmployeeName(null)
+        }, 4000)
       } else {
-        // Clock-out - always allowed
-        await addAttendanceLog({
-          employee_id: employeeId,
-          employee_name: employeeName,
-          type: selectedAction,
-          method: 'nfc',
-          is_ops_device: true,
-          device_info: getDeviceFingerprint()
-        })
-        
-        // Calculate regulated duration
-        const duration = await getDailyWorkDuration(employeeId, today)
-        const regHours = Math.floor(duration.regularMinutes / 60)
-        const regMins = duration.regularMinutes % 60
-        const otHours = Math.floor(duration.overtimeMinutes / 60)
-        const otMins = duration.overtimeMinutes % 60
-        
-        if (duration.overtimeMinutes > 0) {
-          setShowWarningMessage(`${employeeName} clocked out — Regular: ${regHours}h ${regMins}m | OT: ${otHours}h ${otMins}m (Pending Approval)`)
-        } else {
-          setShowSuccessMessage(`${employeeName} clocked out — Shift Total: ${regHours}h ${regMins}m`)
-        }
+        // For stock actions, show stock modal
+        setPendingStockAction(actionType as "stock-in" | "stock-out" | "waste" | "opname")
+        setSelectedAction(null)
+        setShowStockModal(true)
       }
-      
-      setSelectedAction(null)
-      setTimeout(() => {
-        setShowSuccessMessage(null)
-        setShowWarningMessage(null)
-        setCurrentEmployeeId(null)
-        setCurrentEmployeeName(null)
-      }, 4000)
-    } else {
-      // For stock actions, show stock modal
-      setPendingStockAction(selectedAction as "stock-in" | "stock-out" | "waste" | "opname")
-      setSelectedAction(null)
-      setShowStockModal(true)
+    } catch (error) {
+      console.error("NFC Action Error:", error)
+      setShowErrorMessage("Action failed. Please try again.")
+      setTimeout(() => setShowErrorMessage(null), 3000)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  const handleStockActionComplete = async (data: { itemId: string; amount: number; notes?: string }) => {
+  const handleStockActionComplete = async (data: { itemId: string; amount: number; notes?: string; batchId?: string }) => {
     if (!currentEmployeeId || !currentEmployeeName || !pendingStockAction) return
 
     const item = inventory.find(i => i.id === data.itemId)
     if (!item) return
 
-    // Validate stock out doesn't exceed available stock
+    setIsSubmitting(true)
+    try {
+      // Validate stock out doesn't exceed available stock
     if ((pendingStockAction === "stock-out" || pendingStockAction === "waste") && data.amount > (item.current_stock ?? 0)) {
       setShowErrorMessage(`Cannot ${pendingStockAction === "stock-out" ? "take out" : "waste"} more than available stock (${item.current_stock ?? 0} ${item.unit})`)
       setTimeout(() => setShowErrorMessage(null), 3000)
@@ -291,20 +318,30 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
       "opname": "opname"
     }
 
-    // Add stock log
-    await addStockLog({
-      item_id: data.itemId,
-      item_name: item.name,
-      type: logTypeMap[pendingStockAction],
-      amount: data.amount,
-      employee_id: currentEmployeeId,
-      employee_name: currentEmployeeName,
-      notes: data.notes
-    })
-
-    // Refresh inventory
-    const updatedInventory = await getInventory()
-    setInventory(updatedInventory)
+    // Routing to specific specialized functions if batchId is provided
+    if (pendingStockAction === "stock-out" && data.batchId) {
+      // Calculate split size: use conversion_rate if available, otherwise default to 1 unit (in base units)
+      const splitSize = item.conversion_rate || 1;
+      
+      await import("@/lib/api/supabase-service").then(m => 
+        m.transferToFloor(data.batchId!, data.amount, currentEmployeeName, data.notes, splitSize)
+      );
+    } else if (pendingStockAction === "waste" && data.batchId) {
+      await import("@/lib/api/supabase-service").then(m => 
+        m.stockOutManual(data.batchId!, data.amount, data.notes || "Wasted via Ops", currentEmployeeName)
+      );
+    } else {
+      // Default to general stock log (which uses FIFO batches internally now)
+      await addStockLog({
+        item_id: data.itemId,
+        item_name: item.name,
+        type: logTypeMap[pendingStockAction],
+        amount: data.amount,
+        employee_id: currentEmployeeId,
+        employee_name: currentEmployeeName,
+        notes: data.notes
+      })
+    }
 
     const actionLabels: Record<string, string> = {
       "stock-in": "Stock received recorded",
@@ -313,22 +350,38 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
       "opname": "Stock count submitted",
     }
 
-    setShowSuccessMessage(actionLabels[pendingStockAction] || "Action completed")
+    // Close modal and show success immediately for better UX
     setShowStockModal(false)
+    setShowSuccessMessage(actionLabels[pendingStockAction] || "Action completed")
+    
+    // Reset selections
     setPendingStockAction(null)
     setCurrentEmployeeId(null)
     setCurrentEmployeeName(null)
 
+    // Refresh inventory in background
+    const updatedInventory = await getInventory()
+    setInventory(updatedInventory)
+
     setTimeout(() => {
       setShowSuccessMessage(null)
     }, 3000)
+    } catch (error) {
+      console.error("Stock Action Error:", error)
+      setShowErrorMessage("Failed to record stock movement.")
+      setTimeout(() => setShowErrorMessage(null), 3000)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleApplyOvertime = async () => {
     if (!pendingOTData) return
     const { employeeId, employeeName, today } = pendingOTData
     
-    const attendanceLog = await addAttendanceLog({
+    setIsSubmitting(true)
+    try {
+      const attendanceLog = await addAttendanceLog({
       employee_id: employeeId,
       employee_name: employeeName,
       type: "clock-in",
@@ -351,11 +404,17 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     setShowOTPrompt(false)
     setPendingOTData(null)
     setShowWarningMessage(`${employeeName} — Overtime request submitted for early clock-in`)
-    setTimeout(() => {
-      setShowWarningMessage(null)
-      setCurrentEmployeeId(null)
-      setCurrentEmployeeName(null)
-    }, 4000)
+      setTimeout(() => {
+        setShowWarningMessage(null)
+        setCurrentEmployeeId(null)
+        setCurrentEmployeeName(null)
+      }, 4000)
+    } catch (error) {
+      console.error("Overtime Error:", error)
+      setShowErrorMessage("Failed to submit overtime request.")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const getActionTitle = (action: ActionType): string => {
@@ -501,6 +560,7 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         onSuccess={handleNFCSuccess}
         action={`Confirm ${getActionTitle(selectedAction)}`}
         title={getActionTitle(selectedAction)}
+        isSubmitting={isSubmitting}
       />
 
       {/* Stock Action Modal */}
@@ -516,6 +576,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         actionType={pendingStockAction}
         title={getActionTitle(pendingStockAction)}
         inventory={inventory}
+        batches={batches}
+        isSubmitting={isSubmitting}
       />
     </div>
   )

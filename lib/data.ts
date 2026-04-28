@@ -128,7 +128,7 @@ export interface InventoryBatch {
   batchNumber: string
   supplier: string
   receivedDate: string
-  expiryDate: string
+  expiryDate: string | null
   initialQuantity: number
   currentQuantity: number
   unitCost: number
@@ -140,6 +140,7 @@ export interface InventoryBatch {
   updatedAt?: string // Made optional
   unit?: string // The unit name for display
   category?: string
+  location?: string
   
   // Database Aliases
   item_id?: string
@@ -149,7 +150,7 @@ export interface InventoryBatch {
   cost_per_unit?: number
   supplier_name?: string
   received_date?: string
-  expired_date?: string
+  expired_date?: string | null
   created_at?: string
 }
 
@@ -1126,16 +1127,21 @@ export function getExpiringBatches(daysThreshold: number = 7): InventoryBatch[] 
   
   return inventoryBatches
     .filter((batch) => {
-      if (batch.status !== "active") return false
+      if (batch.status !== "active" || !batch.expiryDate) return false
       const expiryDate = new Date(batch.expiryDate)
       return expiryDate <= thresholdDate
     })
-    .sort((a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime())
+    .sort((a, b) => {
+      if (!a.expiryDate) return 1
+      if (!b.expiryDate) return -1
+      return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime()
+    })
 }
 
 export function getExpiredBatches(): InventoryBatch[] {
   const today = new Date()
   return inventoryBatches.filter((batch) => {
+    if (!batch.expiryDate) return false
     const expiryDate = new Date(batch.expiryDate)
     return expiryDate < today && batch.status !== "depleted"
   })
@@ -1149,15 +1155,20 @@ export function getBatchMovements(batchId: string): BatchMovement[] {
 
 export function getBatchStatus(batch: InventoryBatch): BatchStatus {
   const today = new Date()
-  const expiryDate = new Date(batch.expiryDate)
   
   if (batch.currentQuantity <= 0) return "depleted"
-  if (expiryDate < today) return "expired"
   if (batch.status === "quarantined") return "quarantined"
+  
+  if (batch.expiryDate) {
+    const expiryDate = new Date(batch.expiryDate)
+    if (expiryDate < today) return "expired"
+  }
+  
   return "active"
 }
 
-export function getDaysUntilExpiry(expiryDate: string): number {
+export function getDaysUntilExpiry(expiryDate: string | null): number {
+  if (!expiryDate) return 9999 // Represent "forever"
   const today = new Date()
   const expiry = new Date(expiryDate)
   const diffTime = expiry.getTime() - today.getTime()

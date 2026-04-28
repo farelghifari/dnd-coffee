@@ -23,6 +23,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -50,7 +51,7 @@ import {
   Check,
   Layers
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { 
   BarChart, 
@@ -65,6 +66,7 @@ import {
   Pie,
   Cell
 } from 'recharts'
+import { useAuth } from "@/lib/auth-context"
 
 export default function ReportPage() {
   // Data state
@@ -75,12 +77,17 @@ export default function ReportPage() {
   const [batches, setBatches] = useState<any[]>([])
   const [recipes, setRecipes] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const { isSuperAdmin, user } = useAuth()
+  
+  // Permission check: Super Admin & Admin = full access
+  const canEdit = isSuperAdmin() || user?.role === 'admin'
   const [error, setError] = useState("")
   
   // Daily Sales Input state (bulk sell)
   const [bulkSaleItems, setBulkSaleItems] = useState<BulkSaleItem[]>([{ menu_id: "", quantity: 0 }])
   const [selectedRows, setSelectedRows] = useState<number[]>([])
   const [bundlePrice, setBundlePrice] = useState<string>("")
+  const [bulkSaleDate, setBulkSaleDate] = useState(getLocalYYYYMMDD())
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const fetchData = async () => {
@@ -144,6 +151,13 @@ export default function ReportPage() {
   const topSellingMenu = salesReport.length > 0 
     ? salesReport.reduce((top, curr) => curr.total_sold > top.total_sold ? curr : top)
     : null
+
+  const revenueDistribution = useMemo(() => {
+    return salesReport
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5)
+      .map(s => ({ name: s.menu_name, value: s.revenue }))
+  }, [salesReport])
 
   // Bulk Sale handlers
   const addBulkSaleRow = () => {
@@ -221,7 +235,7 @@ export default function ReportPage() {
     setIsSubmitting(true)
     setError("")
     
-    const result = await bulkSellMenu(validItems)
+    const result = await bulkSellMenu(validItems, bulkSaleDate)
     
     if (!result) {
       setError("Failed to process sales. Please check stock availability.")
@@ -232,7 +246,9 @@ export default function ReportPage() {
     // Success - reset form
     setBulkSaleItems([{ menu_id: "", quantity: 0 }])
     setIsSubmitting(false)
-    // No fetchData() - realtime subscription will update UI
+    
+    // Auto-refresh the page data so changes reflect immediately
+    fetchData()
   }
 
   // Calculate estimated total for bulk sale
@@ -245,20 +261,89 @@ export default function ReportPage() {
   }, 0)
 
   // Calculate Inventory Consumption based on sales + recipes
+  // Calculate consumption directly from TODAY'S SALES and RECIPES.
+  // This ensures consumption reflects actual usage today, regardless of batch boundaries.
   const inventoryConsumption = useMemo(() => {
     const consumption: Record<string, number> = {}
     
-    salesReport.forEach(report => {
-      // Find recipes for this menu item
-      const itemRecipes = recipes.filter(r => r.menu_item_id === report.menu_id)
-      itemRecipes.forEach(recipe => {
-        const totalUsed = report.total_sold * recipe.quantity
-        consumption[recipe.inventory_item_id] = (consumption[recipe.inventory_item_id] || 0) + totalUsed
-      })
-    })
+    // Find today's logs from the grouped logs
+    const today = getLocalYYYYMMDD()
+    const todayGroup = salesLogsGrouped.find(g => g.date === today)
+    const allDates = salesLogsGrouped.map(g => g.date)
     
+    console.log("[DEBUG CONSUMPTION V3]", {
+      today,
+      allDates,
+      foundTodayGroup: !!todayGroup,
+      todaySalesCount: todayGroup?.logs?.length || 0,
+      menuItemsCount: menuItems.length
+    })
+
+    if (todayGroup) {
+      // Aggregate today's sales by menu_id
+      const todaySales: Record<string, number> = {}
+      todayGroup.logs.forEach(log => {
+        todaySales[log.menu_id] = (todaySales[log.menu_id] || 0) + log.quantity
+      })
+
+      console.log("[DEBUG CONSUMPTION V3] todaySales:", todaySales)
+
+      // Calculate consumption based on recipes
+      Object.entries(todaySales).forEach(([menuId, totalSold]) => {
+        const menu = menuItems.find(m => m.id === menuId)
+        
+        console.log(`[DEBUG CONSUMPTION V3] menu ${menuId} (${menu?.name}):`, {
+          hasRecipe: !!menu?.recipe,
+          ingredientsCount: menu?.recipe?.ingredients?.length || 0
+        })
+
+        if (menu?.recipe?.ingredients) {
+          menu.recipe.ingredients.forEach((ing: any) => {
+            const totalUsed = totalSold * ing.amount
+            consumption[ing.item_id] = (consumption[ing.item_id] || 0) + totalUsed
+          })
+        }
+      })
+    }
+    
+    console.log("[DEBUG CONSUMPTION V3] final consumption:", consumption)
     return consumption
-  }, [salesReport, recipes])
+  }, [salesLogsGrouped, menuItems])
+
+  // Validation: Check if all ingredients for selected bulk items are available/opened on floor
+  const missingIngredients = useMemo(() => {
+    // Only validate ingredients if we are recording for TODAY
+    const isToday = bulkSaleDate === getLocalYYYYMMDD();
+    if (!isToday) return [];
+
+    const missing: { menuName: string; itemName: string }[] = [];
+    const validItems = bulkSaleItems.filter(item => item.menu_id && item.quantity > 0);
+    
+    validItems.forEach(saleItem => {
+      const menu = menuItems.find(m => m.id === saleItem.menu_id);
+      if (!menu) return;
+
+      const menuRecipes = recipes.filter(r => r.menu_item_id === saleItem.menu_id);
+      menuRecipes.forEach(recipe => {
+        // Check if there is ANY opened/active batch for this ingredient on the FLOOR
+        const hasOpenedBatch = batches.some(b => 
+          (b.item_id === recipe.inventory_item_id || b.inventoryItemId === recipe.inventory_item_id) && 
+          b.is_opened && 
+          (b.remaining_quantity || b.currentQuantity || 0) > 0
+        );
+
+        if (!hasOpenedBatch) {
+          const invItem = inventory.find(i => i.id === recipe.inventory_item_id);
+          missing.push({
+            menuName: menu.name,
+            itemName: invItem?.name || "Unknown Ingredient"
+          });
+        }
+      });
+    });
+    
+    return missing;
+  }, [bulkSaleItems, recipes, batches, menuItems, inventory]);
 
   // Colors for PieChart
   const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#0088FE', '#00C49F', '#FFBB28', '#FF8042']
@@ -280,14 +365,47 @@ export default function ReportPage() {
 
       {/* Daily Sales Input Section */}
       <Card className="rounded-sm mb-8">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5" />
-            Daily Sales Input
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Record multiple menu sales at once. Select menus and enter quantities.
-          </p>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5" />
+              Daily Sales Input
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Record multiple menu sales at once. Select menus and enter quantities.
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <label 
+              className="flex items-center gap-2 bg-muted/50 p-1.5 rounded-sm border shadow-sm cursor-pointer hover:bg-muted/80 transition-colors"
+              onClick={(e) => {
+                const input = e.currentTarget.querySelector('input');
+                if (input && 'showPicker' in input) {
+                  try {
+                    input.showPicker();
+                  } catch (err) {
+                    // Fallback for older browsers
+                    input.focus();
+                  }
+                }
+              }}
+            >
+              <CalendarDays className="w-4 h-4 text-muted-foreground ml-1" />
+              <Input 
+                type="date" 
+                value={bulkSaleDate} 
+                max={getLocalYYYYMMDD()}
+                onChange={(e) => setBulkSaleDate(e.target.value)}
+                className="h-7 w-32 border-none bg-transparent text-xs p-0 focus-visible:ring-0 font-bold cursor-pointer"
+                onClick={(e) => e.stopPropagation()} // Prevent double trigger
+              />
+            </label>
+            {bulkSaleDate !== getLocalYYYYMMDD() && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200 text-[10px] uppercase font-bold animate-pulse">
+                Historical Entry (No Inventory Deduction)
+              </Badge>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {error && (
@@ -312,12 +430,12 @@ export default function ReportPage() {
                 )}>
                   <div 
                     className={cn(
-                      "w-6 h-6 rounded-sm border flex items-center justify-center cursor-pointer transition-colors",
-                      isSelectedForBundle ? "bg-primary border-primary text-white" : "border-border hover:border-primary/50"
+                      "w-10 h-10 -ml-1 rounded-sm border flex items-center justify-center cursor-pointer transition-all active:scale-90",
+                      isSelectedForBundle ? "bg-primary border-primary text-white" : "border-border hover:border-primary/50 hover:bg-muted/50"
                     )}
                     onClick={() => toggleRowSelection(idx)}
                   >
-                    {isSelectedForBundle && <Check className="w-4 h-4" />}
+                    {isSelectedForBundle ? <Check className="w-5 h-5" /> : <div className="w-2 h-2 rounded-full bg-border" />}
                   </div>
 
                   <div className="flex-1 min-w-[200px]">
@@ -434,10 +552,22 @@ export default function ReportPage() {
           )}
           
           <div className="flex items-center justify-between">
-            <Button variant="outline" onClick={addBulkSaleRow} className="rounded-sm">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Menu
-            </Button>
+            <div className="flex flex-col gap-1">
+              <Button variant="outline" onClick={addBulkSaleRow} className="rounded-sm">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Menu
+              </Button>
+              {missingIngredients.length > 0 && (
+                <div className="flex flex-col gap-1 mt-2">
+                  {Array.from(new Set(missingIngredients.map(m => m.itemName))).map((item, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[10px] font-bold text-destructive uppercase animate-pulse">
+                      <Package className="w-3 h-3" />
+                      Must Open Batch: {item}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             
             <div className="flex items-center gap-4">
               {bulkSaleTotal > 0 && (
@@ -448,10 +578,13 @@ export default function ReportPage() {
               )}
               <Button 
                 onClick={handleBulkSell} 
-                disabled={isSubmitting || bulkSaleItems.every(i => !i.menu_id || !i.quantity)}
-                className="rounded-sm"
+                disabled={isSubmitting || bulkSaleItems.every(i => !i.menu_id || !i.quantity) || missingIngredients.length > 0}
+                className={cn(
+                  "rounded-sm",
+                  missingIngredients.length > 0 ? "bg-muted text-muted-foreground cursor-not-allowed" : ""
+                )}
               >
-                {isSubmitting ? "Processing..." : "Submit Sales"}
+                {isSubmitting ? "Processing..." : missingIngredients.length > 0 ? "Stock Missing" : "Submit Sales"}
               </Button>
             </div>
           </div>
@@ -514,51 +647,44 @@ export default function ReportPage() {
               Sales Volume by Menu
             </CardTitle>
           </CardHeader>
-          <CardContent className="h-[300px]">
+          <CardContent className="h-[350px]">
             {salesReport.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={salesReport.slice(0, 8)}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-                  <XAxis 
+                <BarChart 
+                  data={salesReport.sort((a,b) => b.total_sold - a.total_sold).slice(0, 8)} 
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} vertical={true} opacity={0.3} />
+                  <XAxis type="number" hide />
+                  <YAxis 
                     dataKey="menu_name" 
+                    type="category" 
                     fontSize={10} 
                     tickLine={false} 
                     axisLine={false}
-                    interval={0}
-                    tick={{ fill: 'currentColor', opacity: 0.6 }}
+                    width={120}
                   />
-                  <YAxis fontSize={10} tickLine={false} axisLine={false} opacity={0.4} />
                   <Tooltip 
-                    cursor={{ fill: 'hsl(var(--muted)/0.3)' }}
-                    contentStyle={{ 
-                      backgroundColor: 'hsl(var(--background))', 
-                      borderRadius: '4px', 
-                      border: '1px solid hsl(var(--border))',
-                      fontSize: '12px'
-                    }}
+                    cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                    contentStyle={{ borderRadius: '4px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                   />
-                  <Bar 
-                    dataKey="total_sold" 
-                    fill="hsl(var(--primary))" 
-                    radius={[4, 4, 0, 0]} 
-                    barSize={32}
-                  />
+                  <Bar dataKey="total_sold" fill="#1a1a1a" radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground bg-muted/20 border border-dashed border-border rounded-sm">
                 <BarChart3 className="w-8 h-8 mb-2 opacity-20" />
                 <p className="text-sm font-medium">No sales data yet</p>
-                <p className="text-xs">Waiting for completed transactions</p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Revenue Share Chart */}
+        {/* Revenue Distribution Chart */}
         <Card className="rounded-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
               <PieIcon className="w-4 h-4 text-primary" />
               Revenue Distribution
             </CardTitle>
@@ -672,7 +798,11 @@ export default function ReportPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {inventory.map((item) => {
+                    {inventory
+                      .filter(item => 
+                        batches.some(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
+                      )
+                      .map((item) => {
                       // CALC: Get only "OPENED" batches for this item (Active Bar Stock)
                       const itemOpenedBatches = batches.filter(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
                       const activeBarStockBase = itemOpenedBatches.reduce((sum, b) => sum + (b.remaining_quantity || b.currentQuantity || 0), 0)

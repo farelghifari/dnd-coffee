@@ -14,7 +14,6 @@ import {
   type DisplayUnit
 } from "@/lib/api/supabase-service"
 import { 
-  inventoryBatches, 
   type InventoryBatch, 
   getDaysUntilExpiry 
 } from "@/lib/data"
@@ -27,27 +26,31 @@ interface StockActionModalProps {
   actionType: "stock-in" | "stock-out" | "waste" | "opname" | null
   title: string
   inventory: InventoryItem[]
+  batches: InventoryBatch[]
+  isSubmitting?: boolean
 }
 
-export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title, inventory }: StockActionModalProps) {
+export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title, inventory, batches, isSubmitting = false }: StockActionModalProps) {
   const [selectedItem, setSelectedItem] = useState<string | null>(null)
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null)
   const [amount, setAmount] = useState(0)
   const [notes, setNotes] = useState("")
   const [step, setStep] = useState<"select" | "batch" | "amount">("select")
   const [currentUnit, setCurrentUnit] = useState<DisplayUnit>("ml")
+  const [showWarning, setShowWarning] = useState(false)
+  const [activeFloorBatch, setActiveFloorBatch] = useState<InventoryBatch | null>(null)
 
   // Get batches for selected item (FIFO - oldest first)
   const availableBatches = useMemo(() => {
     if (!selectedItem) return []
-    return inventoryBatches
+    return batches
       .filter(batch => 
-        batch.inventoryItemId === selectedItem && 
-        batch.status === "active" && 
-        batch.currentQuantity > 0
+        (batch.inventoryItemId === selectedItem || batch.item_id === selectedItem) && 
+        (batch.status === "active" || (batch.remaining_quantity || 0) > 0) &&
+        (batch.location === 'warehouse')
       )
-      .sort((a, b) => new Date(a.receivedDate).getTime() - new Date(b.receivedDate).getTime())
-  }, [selectedItem])
+      .sort((a, b) => new Date(a.receivedDate || a.received_date || '').getTime() - new Date(b.receivedDate || b.received_date || '').getTime())
+  }, [selectedItem, batches])
 
   const selectedInventoryItem = useMemo(() => {
     return inventory.find(i => i.id === selectedItem)
@@ -63,8 +66,8 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
   // Check if item has batches
   const hasBatches = availableBatches.length > 0
 
-  // For stock-out and waste, we need to select a batch if available
-  const requiresBatchSelection = (actionType === "stock-out" || actionType === "waste") && hasBatches
+  // Simplified for Ops: No manual batch selection to keep it fast
+  const requiresBatchSelection = false
 
   const handleItemSelect = (itemId: string) => {
     setSelectedItem(itemId)
@@ -73,17 +76,13 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     setNotes("")
     
     // Check if this item has batches and needs batch selection
-    const itemBatches = inventoryBatches.filter(batch => 
-      batch.inventoryItemId === itemId && 
-      batch.status === "active" && 
-      batch.currentQuantity > 0
+    const itemBatches = batches.filter(batch => 
+      (batch.inventoryItemId === itemId || batch.item_id === itemId) && 
+      (batch.status === "active" || (batch.remaining_quantity || 0) > 0) &&
+      (batch.location === 'warehouse')
     )
     
-    if ((actionType === "stock-out" || actionType === "waste") && itemBatches.length > 0) {
-      setStep("batch")
-    } else {
-      setStep("amount")
-    }
+    setStep("amount")
   }
 
   const handleBatchSelect = (batchId: string) => {
@@ -92,12 +91,33 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     setAmount(0)
   }
 
+  const handleConfirmSubmit = () => {
+    if (selectedItem && amount > 0) {
+      // If it's a regular stock-out (transfer to bar), check for existing floor stock
+      if (actionType === "stock-out" && !notes) {
+        const floorBatch = batches.find(b => 
+          (b.inventoryItemId === selectedItem || b.item_id === selectedItem) && 
+          b.location === 'floor' && 
+          (b.currentQuantity > 0 || (b.remaining_quantity || 0) > 0)
+        )
+        
+        if (floorBatch) {
+          setActiveFloorBatch(floorBatch)
+          setShowWarning(true)
+          return
+        }
+      }
+      
+      handleSubmit()
+    }
+  }
+
   const handleSubmit = () => {
     if (selectedItem && amount > 0) {
       const selectedInventoryItem = inventory.find((i) => i.id === selectedItem)
       
       // Convert the entered amount from the selected display unit back to base unit for DB
-      const dbAmount = selectedInventoryItem ? toBaseUnit(amount, currentUnit) : amount
+      const dbAmount = selectedInventoryItem ? toBaseUnit(amount, currentUnit, selectedInventoryItem) : amount
       
       onSubmit({ 
         itemId: selectedItem, 
@@ -137,7 +157,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
   }
 
 
-  const selectedBatchItem = selectedBatch ? inventoryBatches.find(b => b.id === selectedBatch) : null
+  const selectedBatchItem = selectedBatch ? batches.find(b => b.id === selectedBatch) : null
   
   // Calculate display parameters if item selected
   const displayUnit = selectedInventoryItem ? getDisplayUnit(selectedInventoryItem) : 'pcs'
@@ -150,7 +170,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     : displayCurrentStock
   
   // Check if amount exceeds available stock for out/waste
-  const baseAmount = toBaseUnit(amount, currentUnit)
+  const baseAmount = selectedInventoryItem ? toBaseUnit(amount, currentUnit, selectedInventoryItem) : amount
   const baseMaxAvailable = selectedBatchItem 
     ? selectedBatchItem.currentQuantity 
     : (selectedInventoryItem?.current_stock || 0)
@@ -190,10 +210,10 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
             <p className="text-sm text-muted-foreground mb-4">Select an item</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto">
               {inventory.map((item) => {
-                const itemBatches = inventoryBatches.filter(b => 
-                  b.inventoryItemId === item.id && 
-                  b.status === "active" && 
-                  b.currentQuantity > 0
+                const itemBatches = batches.filter(b => 
+                  (b.inventoryItemId === item.id || b.item_id === item.id) && 
+                  (b.status === "active" || (b.remaining_quantity || 0) > 0) &&
+                  (b.location === 'warehouse')
                 )
                 const hasBatches = itemBatches.length > 0
                 
@@ -228,7 +248,8 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
             
             <div className="space-y-2">
               {availableBatches.map((batch, index) => {
-                const daysUntilExpiry = getDaysUntilExpiry(batch.expiryDate)
+                const expiryDateStr = batch.expiryDate || batch.expired_date || null
+                const daysUntilExpiry = expiryDateStr ? getDaysUntilExpiry(expiryDateStr) : 999
                 const isExpiringSoon = daysUntilExpiry <= 7 && daysUntilExpiry > 0
                 const isExpired = daysUntilExpiry <= 0
                 
@@ -263,7 +284,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                           isExpired ? "text-red-600" : isExpiringSoon ? "text-amber-600" : "text-muted-foreground"
                         )}>
                           <Clock className="w-3 h-3 inline mr-1" />
-                          {isExpired ? "Expired" : `Exp: ${formatDate(batch.expiryDate)}`}
+                          {isExpired ? "Expired" : `Exp: ${expiryDateStr ? formatDate(expiryDateStr) : '-'}`}
                           {isExpiringSoon && ` (${daysUntilExpiry}d)`}
                         </span>
                       </div>
@@ -336,14 +357,21 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                   <div className="flex items-center gap-1 mt-2">
                     {(() => {
                       const allowedUnits = selectedInventoryItem ? getAllowedUnitsForItem(selectedInventoryItem.unit || "pcs") : ["pcs"] as DisplayUnit[]
+                      const dUnit = selectedInventoryItem ? getDisplayUnit(selectedInventoryItem) : null
                       
-                      return allowedUnits.map((u) => (
+                      // Ensure the display unit is always in the list
+                      const finalUnits = [...allowedUnits]
+                      if (dUnit && !finalUnits.includes(dUnit)) {
+                        finalUnits.push(dUnit)
+                      }
+                      
+                      return finalUnits.map((u) => (
                         <button
                           key={u}
                           onClick={() => {
                             // Convert current amount to the new unit so the "value" stays physically the same
-                            const baseQty = toBaseUnit(amount, currentUnit)
-                            const convertedQty = fromBaseUnit(baseQty, u as DisplayUnit)
+                            const baseQty = toBaseUnit(amount, currentUnit, selectedInventoryItem || undefined)
+                            const convertedQty = fromBaseUnit(baseQty, u as DisplayUnit, selectedInventoryItem || undefined)
                             setAmount(parseFloat(convertedQty.toFixed(4)))
                             setCurrentUnit(u as DisplayUnit)
                           }}
@@ -421,18 +449,71 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
       {step === "amount" && (
         <div className="p-4 border-t border-border">
           <button
-            onClick={handleSubmit}
-            disabled={amount === 0 || exceedsStock}
+            onClick={handleConfirmSubmit}
+            disabled={amount === 0 || exceedsStock || isSubmitting}
             className={cn(
               "w-full py-4 rounded-sm text-lg font-medium flex items-center justify-center gap-2 transition-colors",
-              amount > 0 && !exceedsStock
+              amount > 0 && !exceedsStock && !isSubmitting
                 ? "bg-foreground text-background hover:bg-foreground/90"
                 : "bg-muted text-muted-foreground cursor-not-allowed"
             )}
           >
             <Check className="w-5 h-5" />
-            Confirm {title}
+            {isSubmitting ? "Recording..." : `Confirm ${title}`}
           </button>
+        </div>
+      )}
+
+      {/* Existing Stock Warning Modal */}
+      {showWarning && (
+        <div className="fixed inset-0 z-[100] bg-background flex flex-col p-6 items-center justify-center text-center animate-in fade-in duration-200">
+          <div className="max-w-sm w-full space-y-6">
+            <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
+              <AlertTriangle className="w-10 h-10" />
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="text-2xl font-bold">Existing Stock Detected</h3>
+              <p className="text-muted-foreground">
+                There is still an opened batch of <span className="font-bold text-foreground">{selectedInventoryItem?.name}</span> at the Bar.
+              </p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-100 p-4 rounded-sm space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-amber-700">Opened Batch:</span>
+                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.batchNumber || activeFloorBatch?.batch_number}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-amber-700">Remaining Qty:</span>
+                <span className="font-mono font-bold text-amber-900">
+                  {selectedInventoryItem ? getDisplayStock(activeFloorBatch?.currentQuantity || activeFloorBatch?.remaining_quantity || 0, selectedInventoryItem) : 0} {displayUnit}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground italic">
+              Note: Proceeding will auto-waste the old batch if it has been opened for more than 5 minutes.
+            </p>
+
+            <div className="grid grid-cols-1 gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setShowWarning(false);
+                  handleSubmit();
+                }}
+                className="w-full py-4 bg-foreground text-background rounded-sm font-medium text-lg active:scale-95 transition-transform"
+              >
+                Yes, Open New Batch
+              </button>
+              <button
+                onClick={() => setShowWarning(false)}
+                className="w-full py-4 bg-muted text-foreground rounded-sm font-medium text-lg active:scale-95 transition-transform"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -46,8 +46,10 @@ import {
 } from "@/components/ui/select"
 import { UserPlus, UserMinus, HardDrive, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
+import { useAuth } from "@/lib/auth-context"
 
 export default function AttendanceReportPage() {
+  const { isSuperAdmin } = useAuth()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [reportData, setReportData] = useState<any[]>([])
   const [shifts, setShifts] = useState<ShiftAssignment[]>([])
@@ -258,22 +260,24 @@ export default function AttendanceReportPage() {
           <p className="text-muted-foreground">Monitor performance and calculate work hours for salary evaluations</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            className="rounded-sm gap-2 border-primary/20 text-primary hover:bg-primary/5"
-            onClick={() => {
-              setManualData({
-                employeeId: "",
-                type: "clock-in",
-                date: format(new Date(), "yyyy-MM-dd"),
-                time: format(new Date(), "HH:mm")
-              })
-              setManualModalOpen(true)
-            }}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            Manual Action
-          </Button>
+          {isSuperAdmin() && (
+            <Button 
+              variant="outline" 
+              className="rounded-sm gap-2 border-primary/20 text-primary hover:bg-primary/5"
+              onClick={() => {
+                setManualData({
+                  employeeId: "",
+                  type: "clock-in",
+                  date: format(new Date(), "yyyy-MM-dd"),
+                  time: format(new Date(), "HH:mm")
+                })
+                setManualModalOpen(true)
+              }}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Manual Action
+            </Button>
+          )}
           <Button variant="outline" className="rounded-sm gap-2">
             <Download className="w-4 h-4" />
             Export CSV
@@ -593,21 +597,23 @@ export default function AttendanceReportPage() {
                             <span className="font-bold text-destructive">Did not clock in</span>
                             <div className="flex items-center gap-2">
                               <span className="text-[10px] text-muted-foreground">Subject to penalty/deduction</span>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="h-5 text-[10px] px-2 py-0 border-primary/20 text-primary hover:bg-primary/10"
-                                onClick={() => {
-                                  setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
-                                  setResolveTimes({ 
-                                    clockIn: row.shift?.start_time?.substring(0,5) || "08:00", 
-                                    clockOut: row.shift?.end_time?.substring(0,5) || "17:00" 
-                                  })
-                                  setResolveModalOpen(true)
-                                }}
-                              >
-                                Resolve
-                              </Button>
+                              {isSuperAdmin() && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-5 text-[10px] px-2 py-0 border-primary/20 text-primary hover:bg-primary/10"
+                                  onClick={() => {
+                                    setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
+                                    setResolveTimes({ 
+                                      clockIn: row.shift?.start_time?.substring(0,5) || "08:00", 
+                                      clockOut: row.shift?.end_time?.substring(0,5) || "17:00" 
+                                    })
+                                    setResolveModalOpen(true)
+                                  }}
+                                >
+                                  Resolve
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -627,12 +633,14 @@ export default function AttendanceReportPage() {
                                    ) : (
                                      <div className="flex items-center gap-2">
                                        <span className="text-primary font-bold text-[10px] uppercase tracking-wider bg-primary/10 px-1 py-0.5 rounded-sm">Active</span>
-                                       <button 
-                                         onClick={() => triggerForceClockOut(row.employee_id, row.employee_name, row.date)}
-                                         className="text-[9px] font-bold text-destructive hover:underline flex items-center gap-1"
-                                       >
-                                         <UserMinus className="w-3 h-3" /> Force Out
-                                       </button>
+                                       {isSuperAdmin() && (
+                                         <button 
+                                           onClick={() => triggerForceClockOut(row.employee_id, row.employee_name, row.date)}
+                                           className="text-[9px] font-bold text-destructive hover:underline flex items-center gap-1"
+                                         >
+                                           <UserMinus className="w-3 h-3" /> Force Out
+                                         </button>
+                                       )}
                                      </div>
                                    )}
                                </span>

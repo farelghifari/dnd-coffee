@@ -37,6 +37,8 @@ import {
   updateBatch,
   getBatchesByItem,
   updateBatchesExpiryByItem,
+  updateBatchDetails,
+  transferToFloor,
   type InventoryItem,
   type InventoryBatch,
   type MenuItem,
@@ -98,25 +100,33 @@ import {
   Image as ImageIcon,
   Upload,
   ArrowRightLeft,
-  X
+  ArrowUpRight,
+  PackageSearch,
+  Warehouse,
+  X,
+  ClipboardList,
+  Check
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
+import { toast } from "sonner"
+import { format } from "date-fns"
 
 const DEFAULT_CATEGORIES = ["beans", "milk", "syrup", "cups", "food", "other"]
 const unitOptions: DisplayUnit[] = ["gram", "ml", "pcs", "kg", "liter"]
 const menuCategories = ["all", "coffee", "non-coffee", "food"] as const
 
 export default function InventoryPage() {
-  const { user, isSuperAdmin } = useAuth()
-  const canEdit = isSuperAdmin()
+  const { user, isAdmin } = useAuth()
+  const canEdit = isAdmin()
   const actorName = user?.name || user?.nickname || "System"
   
   const [activeTab, setActiveTab] = useState("raw-materials")
@@ -150,11 +160,29 @@ export default function InventoryPage() {
   const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false)
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false)
   const [isStockOutModalOpen, setIsStockOutModalOpen] = useState(false)
-   const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
-   const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
-   const [isAddOpexModalOpen, setIsAddOpexModalOpen] = useState(false)
-   const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
-   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
+  const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
+  const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
+  const [isStockOutWarningOpen, setIsStockOutWarningOpen] = useState(false)
+  const [activeFloorBatch, setActiveFloorBatch] = useState<InventoryBatch | null>(null)
+  const [isManageWarehouseModalOpen, setIsManageWarehouseModalOpen] = useState(false)
+  const [manageWarehouseItemId, setManageWarehouseItemId] = useState<string>("")
+  const [warehouseBatches, setWarehouseBatches] = useState<InventoryBatch[]>([])
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null)
+  const [batchEditForm, setBatchEditForm] = useState<{currentQuantity: number, unitCost: number, supplier: string, receivedDate: string, expiryDate: string}>({
+    currentQuantity: 0, unitCost: 0, supplier: '', receivedDate: '', expiryDate: ''
+  })
+  const [warehouseAction, setWarehouseAction] = useState<'in' | 'out' | null>(null)
+  const [whStockInQty, setWhStockInQty] = useState('')
+  const [whStockInCost, setWhStockInCost] = useState('')
+  const [whStockInSupplier, setWhStockInSupplier] = useState('')
+  const [whStockOutBatchId, setWhStockOutBatchId] = useState('')
+  const [whStockOutQty, setWhStockOutQty] = useState('')
+  const [whStockOutReason, setWhStockOutReason] = useState('')
+  const [selectedStockOutBatchId, setSelectedStockOutBatchId] = useState<string>('')
+  const [selectedStockOutBatchIds, setSelectedStockOutBatchIds] = useState<string[]>([])
+  const [stockOutBatches, setStockOutBatches] = useState<InventoryBatch[]>([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
   
   // Custom Delete Alert State
   const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'item' | 'menu' | null, id: string | null}>({ isOpen: false, type: null, id: null })
@@ -210,14 +238,6 @@ export default function InventoryPage() {
     packaging_cost: "0",
     ingredients: [] as MenuRecipeIngredient[]
   })
-
-  const [opexForm, setOpexForm] = useState({
-    month: new Date().toISOString().slice(0, 7), // YYYY-MM
-    category: "Salary",
-    amount: "",
-    notes: ""
-  })
-  const [opexFile, setOpexFile] = useState<File | null>(null)
 
   const [opnameForm, setOpnameForm] = useState({
     category: "all" as string,
@@ -378,6 +398,7 @@ export default function InventoryPage() {
         notes: formData.notes
       }, actorName)
       
+      toast.success("Item added successfully")
       setIsAddItemModalOpen(false)
       resetItemForm()
       fetchData()
@@ -421,6 +442,7 @@ export default function InventoryPage() {
         await updateBatchesExpiryByItem(formData.id, formData.expiryDate)
       }
       
+      toast.success("Item updated successfully")
       setIsEditItemModalOpen(false)
       resetItemForm()
       fetchData()
@@ -554,6 +576,7 @@ export default function InventoryPage() {
         notes: stockInForm.notes
       }, actorName)
       
+      toast.success("Stock added successfully")
       setIsAddStockModalOpen(false)
       setStockInForm({ 
         category: "all",
@@ -574,11 +597,32 @@ export default function InventoryPage() {
   }
 
   // Stock Out (Manual Waste/Damage)
-  const handleStockOutManual = async () => {
-    if (!stockOutForm.itemId || !stockOutForm.quantity) {
-      setError("Please select an item and enter a quantity.");
+  const handleStockOutAttempt = async () => {
+    if (!selectedStockOutBatchId || !stockOutForm.quantity) {
+      setError("Please select a batch and enter a quantity.");
       return;
     }
+
+    // Check if there's an active floor batch for this item
+    // Only check if it's a Transfer to Bar (no waste reason)
+    if (!stockOutForm.reason) {
+      const activeBatch = batches.find(b => 
+        (b.inventoryItemId === stockOutForm.itemId || b.id === stockOutForm.itemId) && 
+        b.location === 'floor' && 
+        b.currentQuantity > 0
+      );
+      
+      if (activeBatch) {
+        setActiveFloorBatch(activeBatch);
+        setIsStockOutWarningOpen(true);
+        return;
+      }
+    }
+
+    await handleStockOutManual();
+  }
+
+  const handleStockOutManual = async () => {
     
     setError(null);
     setIsLoading(true);
@@ -588,34 +632,43 @@ export default function InventoryPage() {
       const multiplier = item?.conversion_rate || getConversionRate(stockOutForm.displayUnit, item?.unit || 'pcs') || 1
       const rawQty = parseFloat(stockOutForm.quantity)
       const baseQty = rawQty * multiplier
-      
-      // UNIVERSAL SPLIT: If using a larger unit (multiplier > 1), split into multiple rows
-      // Example: 2 Liter -> 2 rows. 500 gram -> 1 row.
-      const batchCount = multiplier > 1 ? Math.max(1, Math.floor(rawQty)) : 1
 
-      console.log("Attempting universal multi-batch stock out:", { itemName: item?.name, qty: baseQty, count: batchCount });
+      let success = false;
 
-
-      const success = await stockOutManual(
-        stockOutForm.itemId,
-        baseQty,
-        stockOutForm.reason || 'manual',
-        actorName,
-        batchCount
-      )
+      if (!stockOutForm.reason) {
+        // No waste reason → Transfer to Bar (batch tracking / floor)
+        // Use the first selected batch as starting point, or the whole array
+        const splitSize = multiplier > 1 ? multiplier : undefined;
+        const targetIds = selectedStockOutBatchIds.length > 0 ? selectedStockOutBatchIds : [selectedStockOutBatchId];
+        success = await transferToFloor(targetIds, baseQty, actorName, undefined, splitSize, stockOutForm.itemId);
+      } else {
+        // Waste reason selected → Manual waste
+        const targetIds = selectedStockOutBatchIds.length > 0 ? selectedStockOutBatchIds : [selectedStockOutBatchId];
+        success = await stockOutManual(
+          targetIds,
+          baseQty,
+          stockOutForm.reason,
+          actorName,
+          stockOutForm.itemId
+        );
+      }
 
       if (!success) {
-        setError("Database rejected the stock-out. Running the SQL fix and refreshing the page may help.");
+        setError("Database rejected the operation. Please try again.");
         setIsLoading(false);
         return;
       }
       
+      toast.success(stockOutForm.reason ? "Waste recorded successfully" : "Transferred to bar successfully")
       setIsStockOutModalOpen(false)
       setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
-      await fetchData()
+      setSelectedStockOutBatchId('')
+      setSelectedStockOutBatchIds([])
+      setStockOutBatches([])
+      fetchData()
     } catch (err) {
       console.error("Stock out error:", err);
-      setError("Failed to remove stock: " + (err instanceof Error ? err.message : String(err)))
+      setError("Failed: " + (err instanceof Error ? err.message : String(err)))
     } finally {
       setIsLoading(false);
     }
@@ -722,10 +775,11 @@ export default function InventoryPage() {
         await saveMenuRecipes(savedMenuId, baseIngredients)
       }
       
+      toast.success(isEditMenuModalOpen ? "Menu updated" : "Menu created")
       setIsAddMenuModalOpen(false)
       setIsEditMenuModalOpen(false)
       resetMenuForm()
-      await fetchData()
+      fetchData()
     } catch (err) {
       console.error("Save menu error:", err)
       setError("Failed to save menu: " + (err instanceof Error ? err.message : String(err)))
@@ -769,30 +823,6 @@ export default function InventoryPage() {
   }
 
   // Monthly Opex / BOP Handling
-  const handleAddOpex = async () => {
-    if (!opexForm.amount) return
-    try {
-      let attachmentUrl = undefined
-      if (opexFile) {
-        attachmentUrl = await uploadOpexAttachment(opexFile) || undefined
-      }
-
-      await addMonthlyOpex({
-        month: opexForm.month,
-        category: opexForm.category,
-        amount: parseFloat(opexForm.amount),
-        notes: opexForm.notes,
-        attachment_url: attachmentUrl
-      })
-      
-      setIsAddOpexModalOpen(false)
-      setOpexForm({ ...opexForm, amount: "", notes: "" })
-      setOpexFile(null)
-      fetchData()
-    } catch (err) {
-      setError("Failed to add operational expense")
-    }
-  }
 
   // Stock Opname Handling
   const handleAddOpname = async () => {
@@ -806,9 +836,9 @@ export default function InventoryPage() {
       // Use stored conversion_rate if matches display_unit, otherwise use global converter
       const multiplier = (item.display_unit === opnameForm.displayUnit && item.conversion_rate) ? 
         item.conversion_rate : 
-        getConversionRate(opnameForm.displayUnit, item.unit);
+        getConversionRate(opnameForm.displayUnit, item.unit) || 1;
         
-      const actual = parseFloat(opnameForm.actualStock) * (multiplier || 1)
+      const actual = parseFloat(opnameForm.actualStock) * multiplier
       
       await addInventoryOpname({
         item_id: opnameForm.itemId,
@@ -819,6 +849,7 @@ export default function InventoryPage() {
         actor_name: actorName
       })
       
+      toast.success("Stock opname recorded successfully")
       setIsRecordOpnameModalOpen(false)
       setOpnameForm({ category: "all", itemId: "", actualStock: "", displayUnit: "pcs", theoreticalStock: 0, reason: "" })
       fetchData()
@@ -880,10 +911,6 @@ export default function InventoryPage() {
           <TabsTrigger value="menu-items" className="gap-2">
             <Coffee className="w-4 h-4" />
             Menu Items
-          </TabsTrigger>
-          <TabsTrigger value="overheads" className="gap-2">
-            <Calculator className="w-4 h-4" />
-            Overheads (BOP)
           </TabsTrigger>
           <TabsTrigger value="opname" className="gap-2">
             <ClipboardCheck className="w-4 h-4" />
@@ -1004,10 +1031,25 @@ export default function InventoryPage() {
                                 <DropdownMenuTrigger asChild>
                                   <button className="p-1 hover:bg-muted rounded-sm"><MoreVertical className="w-4 h-4" /></button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="rounded-sm">
-                                  <DropdownMenuItem onClick={() => openEditItemModal(item)}><Pencil className="w-4 h-4 mr-2" />Edit</DropdownMenuItem>
-                                  <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteItem(item.id)}><Trash2 className="w-4 h-4 mr-2" />Delete</DropdownMenuItem>
-                                </DropdownMenuContent>
+                                  <DropdownMenuContent align="end" className="rounded-sm">
+                                    <DropdownMenuItem onClick={() => {
+                                      setManageWarehouseItemId(item.id);
+                                      getBatchesByItem(item.id, 'warehouse').then(setWarehouseBatches);
+                                      setIsManageWarehouseModalOpen(true);
+                                    }}>
+                                      <Warehouse className="w-4 h-4 mr-2" />
+                                      Manage Warehouse
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem onClick={() => openEditItemModal(item)}>
+                                      <Pencil className="w-4 h-4 mr-2" />
+                                      Edit Item
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteItem(item.id)}>
+                                      <Trash2 className="w-4 h-4 mr-2" />
+                                      Delete Item
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
                               </DropdownMenu>
                             ) : <span>-</span>}
                           </td>
@@ -1164,53 +1206,7 @@ export default function InventoryPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="overheads">
-          <div className="flex justify-between items-center mb-6">
-            <Button className="rounded-sm" onClick={() => setIsAddOpexModalOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />Add Overhead
-            </Button>
-            <Card className="bg-secondary/20 border-none">
-              <CardContent className="p-4 flex items-center gap-4">
-                <Calculator className="w-5 h-5" />
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">Total Monthly BOP</p>
-                  <p className="text-xl font-mono font-bold">{formatPrice(monthlyOpex.reduce((sum, item) => sum + (item.amount || 0), 0))}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
 
-          <Card className="rounded-sm">
-            <CardHeader><CardTitle>Operational Expense Logs</CardTitle></CardHeader>
-            <CardContent>
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Date</th>
-                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Category</th>
-                    <th className="text-right py-3 px-4 text-sm text-muted-foreground">Amount</th>
-                    <th className="text-left py-3 px-4 text-sm text-muted-foreground">Notes/Receipt</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {monthlyOpex.map((opex) => (
-                    <tr key={opex.id} className="border-b border-border">
-                      <td className="py-4 px-4 text-xs">{new Date(opex.created_at).toLocaleDateString()}</td>
-                      <td className="py-4 px-4"><span className="px-2 py-1 bg-secondary rounded text-[10px] uppercase">{opex.category}</span></td>
-                      <td className="py-4 px-4 text-right font-mono">{formatPrice(opex.amount)}</td>
-                      <td className="py-4 px-4">
-                        <div className="flex flex-col gap-1">
-                          {opex.notes && <span className="text-xs">{opex.notes}</span>}
-                          {opex.attachment_url && <a href={opex.attachment_url} target="_blank" rel="noreferrer" className="text-[10px] text-primary hover:underline flex items-center gap-1"><ImageIcon className="w-3 h-3"/>View Receipt</a>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="opname">
           <div className="flex justify-between items-center mb-6">
@@ -1219,10 +1215,10 @@ export default function InventoryPage() {
             </Button>
           </div>
 
-          <Card className="rounded-sm">
+          <Card className="rounded-sm overflow-x-auto">
             <CardHeader><CardTitle className="flex items-center gap-2"><History className="w-5 h-5"/>History</CardTitle></CardHeader>
             <CardContent>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[700px]">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="text-left py-3 px-4 text-muted-foreground">Date</th>
@@ -1244,14 +1240,30 @@ export default function InventoryPage() {
                       
                       return (
                         <tr key={opname.id} className="border-b border-border">
-                          <td className="py-4 px-4 text-xs">{new Date(opname.created_at).toLocaleString()}</td>
+                          <td className="py-4 px-4 text-xs">
+                            {(() => {
+                              let normalized = opname.created_at;
+                              if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
+                              if (!normalized.includes('Z') && !normalized.includes('+')) normalized += 'Z';
+                              const date = new Date(normalized);
+                              return new Intl.DateTimeFormat('id-ID', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: false,
+                                timeZone: 'Asia/Jakarta'
+                              }).format(date).replace(/\./g, ':');
+                            })()}
+                          </td>
                           <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
                           <td className="py-4 px-4 text-right font-mono">{parseFloat(((opname.theoretical_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
                           <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(((opname.actual_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
                           <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
                             {opname.difference > 0 ? '+' : ''}{parseFloat(((opname.difference || 0) / multiplier).toFixed(4))} {dUnit}
                           </td>
-                          <td className="py-4 px-4 text-xs text-muted-foreground max-w-[150px] truncate" title={opname.reason || ""}>
+                          <td className="py-4 px-4 text-xs text-muted-foreground break-words" title={opname.reason || ""}>
                             {opname.reason || "-"}
                           </td>
                         </tr>
@@ -1394,7 +1406,8 @@ export default function InventoryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="current-stock">Current Stock</Label>
-                <Input id="current-stock" type="number" placeholder="0" value={formData.currentStock} onChange={(e) => setFormData(p => ({...p, currentStock: e.target.value}))} />
+                <Input id="current-stock" type="number" value={formData.currentStock} disabled className="bg-muted cursor-not-allowed" />
+                <p className="text-[10px] text-muted-foreground">Managed via Stock In / Stock Out</p>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
@@ -1465,7 +1478,7 @@ export default function InventoryPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={isEditItemModalOpen ? handleEditItem : handleAddItem}>{isEditItemModalOpen ? "Save" : "Add"}</Button>
+            <Button onClick={isEditItemModalOpen ? handleEditItem : handleAddItem} disabled={isLoading}>{isEditItemModalOpen ? "Save" : "Add"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1501,7 +1514,7 @@ export default function InventoryPage() {
                 <Label>Select Item</Label>
                 <Select value={stockInForm.itemId} onValueChange={(v) => {
                   const item = inventory.find(i => i.id === v);
-                  setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? getDefaultDisplayUnit(item.unit) : 'pcs' }));
+                  setStockInForm(p => ({ ...p, itemId: v, displayUnit: item ? (item.display_unit as DisplayUnit) || getDefaultDisplayUnit(item.unit) : 'pcs' }));
                 }}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
@@ -1518,6 +1531,16 @@ export default function InventoryPage() {
               <div className="space-y-2">
                 <Label>Quantity</Label>
                 <Input type="number" placeholder="0" value={stockInForm.quantity} onChange={(e) => setStockInForm(p => ({ ...p, quantity: e.target.value }))} />
+                {(() => {
+                  const item = inventory.find(i => i.id === stockInForm.itemId);
+                  const convRate = item?.conversion_rate || getConversionRate(stockInForm.displayUnit, item?.unit || 'pcs') || 1;
+                  const baseUnit = item?.unit || 'pcs';
+                  if (convRate > 1 && stockInForm.quantity) {
+                    const baseQty = parseFloat(stockInForm.quantity) * convRate;
+                    return <p className="text-[10px] text-muted-foreground">= {Math.round(baseQty).toLocaleString('id-ID')} {baseUnit} <span className="opacity-60">(1 {stockInForm.displayUnit} = {convRate} {baseUnit})</span></p>;
+                  }
+                  return null;
+                })()}
               </div>
               <div className="space-y-2">
                 <Label>Unit</Label>
@@ -1544,6 +1567,16 @@ export default function InventoryPage() {
                 <Input type="number" placeholder="0" value={stockInForm.unitCost} onChange={(e) => setStockInForm(p => ({ ...p, unitCost: e.target.value }))} />
                 <span className="text-[10px] text-muted-foreground whitespace-nowrap uppercase font-bold">per {stockInForm.displayUnit}</span>
               </div>
+              {(() => {
+                const item = inventory.find(i => i.id === stockInForm.itemId);
+                const convRate = item?.conversion_rate || getConversionRate(stockInForm.displayUnit, item?.unit || 'pcs') || 1;
+                const baseUnit = item?.unit || 'pcs';
+                if (convRate > 1 && stockInForm.unitCost) {
+                  const baseCost = parseFloat(stockInForm.unitCost) / convRate;
+                  return <p className="text-[10px] text-muted-foreground">= Rp {Math.round(baseCost).toLocaleString('id-ID')} /{baseUnit}</p>;
+                }
+                return null;
+              })()}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1580,7 +1613,11 @@ export default function InventoryPage() {
               </Label>
             </div>
           </div>
-          <DialogFooter><Button onClick={handleStockIn}>Stock In</Button></DialogFooter>
+          <DialogFooter>
+            <Button onClick={handleStockIn} disabled={isLoading || !stockInForm.itemId || !stockInForm.quantity}>
+              {isLoading ? "Processing..." : "Add Stock"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1623,6 +1660,8 @@ export default function InventoryPage() {
                 <Select value={stockOutForm.itemId} onValueChange={(v) => {
                   const item = inventory.find(i => i.id === v);
                   setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? (item.display_unit as DisplayUnit || getDefaultDisplayUnit(item.unit)) : 'pcs' }));
+                  setSelectedStockOutBatchId('');
+                  getBatchesByItem(v, 'warehouse').then(setStockOutBatches);
                 }}>
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
@@ -1638,7 +1677,10 @@ export default function InventoryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Quantity</Label>
-                <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => setStockOutForm(p => ({ ...p, quantity: e.target.value }))} />
+                <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => {
+                  setStockOutForm(p => ({ ...p, quantity: e.target.value }));
+                  setSelectedStockOutBatchIds([]);
+                }} />
               </div>
               <div className="space-y-2">
                 <Label>Unit</Label>
@@ -1659,41 +1701,95 @@ export default function InventoryPage() {
               </div>
             </div>
 
-            {stockOutForm.itemId && (
-              <div className="space-y-2">
-                <Label className="text-[10px] uppercase font-bold text-muted-foreground">FIFO Suggestions (Prioritize Opened)</Label>
-                <div className="space-y-1">
-                  {batches
-                    .filter(b => b.item_id === stockOutForm.itemId && (b.remaining_quantity ?? 0) > 0)
-                    .sort((a, b) => {
-                      // Sort by opened first, then by received date
-                      if (a.is_opened && !b.is_opened) return -1;
-                      if (!a.is_opened && b.is_opened) return 1;
-                      return new Date(a.received_date || 0).getTime() - new Date(b.received_date || 0).getTime();
-                    })
-                    .slice(0, 3)
-                    .map(b => (
-                      <div key={b.id} className={cn("p-2 text-[10px] border rounded-sm flex items-center justify-between", b.is_opened ? "bg-amber-50 border-amber-200" : "bg-muted/30 border-border")}>
-                        <div className="flex items-center gap-2">
-                          {b.is_opened && <PackageOpen className="w-3 h-3 text-amber-600" />}
-                          <span className="font-mono">{b.batch_number}</span>
-                          <span className="text-muted-foreground">({b.remaining_quantity} {inventory.find(i => i.id === b.item_id)?.unit})</span>
+            {stockOutForm.itemId && (() => {
+              const item = inventory.find(i => i.id === stockOutForm.itemId);
+              const convRate = item?.conversion_rate || 1;
+              const dUnit = (item?.display_unit || item?.unit || 'pcs') as string;
+              const baseUnit = (item?.unit || 'pcs') as string;
+              const activeBatches = stockOutBatches.filter(b => b.currentQuantity > 0);
+              return (
+                <div className="space-y-2">
+                  <Label>Select Warehouse Batches (Multi-select supported)</Label>
+                  <div className="border rounded-sm p-2 bg-muted/30 max-h-[150px] overflow-y-auto space-y-1">
+                    {activeBatches.map(b => {
+                      const dQty = convRate > 1 ? (b.currentQuantity / convRate) : b.currentQuantity;
+                      const rcvDate = b.receivedDate ? new Date(b.receivedDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+                      const isSelected = selectedStockOutBatchIds.includes(b.id) || selectedStockOutBatchId === b.id;
+                      
+                      return (
+                        <div key={b.id} className={cn(
+                          "flex items-center gap-2 p-1.5 rounded-sm transition-colors hover:bg-muted cursor-pointer",
+                          isSelected && "bg-blue-50 border-blue-100",
+                          (!isSelected && stockOutBatches.filter(id => selectedStockOutBatchIds.includes(id.id)).reduce((s,c) => s+c.currentQuantity, 0) >= (parseFloat(stockOutForm.quantity || '0') * convRate)) && "opacity-50 cursor-not-allowed grayscale-[0.5]"
+                        )} onClick={() => {
+                          const isAlreadySelected = selectedStockOutBatchIds.includes(b.id);
+                          const totalSelected = stockOutBatches
+                            .filter(id => selectedStockOutBatchIds.includes(id.id))
+                            .reduce((sum, curr) => sum + curr.currentQuantity, 0);
+                          const targetQtyBase = parseFloat(stockOutForm.quantity || '0') * convRate;
+
+                          if (isAlreadySelected) {
+                            setSelectedStockOutBatchIds(prev => prev.filter(id => id !== b.id));
+                          } else if (totalSelected < targetQtyBase) {
+                            setSelectedStockOutBatchIds(prev => [...prev, b.id]);
+                            setSelectedStockOutBatchId(b.id);
+                          }
+                        }}>
+                          <div className={cn(
+                            "w-4 h-4 rounded border flex items-center justify-center shrink-0",
+                            isSelected ? "bg-blue-600 border-blue-600 text-white" : 
+                            (stockOutBatches.filter(id => selectedStockOutBatchIds.includes(id.id)).reduce((s,c) => s+c.currentQuantity, 0) >= (parseFloat(stockOutForm.quantity || '0') * convRate) ? "bg-muted border-muted-foreground/30 opacity-50" : "border-input bg-background")
+                          )}>
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between text-[11px] font-medium">
+                              <span className="truncate">{b.batchNumber}</span>
+                              <span>{parseFloat(dQty.toFixed(2))} {dUnit}</span>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              Rec: {rcvDate} {b.is_opened ? '• Opened' : ''}
+                            </div>
+                          </div>
                         </div>
-                        {b.is_opened ? <span className="text-amber-600 font-bold">Opened</span> : <span className="text-muted-foreground">New</span>}
-                      </div>
-                    ))
-                  }
-                  {batches.filter(b => b.item_id === stockOutForm.itemId && (b.remaining_quantity ?? 0) > 0).length === 0 && (
-                    <p className="text-[10px] text-muted-foreground italic">No active batches for this item</p>
+                      );
+                    })}
+                  </div>
+                  <div className="flex justify-between items-center px-1">
+                    <p className="text-[10px] text-muted-foreground italic">
+                      {selectedStockOutBatchIds.length} batch(es) selected
+                    </p>
+                    {selectedStockOutBatchIds.length > 0 && (() => {
+                      const totalAvailableBase = stockOutBatches
+                        .filter(b => selectedStockOutBatchIds.includes(b.id))
+                        .reduce((sum, b) => sum + b.currentQuantity, 0);
+                      const targetBase = parseFloat(stockOutForm.quantity || '0') * convRate;
+                      const totalAvailableDisplay = totalAvailableBase / convRate;
+                      const targetDisplay = parseFloat(stockOutForm.quantity || '0');
+                      
+                      return (
+                        <div className="text-right">
+                          <p className="text-[10px] font-medium text-muted-foreground">
+                            Available in Selection: {parseFloat(totalAvailableDisplay.toFixed(2))} {dUnit}
+                          </p>
+                          <p className="text-[11px] font-bold text-blue-600">
+                            Will Deduct: {targetDisplay} {dUnit}
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  {convRate > 1 && (
+                    <p className="text-[10px] text-muted-foreground italic">1 {dUnit} = {convRate} {baseUnit}</p>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="space-y-2">
-              <Label>Waste Category / Reason</Label>
+              <Label>Waste Category / Reason <span className="text-[10px] text-muted-foreground">(leave empty to Transfer to Bar)</span></Label>
               <Select value={stockOutForm.reason} onValueChange={(v) => setStockOutForm(p => ({ ...p, reason: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select a reason" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="No waste - Transfer to Bar" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Spoiled/Expired">Spoiled / Expired</SelectItem>
                   <SelectItem value="Damaged">Damaged</SelectItem>
@@ -1703,9 +1799,73 @@ export default function InventoryPage() {
                   <SelectItem value="Other">Other</SelectItem>
                 </SelectContent>
               </Select>
+              {stockOutForm.reason && (
+                <button className="text-[10px] text-blue-600 hover:underline" onClick={() => setStockOutForm(p => ({ ...p, reason: '' }))}>Clear reason (switch to Transfer to Bar)</button>
+              )}
             </div>
           </div>
-          <DialogFooter><Button variant="destructive" onClick={handleStockOutManual}>Confirm removal</Button></DialogFooter>
+          <DialogFooter>
+            <Button 
+              variant={stockOutForm.reason ? 'destructive' : 'default'}
+              onClick={handleStockOutAttempt}
+              disabled={isLoading || (!selectedStockOutBatchId && selectedStockOutBatchIds.length === 0) || !stockOutForm.quantity}
+            >
+              {isLoading ? 'Processing...' : (stockOutForm.reason ? 'Confirm Waste' : 'Transfer to Bar')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Stock Out Confirmation Warning */}
+      <Dialog open={isStockOutWarningOpen} onOpenChange={setIsStockOutWarningOpen}>
+        <DialogContent className="sm:max-w-[400px] rounded-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="w-5 h-5" />
+              Existing Stock Detected
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-foreground font-medium">
+              There is still an opened batch of this item at the Bar.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4 space-y-3">
+            <div className="bg-amber-50 border border-amber-100 p-3 rounded-sm space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-amber-700">Opened Batch:</span>
+                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.batchNumber}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-amber-700">Remaining Quantity:</span>
+                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.currentQuantity} {activeFloorBatch?.unit || ''}</span>
+              </div>
+            </div>
+            
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              If you proceed with this Stock Out, the existing batch will be <span className="font-bold text-destructive">AUTO-WASTED</span> by the system (if it was opened more than 5 minutes ago). 
+              Are you sure you want to open a new batch?
+            </p>
+          </div>
+          
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsStockOutWarningOpen(false)}
+              className="rounded-sm"
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive"
+              onClick={() => {
+                setIsStockOutWarningOpen(false);
+                handleStockOutManual();
+              }}
+              className="rounded-sm"
+            >
+              Yes, Open New Batch
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1851,8 +2011,8 @@ export default function InventoryPage() {
             </div>
           </div>
           <DialogFooter className="pt-4 border-t border-border">
-            <Button onClick={handleSaveMenu} disabled={isSubmitting} className="w-full sm:w-auto">
-              {isSubmitting ? "Saving..." : "Save Menu Item"}
+            <Button className="rounded-sm w-full" onClick={handleSaveMenu} disabled={isLoading || !menuForm.name || !menuForm.category}>
+              {isLoading ? "Saving..." : (isEditMenuModalOpen ? "Update Menu Item" : "Create Menu Item")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1893,7 +2053,7 @@ export default function InventoryPage() {
                   const item = inventory.find(i => i.id === v);
                   if (item) {
                     const dUnit = (item.display_unit as DisplayUnit) || getDefaultDisplayUnit(item.unit);
-                    const theoretical = fromBaseUnit(item.stock ?? 0, dUnit);
+                    const theoretical = fromBaseUnit(item.stock ?? 0, dUnit, item);
                     setOpnameForm(p => ({ 
                       ...p, 
                       itemId: v, 
@@ -1926,7 +2086,9 @@ export default function InventoryPage() {
                   </div>
                 </div>
                 <div className="pt-2 border-t border-border flex justify-between items-center bg-background p-2 rounded-sm mt-1">
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Difference (Waste)</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Difference {((parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock) < 0 ? "(Waste)" : ((parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock) > 0 ? "(Surplus)" : ""}
+                  </span>
                   <span className={cn("text-base font-mono font-bold tracking-tight", (parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock < 0 ? "text-destructive" : "text-emerald-500")}>
                     {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock > 0 ? "+" : ""}
                     {(parseFloat(opnameForm.actualStock) || 0) - opnameForm.theoreticalStock} <span className="opacity-70 text-xs font-normal ml-1">{opnameForm.displayUnit}</span>
@@ -1951,7 +2113,7 @@ export default function InventoryPage() {
                     const item = inventory.find(i => i.id === opnameForm.itemId);
                     if (item) {
                       const newUnit = v as DisplayUnit;
-                      const theoretical = fromBaseUnit(item.stock ?? 0, newUnit);
+                      const theoretical = fromBaseUnit(item.stock ?? 0, newUnit, item);
                       setOpnameForm(p => ({ 
                         ...p, 
                         displayUnit: newUnit, 
@@ -1998,39 +2160,175 @@ export default function InventoryPage() {
               )}
             </div>
           </div>
-          <DialogFooter><Button onClick={handleAddOpname}>Record Audit</Button></DialogFooter>
+          <DialogFooter>
+            <Button onClick={handleAddOpname} disabled={isLoading}>
+              {isLoading ? "Recording..." : "Record Audit"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
       
-      {/* Add Overhead Modal */}
-      <Dialog open={isAddOpexModalOpen} onOpenChange={setIsAddOpexModalOpen}>
-        <DialogContent className="sm:max-w-[425px] rounded-sm">
+
+      {/* Manage Warehouse Modal */}
+      <Dialog open={isManageWarehouseModalOpen} onOpenChange={(open) => {
+        setIsManageWarehouseModalOpen(open);
+        if (!open) { setEditingBatchId(null); }
+      }}>
+        <DialogContent className="sm:max-w-[800px] max-h-[85vh] overflow-y-auto rounded-sm">
           <DialogHeader>
-            <DialogTitle>Add Overhead</DialogTitle>
-            <DialogDescription>Record monthly operational expenditures.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Warehouse className="w-5 h-5" />
+              {(() => {
+                const item = inventory.find(i => i.id === manageWarehouseItemId);
+                return `Warehouse Batches: ${item?.name || 'Unknown'}`;
+              })()}
+            </DialogTitle>
+            <DialogDescription>
+              Manage individual stock entries (sub-items) currently in the warehouse.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label>Month</Label>
-              <Input type="month" value={opexForm.month} onChange={(e) => setOpexForm(p => ({...p, month: e.target.value}))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select value={opexForm.category} onValueChange={(v) => setOpexForm(p => ({ ...p, category: v }))}>
-                <SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{opexCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Amount (IDR)</Label>
-              <Input type="number" placeholder="0" value={opexForm.amount} onChange={(e) => setOpexForm(p => ({...p, amount: e.target.value}))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Receipt Attachment</Label>
-              <Input type="file" onChange={(e) => setOpexFile(e.target.files?.[0] || null)} />
-            </div>
+
+          {/* Batch Table */}
+          <div className="space-y-3">
+            {warehouseBatches.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No warehouse batches found. Use the "Stock In" button to add stock.</p>
+            ) : (
+              <div className="border rounded-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="py-2 px-3 text-left font-medium">Batch #</th>
+                      <th className="py-2 px-3 text-right font-medium">Stock</th>
+                      <th className="py-2 px-3 text-center font-medium">Received</th>
+                      <th className="py-2 px-3 text-center font-medium">Expiry</th>
+                      <th className="py-2 px-3 text-right font-medium">Cost</th>
+                      <th className="py-2 px-3 text-center font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warehouseBatches.map((batch) => {
+                      const item = inventory.find(i => i.id === manageWarehouseItemId);
+                      const dUnit = (item?.display_unit || item?.unit || 'pcs') as string;
+                      const convRate = item?.conversion_rate || 1;
+                      const displayQty = convRate > 1 ? (batch.currentQuantity / convRate) : batch.currentQuantity;
+                      const displayCost = convRate > 1 ? (batch.unitCost * convRate) : batch.unitCost;
+                      const isDepleted = batch.currentQuantity <= 0;
+
+                      return (
+                        <tr key={batch.id} className={cn("border-t", isDepleted && "opacity-40")}>
+                          <td className="py-2 px-3 font-mono text-xs">{batch.batchNumber}</td>
+                          <td className="py-2 px-3 text-right font-mono">
+                            {parseFloat(displayQty.toFixed(2))}
+                          </td>
+                          <td className="py-2 px-3 text-center text-xs">
+                            {batch.receivedDate || '-'}
+                          </td>
+                          <td className="py-2 px-3 text-center text-xs">
+                            {batch.expiryDate || '-'}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-xs">
+                            Rp {Math.round(displayCost).toLocaleString('id-ID')}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              className="p-1 hover:bg-muted rounded-sm"
+                              onClick={() => {
+                                setEditingBatchId(batch.id);
+                                setBatchEditForm({
+                                  currentQuantity: parseFloat(displayQty.toFixed(2)),
+                                  unitCost: parseFloat(displayCost.toFixed(0)),
+                                  supplier: batch.supplier || '',
+                                  receivedDate: batch.receivedDate || '',
+                                  expiryDate: batch.expiryDate || ''
+                                });
+                              }}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Inline Edit Form */}
+            {editingBatchId && (() => {
+              const item = inventory.find(i => i.id === manageWarehouseItemId);
+              const dUnit = (item?.display_unit || item?.unit || 'pcs') as string;
+              const baseUnit = (item?.unit || 'pcs') as string;
+              const convRate = item?.conversion_rate || 1;
+              const editBatch = warehouseBatches.find(b => b.id === editingBatchId);
+              const baseQtyCalc = batchEditForm.currentQuantity * convRate;
+              const baseCostCalc = convRate > 1 ? batchEditForm.unitCost / convRate : batchEditForm.unitCost;
+              return (
+                <div className="border rounded-sm p-4 bg-muted/30 space-y-3">
+                  <p className="text-sm font-semibold">Edit Batch: <span className="font-mono">{editBatch?.batchNumber}</span></p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Quantity</Label>
+                      <div className="flex items-center gap-2">
+                        <Input type="number" value={batchEditForm.currentQuantity} onChange={(e) => setBatchEditForm(p => ({ ...p, currentQuantity: Number(e.target.value) }))} className="h-8" />
+                        <span className="text-xs font-semibold uppercase text-muted-foreground whitespace-nowrap">{dUnit}</span>
+                      </div>
+                      {convRate > 1 && (
+                        <p className="text-[10px] text-muted-foreground">= {Math.round(baseQtyCalc).toLocaleString('id-ID')} {baseUnit} <span className="opacity-60">(1 {dUnit} = {convRate} {baseUnit})</span></p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Unit Cost (IDR)</Label>
+                      <div className="flex items-center gap-2">
+                        <Input type="number" value={batchEditForm.unitCost} onChange={(e) => setBatchEditForm(p => ({ ...p, unitCost: Number(e.target.value) }))} className="h-8" />
+                        <span className="text-xs font-semibold uppercase text-muted-foreground whitespace-nowrap">per {dUnit}</span>
+                      </div>
+                      {convRate > 1 && (
+                        <p className="text-[10px] text-muted-foreground">= Rp {Math.round(baseCostCalc).toLocaleString('id-ID')} /{baseUnit}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Received Date</Label>
+                      <Input type="date" value={batchEditForm.receivedDate} onChange={(e) => setBatchEditForm(p => ({ ...p, receivedDate: e.target.value }))} className="h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Expiry Date</Label>
+                      <Input type="date" value={batchEditForm.expiryDate} onChange={(e) => setBatchEditForm(p => ({ ...p, expiryDate: e.target.value }))} className="h-8" />
+                    </div>
+                    <div className="space-y-1 col-span-2">
+                      <Label className="text-xs">Supplier</Label>
+                      <Input value={batchEditForm.supplier} onChange={(e) => setBatchEditForm(p => ({ ...p, supplier: e.target.value }))} className="h-8" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" className="rounded-sm" disabled={isSubmitting} onClick={async () => {
+                      setIsSubmitting(true);
+                      try {
+                        const baseQty = batchEditForm.currentQuantity * convRate;
+                        const baseCost = convRate > 1 ? batchEditForm.unitCost / convRate : batchEditForm.unitCost;
+                        await updateBatchDetails(editingBatchId, {
+                          currentQuantity: baseQty,
+                          unitCost: baseCost,
+                          supplier: batchEditForm.supplier,
+                          receivedDate: batchEditForm.receivedDate,
+                          expiryDate: batchEditForm.expiryDate || null
+                        } as any);
+                        setEditingBatchId(null);
+                        getBatchesByItem(manageWarehouseItemId, 'warehouse').then(setWarehouseBatches);
+                        fetchData();
+                      } finally { setIsSubmitting(false); }
+                    }}>
+                      {isSubmitting ? 'Saving...' : 'Save Changes'}
+                    </Button>
+                    <Button size="sm" variant="outline" className="rounded-sm" onClick={() => setEditingBatchId(null)}>Cancel</Button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
-          <DialogFooter><Button onClick={handleAddOpex}>Save</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsManageWarehouseModalOpen(false)}>Close</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
