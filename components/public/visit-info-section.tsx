@@ -54,8 +54,8 @@ export function VisitInfoSection() {
                   <span className="font-black uppercase tracking-widest text-xs">SESSIONS</span>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-lg md:text-xl font-bold text-[#2A1B14]">Daily: {shopInfo.hours.weekday}</p>
-                  <p className="text-sm font-bold text-[#2A1B14]/40 uppercase tracking-tighter italic">Last Batch 23:30</p>
+                  <p className="text-lg md:text-xl font-bold text-[#2A1B14]">Mon - Fri: {shopInfo.hours.weekday}</p>
+                  <p className="text-lg md:text-xl font-bold text-[#2A1B14]">Sat - Sun: {shopInfo.hours.weekend}</p>
                 </div>
               </div>
             </div>

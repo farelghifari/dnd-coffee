@@ -61,7 +61,7 @@ export interface InventoryItem {
   conversionRate?: number
   expiryDate?: string
   status?: string
-  
+
   // Database Aliases (for backward compatibility)
   display_unit?: string
   conversion_rate?: number
@@ -141,7 +141,7 @@ export interface InventoryBatch {
   unit?: string // The unit name for display
   category?: string
   location?: string
-  
+
   // Database Aliases
   item_id?: string
   batch_number?: string
@@ -621,7 +621,7 @@ export const shopInfo = {
   email: "donotdisturb.coffee@gmail.com",
   hours: {
     weekday: "09:00 - 00:00",
-    weekend: "09:00 - 00:00",
+    weekend: "09:00 - 02:00",
   },
   social: {
     instagram: "@donotdisturb.coffee",
@@ -1026,7 +1026,7 @@ export function getLowStockItems(): (InventoryItem & { daysRemaining: number })[
 export function getOperationalCapacity(): number {
   const criticalItems = inventory.filter((item) => getStockHealth(item) === "critical")
   if (criticalItems.length > 0) return 1
-  
+
   const minDays = Math.min(...inventory.map((item) => getDaysRemaining(item)))
   return Math.round(minDays * 10) / 10
 }
@@ -1124,7 +1124,7 @@ export function getActiveBatches(): InventoryBatch[] {
 export function getExpiringBatches(daysThreshold: number = 7): InventoryBatch[] {
   const today = new Date()
   const thresholdDate = new Date(today.getTime() + daysThreshold * 24 * 60 * 60 * 1000)
-  
+
   return inventoryBatches
     .filter((batch) => {
       if (batch.status !== "active" || !batch.expiryDate) return false
@@ -1155,15 +1155,15 @@ export function getBatchMovements(batchId: string): BatchMovement[] {
 
 export function getBatchStatus(batch: InventoryBatch): BatchStatus {
   const today = new Date()
-  
+
   if (batch.currentQuantity <= 0) return "depleted"
   if (batch.status === "quarantined") return "quarantined"
-  
+
   if (batch.expiryDate) {
     const expiryDate = new Date(batch.expiryDate)
     if (expiryDate < today) return "expired"
   }
-  
+
   return "active"
 }
 
