@@ -320,7 +320,7 @@ export interface AttendanceLog {
   action: "clock-in" | "clock-out"
   status: string
   // New metadata
-  method?: 'personal' | 'nfc'
+  method?: 'personal' | 'nfc' | 'manual'
   device_info?: string
   latitude?: number
   longitude?: number
@@ -2363,7 +2363,12 @@ export function calculateRegulatedSession(
   let lateMinutes = 0
   let isPenalty = false
 
-  if (shift && shiftStart && shiftEnd) {
+  const isManualOverride = clockInLog.method === 'manual' || clockInLog.device_info === 'Admin Override'
+
+  if (isManualOverride) {
+    regMins = totalMins
+    otMins = 0
+  } else if (shift && shiftStart && shiftEnd) {
     const delay = Math.round((cIn.getTime() - shiftStart.getTime()) / 60000)
     if (delay > 0) {
       isLate = true

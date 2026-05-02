@@ -71,9 +71,9 @@ export default function AttendanceReportPage() {
   const [manualModalOpen, setManualModalOpen] = useState(false)
   const [manualData, setManualData] = useState({
     employeeId: "",
-    type: "clock-in" as "clock-in" | "clock-out",
     date: format(new Date(), "yyyy-MM-dd"),
-    time: format(new Date(), "HH:mm")
+    clockInTime: format(new Date(), "HH:mm"),
+    clockOutTime: ""
   })
   const [isManualLoading, setIsManualLoading] = useState(false)
 
@@ -158,22 +158,43 @@ export default function AttendanceReportPage() {
       return
     }
 
+    if (!manualData.clockInTime && !manualData.clockOutTime) {
+      toast.error("Please provide at least a Clock In or Clock Out time")
+      return
+    }
+
     const employee = employees.find(e => e.id === manualData.employeeId)
     if (!employee) return
 
     setIsManualLoading(true)
     try {
-      await addAttendanceLog({
-        employee_id: manualData.employeeId,
-        employee_name: employee.name,
-        type: manualData.type,
-        manual_date: manualData.date,
-        manual_time: `${manualData.time}:00`,
-        method: 'nfc', // Treat admin manual action as system-level
-        is_ops_device: true
-      })
+      if (manualData.clockInTime) {
+        await addAttendanceLog({
+          employee_id: manualData.employeeId,
+          employee_name: employee.name,
+          type: "clock-in",
+          manual_date: manualData.date,
+          manual_time: `${manualData.clockInTime}:00`,
+          method: 'manual' as any, // Treat admin manual action as system-level override
+          device_info: 'Admin Override',
+          is_ops_device: true
+        })
+      }
+
+      if (manualData.clockOutTime) {
+        await addAttendanceLog({
+          employee_id: manualData.employeeId,
+          employee_name: employee.name,
+          type: "clock-out",
+          manual_date: manualData.date,
+          manual_time: `${manualData.clockOutTime}:00`,
+          method: 'manual' as any, // Treat admin manual action as system-level override
+          device_info: 'Admin Override',
+          is_ops_device: true
+        })
+      }
       
-      toast.success(`Successfully ${manualData.type === 'clock-in' ? 'clocked in' : 'clocked out'} ${employee.name}`)
+      toast.success(`Successfully processed manual override for ${employee.name}`)
       setManualModalOpen(false)
       await refreshReport()
     } catch (error) {
@@ -187,9 +208,9 @@ export default function AttendanceReportPage() {
   const triggerForceClockOut = (employeeId: string, employeeName: string, date: string) => {
     setManualData({
       employeeId,
-      type: "clock-out",
       date,
-      time: format(new Date(), "HH:mm")
+      clockInTime: "",
+      clockOutTime: format(new Date(), "HH:mm")
     })
     setManualModalOpen(true)
   }
@@ -267,9 +288,9 @@ export default function AttendanceReportPage() {
               onClick={() => {
                 setManualData({
                   employeeId: "",
-                  type: "clock-in",
                   date: format(new Date(), "yyyy-MM-dd"),
-                  time: format(new Date(), "HH:mm")
+                  clockInTime: format(new Date(), "HH:mm"),
+                  clockOutTime: ""
                 })
                 setManualModalOpen(true)
               }}
@@ -479,49 +500,35 @@ export default function AttendanceReportPage() {
               </Select>
             </div>
 
+            <div className="grid gap-2">
+              <Label>Date</Label>
+              <Input 
+                type="date" 
+                value={manualData.date}
+                onChange={(e) => setManualData({...manualData, date: e.target.value})}
+                className="rounded-sm"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label>Action Type</Label>
-                <Select 
-                  value={manualData.type} 
-                  onValueChange={(val: any) => setManualData({...manualData, type: val})}
-                >
-                  <SelectTrigger className="rounded-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="clock-in">
-                      <div className="flex items-center gap-2 text-green-600">
-                        <UserPlus className="w-4 h-4" /> Clock In
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="clock-out">
-                      <div className="flex items-center gap-2 text-destructive">
-                        <UserMinus className="w-4 h-4" /> Clock Out
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Date</Label>
+                <Label>Clock In Time</Label>
                 <Input 
-                  type="date" 
-                  value={manualData.date}
-                  onChange={(e) => setManualData({...manualData, date: e.target.value})}
+                  type="time" 
+                  value={manualData.clockInTime}
+                  onChange={(e) => setManualData({...manualData, clockInTime: e.target.value})}
                   className="rounded-sm"
                 />
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label>Time (HH:mm)</Label>
-              <Input 
-                type="time" 
-                value={manualData.time}
-                onChange={(e) => setManualData({...manualData, time: e.target.value})}
-                className="rounded-sm"
-              />
+              <div className="grid gap-2">
+                <Label>Clock Out Time (Optional)</Label>
+                <Input 
+                  type="time" 
+                  value={manualData.clockOutTime}
+                  onChange={(e) => setManualData({...manualData, clockOutTime: e.target.value})}
+                  className="rounded-sm"
+                />
+              </div>
             </div>
           </div>
 
