@@ -6,6 +6,7 @@ import {
   getEmployees,
   getShiftAssignments,
   addAttendanceLog,
+  deleteAttendanceLogs,
   getOutlets,
   type Employee,
   type ShiftAssignment,
@@ -169,26 +170,32 @@ export default function AttendanceReportPage() {
     setIsManualLoading(true)
     try {
       if (manualData.clockInTime) {
+        // REPLACE LOGIC: Delete existing clock-in logs for this day before adding new manual one
+        await deleteAttendanceLogs(manualData.employeeId, manualData.date, "clock-in")
+        
         await addAttendanceLog({
           employee_id: manualData.employeeId,
           employee_name: employee.name,
           type: "clock-in",
           manual_date: manualData.date,
           manual_time: `${manualData.clockInTime}:00`,
-          method: 'manual' as any, // Treat admin manual action as system-level override
+          method: 'manual' as any,
           device_info: 'Admin Override',
           is_ops_device: true
         })
       }
 
       if (manualData.clockOutTime) {
+        // REPLACE LOGIC: Delete existing clock-out logs for this day before adding new manual one
+        await deleteAttendanceLogs(manualData.employeeId, manualData.date, "clock-out")
+        
         await addAttendanceLog({
           employee_id: manualData.employeeId,
           employee_name: employee.name,
           type: "clock-out",
           manual_date: manualData.date,
           manual_time: `${manualData.clockOutTime}:00`,
-          method: 'manual' as any, // Treat admin manual action as system-level override
+          method: 'manual' as any,
           device_info: 'Admin Override',
           is_ops_device: true
         })

@@ -2142,6 +2142,28 @@ export async function getAttendanceByEmployee(employeeId: string): Promise<Atten
 
 // ATTENDANCE FIX - Clock In/Out must insert: employee_id, employee_name, date (today), time (now), action, status
 // ATTENDANCE FIX - Clock In/Out must insert: employee_id, employee_name, date (today), time (now), action, status
+export async function deleteAttendanceLogs(employeeId: string, date: string, type?: "clock-in" | "clock-out") {
+  if (isSupabaseConfigured()) {
+    let query = supabase
+      .from('attendance_logs')
+      .delete()
+      .eq('employee_id', employeeId)
+      .eq('date', date)
+    
+    if (type) {
+      query = query.eq('action', type)
+    }
+    
+    const { error } = await query
+    if (error) {
+      console.error("Error deleting logs:", error)
+      return false
+    }
+    return true
+  }
+  return false
+}
+
 export async function addAttendanceLog(log: { 
   employee_id: string; 
   employee_name?: string; 
@@ -2381,7 +2403,6 @@ export function calculateRegulatedSession(
     
     if (effectiveEndForReg > effectiveStartForReg) {
       regMins = Math.round((effectiveEndForReg.getTime() - effectiveStartForReg.getTime()) / 60000)
-      regMins = Math.min(regMins, 480)
     }
 
     const preShiftStart = cIn
@@ -2475,9 +2496,15 @@ export async function getOvertimeRequestsInRange(startDate: string, endDate: str
 
 // New function for attendance report data (OPTIMIZED & FIXED)
 export async function getAttendanceReportData(startDate: string, endDate: string) {
+  // Fetch one extra day of logs to catch early-morning clock-outs for sessions starting on the last day
+  const ePartsRange = endDate.split('-').map(Number)
+  const endRange = new Date(ePartsRange[0], ePartsRange[1]-1, ePartsRange[2])
+  endRange.setDate(endRange.getDate() + 1)
+  const extendedEndDate = endRange.toISOString().split('T')[0]
+
   const [employees, allLogs, allShifts, allOT] = await Promise.all([
     getEmployees(),
-    getAttendanceLogsInRange(startDate, endDate),
+    getAttendanceLogsInRange(startDate, extendedEndDate), // Use extended range for logs
     getShiftAssignmentsInRange(startDate, endDate),
     getOvertimeRequestsInRange(startDate, endDate)
   ])
@@ -2527,8 +2554,11 @@ export async function getAttendanceReportData(startDate: string, endDate: string
     curr.setDate(curr.getDate() + 1)
   }
   
-  // Iterate newest first
-  for (const dateStr of dateList.reverse()) {
+  // Track logs used as cross-midnight clock-outs to avoid double-processing
+  const consumedLogIds = new Set<string>()
+
+  // Iterate forward (oldest to newest) to allow previous days to consume next-day morning logs
+  for (const dateStr of dateList) {
     for (const emp of employees) {
       const key = `${emp.id}_${dateStr}`
       const empDayLogs = logsMap.get(key) || []
@@ -2596,8 +2626,9 @@ export async function getAttendanceReportData(startDate: string, endDate: string
         }
 
         for (const log of sortedLogs) {
-          const action = (log.action || log.type || '').toLowerCase()
+          if (consumedLogIds.has(log.id)) continue
           
+          const action = (log.action || log.type || '').toLowerCase()
           if (action.includes('in')) {
             if (currentInLog) {
               dailySessions.push(processSession(currentInLog, null))
@@ -2612,7 +2643,27 @@ export async function getAttendanceReportData(startDate: string, endDate: string
         }
 
         if (currentInLog) {
-          dailySessions.push(processSession(currentInLog, null))
+          // CROSS-MIDNIGHT PAIRING: Look for a clock-out on the next day early morning
+          const curDate = new Date(dateStr)
+          curDate.setDate(curDate.getDate() + 1)
+          const nextDateStr = curDate.toISOString().split('T')[0]
+          
+          const nextDayLogs = logsMap.get(`${emp.id}_${nextDateStr}`) || []
+          const earlyMorningOut = nextDayLogs.find(l => {
+            if (consumedLogIds.has(l.id)) return false
+            const act = (l.action || l.type || '').toLowerCase()
+            if (!act.includes('out')) return false
+            // Consider early morning if before 06:00 AM
+            const hour = parseInt(l.time.split(':')[0])
+            return hour < 6
+          })
+
+          if (earlyMorningOut) {
+            dailySessions.push(processSession(currentInLog, earlyMorningOut))
+            consumedLogIds.add(earlyMorningOut.id)
+          } else {
+            dailySessions.push(processSession(currentInLog, null))
+          }
         }
 
         // UNIFY SESSIONS: Merge contiguous/overlapping sessions into single rows
@@ -2698,7 +2749,7 @@ export async function getAttendanceReportData(startDate: string, endDate: string
     }
   }
 
-  return report
+  return report.reverse()
 }
 
 // New function for attendance statistics (Dashboard)
