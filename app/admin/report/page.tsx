@@ -13,6 +13,9 @@ import {
   subscribeToSalesLogs,
   subscribeToInventoryItems,
   subscribeToInventoryBatches,
+  getMonthlyOpex,
+  addMonthlyOpex,
+  deleteMonthlyOpex,
   type MenuItem,
   type SalesReport,
   type SalesLogGrouped,
@@ -21,6 +24,8 @@ import {
   type DisplayUnit
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { format, startOfMonth } from "date-fns"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -31,6 +36,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { 
   Receipt, 
   DollarSign, 
@@ -49,7 +56,9 @@ import {
   Tag,
   BoxSelect,
   Check,
-  Layers
+  Layers,
+  History,
+  Trash2
 } from "lucide-react"
 import { cn, getLocalYYYYMMDD } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
@@ -89,16 +98,22 @@ export default function ReportPage() {
   const [bundlePrice, setBundlePrice] = useState<string>("")
   const [bulkSaleDate, setBulkSaleDate] = useState(getLocalYYYYMMDD())
   const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  // Expenditure State
+  const [opex, setOpex] = useState<any[]>([])
+  const [expenseForm, setExpenseForm] = useState({ category: "", amount: "", notes: "" })
+  const [isSubmittingExpense, setIsSubmittingExpense] = useState(false)
 
   const fetchData = async () => {
     setIsLoading(true)
-    const [menuData, reportData, logsGroupedData, inventoryData, recipeData, batchData] = await Promise.all([
+    const [menuData, reportData, logsGroupedData, inventoryData, recipeData, batchData, opexData] = await Promise.all([
       getMenuItems(),
       getSalesReport(),
       getSalesLogsGroupedByDate(),
       getInventory(),
       getAllMenuRecipes(),
-      getBatches()
+      getBatches(),
+      getMonthlyOpex()
     ])
     setMenuItems(menuData)
     setSalesReport(reportData)
@@ -106,6 +121,7 @@ export default function ReportPage() {
     setInventory(inventoryData)
     setRecipes(recipeData)
     setBatches(batchData)
+    setOpex(opexData)
     setIsLoading(false)
   }
 
@@ -260,7 +276,55 @@ export default function ReportPage() {
     return sum + (menu ? menu.price * item.quantity : 0)
   }, 0)
 
-  // Calculate Inventory Consumption based on sales + recipes
+  // Expense Handlers
+  const handleSaveExpense = async () => {
+    if (!expenseForm.category || !expenseForm.amount) return
+    setIsSubmittingExpense(true)
+    try {
+      await addMonthlyOpex({
+        month: bulkSaleDate.substring(0, 7), // Use the date from calendar
+        category: expenseForm.category,
+        amount: parseFloat(expenseForm.amount),
+        notes: expenseForm.notes,
+        created_at: `${bulkSaleDate}T12:00:00Z` // Force the date to the selected date
+      })
+      toast.success("Expense recorded for " + bulkSaleDate)
+      setExpenseForm({ category: "", amount: "", notes: "" })
+      fetchData()
+    } catch (err) {
+      toast.error("Failed to record expense")
+    } finally {
+      setIsSubmittingExpense(false)
+    }
+  }
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!confirm("Delete this expense?")) return
+    try {
+      await deleteMonthlyOpex(id)
+      toast.success("Expense deleted")
+      fetchData()
+    } catch (err) {
+      toast.error("Failed to delete")
+    }
+  }
+
+  // Calculate Expenses for the selected date
+  const todayDate = getLocalYYYYMMDD()
+  const selectedExpenses = useMemo(() => {
+    return opex.filter(o => {
+      const createdAtDate = o.created_at?.split('T')[0]
+      return createdAtDate === bulkSaleDate
+    }).reduce((sum, o) => sum + o.amount, 0)
+  }, [opex, bulkSaleDate])
+
+  const selectedIncomeData = useMemo(() => {
+    const group = salesLogsGrouped.find(g => g.date === bulkSaleDate)
+    return {
+      revenue: group ? group.logs.reduce((sum, log) => sum + (log.total_price || 0), 0) : 0,
+      count: group ? group.logs.reduce((sum, log) => sum + log.quantity, 0) : 0
+    }
+  }, [salesLogsGrouped, bulkSaleDate])
   // Calculate consumption directly from TODAY'S SALES and RECIPES.
   // This ensures consumption reflects actual usage today, regardless of batch boundaries.
   const inventoryConsumption = useMemo(() => {
@@ -360,10 +424,72 @@ export default function ReportPage() {
     <div>
       <header className="mb-8">
         <h1 className="text-3xl font-light tracking-tight">Report</h1>
-        <p className="text-muted-foreground">Sales operations and reporting</p>
+        <p className="text-muted-foreground">Daily operations, sales, and expenses</p>
       </header>
 
-      {/* Daily Sales Input Section */}
+      {/* Unified Statistics Header - Premium Glassmorphism Style */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+        {/* Today's Focus */}
+        <Card className="lg:col-span-3 rounded-sm border-none shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-4 opacity-10">
+            <Clock className="w-24 h-24" />
+          </div>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              Live Performance: {bulkSaleDate === todayDate ? "Today" : bulkSaleDate}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-emerald-600/70 uppercase tracking-tight mb-1">Income</span>
+                <span className="text-3xl font-bold tracking-tight text-emerald-700">{formatPrice(selectedIncomeData.revenue)}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium">{selectedIncomeData.count} items sold</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-rose-600/70 uppercase tracking-tight mb-1">Expenses</span>
+                <span className="text-3xl font-bold tracking-tight text-rose-700">-{formatPrice(selectedExpenses)}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium">Daily purchases</span>
+              </div>
+              <div className="flex flex-col border-l border-border/50 pl-8">
+                <span className="text-[10px] font-bold text-primary/70 uppercase tracking-tight mb-1">Net Balance</span>
+                <span className={cn("text-3xl font-bold tracking-tight", selectedIncomeData.revenue - selectedExpenses >= 0 ? "text-primary" : "text-rose-600")}>
+                  {formatPrice(selectedIncomeData.revenue - selectedExpenses)}
+                </span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Margin status</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Global Context */}
+        <Card className="rounded-sm border border-dashed bg-muted/5 shadow-none flex flex-col justify-center p-6 relative overflow-hidden group">
+          <div className="absolute -bottom-2 -right-2 opacity-5 group-hover:scale-110 transition-transform">
+            <TrendingUp className="w-20 h-20" />
+          </div>
+          <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-[0.2em] mb-4">Business Scale</p>
+          <div className="space-y-4">
+            <div>
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">All-Time Sales</p>
+              <p className="text-xl font-bold tracking-tight">{totalItemsSold} <span className="text-xs font-normal">portions</span></p>
+            </div>
+            <div className="pt-2 border-t border-border/50">
+              <p className="text-[10px] text-muted-foreground uppercase font-bold">Top Menu</p>
+              <p className="text-xs font-bold truncate text-primary uppercase">{topSellingMenu?.menu_name || "-"}</p>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Tabs defaultValue="sales" className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="sales" className="gap-2"><ShoppingCart className="w-4 h-4" />Sales Input</TabsTrigger>
+          <TabsTrigger value="expenditure" className="gap-2"><Receipt className="w-4 h-4" />Expenditure</TabsTrigger>
+          <TabsTrigger value="inventory" className="gap-2"><Package className="w-4 h-4" />Inventory Impact</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sales">
       <Card className="rounded-sm mb-8">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div className="space-y-1">
@@ -591,51 +717,188 @@ export default function ReportPage() {
         </CardContent>
       </Card>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+        {/* Sales Summary Table */}
         <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <DollarSign className="w-4 h-4" />
-              Total Revenue
+          <CardHeader>
+            <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-tight">
+              <Receipt className="w-4 h-4" /> All-Time Best Sellers
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{formatPrice(totalRevenue)}</p>
+            {salesReport.length > 0 ? (
+              <div className="overflow-x-auto max-h-[400px] overflow-y-auto pr-1">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th className="text-left py-3 font-medium">Menu</th>
+                      <th className="text-right py-3 font-medium">Qty</th>
+                      <th className="text-right py-3 font-medium">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {salesReport.sort((a,b) => b.total_sold - a.total_sold).map((report) => (
+                      <tr key={report.menu_id} className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="py-3 font-medium">{report.menu_name}</td>
+                        <td className="py-3 text-right font-mono">{report.total_sold}</td>
+                        <td className="py-3 text-right font-mono">{formatPrice(report.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <p className="text-xs text-muted-foreground italic py-8 text-center">No sales data yet</p>}
           </CardContent>
         </Card>
-        
+
+        {/* Detailed History */}
         <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Coffee className="w-4 h-4" />
-              Total Items Sold
+          <CardHeader>
+            <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-tight">
+              <CalendarDays className="w-4 h-4" /> History per Transaction
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold">{totalItemsSold}</p>
-          </CardContent>
-        </Card>
-        
-        <Card className="rounded-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Top Selling Menu
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold">
-              {topSellingMenu ? topSellingMenu.menu_name : "-"}
-            </p>
-            {topSellingMenu && (
-              <p className="text-sm text-muted-foreground">
-                {topSellingMenu.total_sold} sold
-              </p>
-            )}
+            {salesLogsGrouped.length > 0 ? (
+              <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
+                {salesLogsGrouped.slice(0, 15).map((group) => (
+                  <div key={group.date} className="p-4 border rounded-sm bg-muted/5 hover:bg-muted/10 transition-colors">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-border/30">
+                      <span className="text-[11px] font-bold uppercase tracking-wider">{group.date}</span>
+                      <span className="text-[11px] font-mono font-bold text-primary">{formatPrice(group.total_revenue)}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {group.logs.map((l, i) => (
+                        <div key={i} className="flex justify-between items-center text-[11px]">
+                          <span className="text-muted-foreground">{l.menu_name}</span>
+                          <div className="flex gap-4">
+                            <span className="font-bold">x{l.quantity}</span>
+                            <span className="font-mono text-muted-foreground/80 w-24 text-right">{formatPrice(l.total_price)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-xs text-muted-foreground italic py-8 text-center">No history data</p>}
           </CardContent>
         </Card>
       </div>
+    </TabsContent>
+
+        <TabsContent value="expenditure">
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+             <Card className="rounded-sm lg:col-span-1 border-primary/20 bg-primary/5">
+                <CardHeader>
+                  <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-tight">
+                    <Plus className="w-4 h-4" /> Record Purchase
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase font-bold text-muted-foreground">Category</Label>
+                      <Select 
+                        onValueChange={(val) => setExpenseForm(p => ({ ...p, category: val }))}
+                        value={expenseForm.category}
+                      >
+                        <SelectTrigger className="h-9 rounded-sm">
+                          <SelectValue placeholder="Select category..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Supplies (Tissue, Cleaning, etc.)">Supplies (Tissue, etc.)</SelectItem>
+                          <SelectItem value="Maintenance">Maintenance / Equipment</SelectItem>
+                          <SelectItem value="Marketing">Marketing</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase font-bold text-muted-foreground">Amount (IDR)</Label>
+                      <Input 
+                        type="number" 
+                        placeholder="e.g. 50000" 
+                        className="h-9 rounded-sm"
+                        value={expenseForm.amount}
+                        onChange={(e) => setExpenseForm(p => ({ ...p, amount: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs uppercase font-bold text-muted-foreground">Notes / Item Name</Label>
+                      <Input 
+                        placeholder="e.g. Beli Sapu & Pel" 
+                        className="h-9 rounded-sm"
+                        value={expenseForm.notes}
+                        onChange={(e) => setExpenseForm(p => ({ ...p, notes: e.target.value }))}
+                      />
+                    </div>
+                    <Button 
+                      className="w-full rounded-sm font-bold uppercase tracking-widest text-[10px] h-10" 
+                      onClick={handleSaveExpense}
+                      disabled={isSubmittingExpense || !expenseForm.category || !expenseForm.amount}
+                    >
+                      {isSubmittingExpense ? "Saving..." : "Record Expense"}
+                    </Button>
+                  </div>
+                </CardContent>
+             </Card>
+
+             <Card className="rounded-sm lg:col-span-2">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-tight">
+                    <History className="w-4 h-4" /> Today's Expense Logs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                   <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="border-b">
+                          <tr className="text-[10px] uppercase font-bold text-muted-foreground text-left">
+                            <th className="py-2">Category</th>
+                            <th className="py-2">Notes</th>
+                            <th className="py-2 text-right">Amount</th>
+                            <th className="py-2 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {opex.filter(o => o.created_at?.split('T')[0] === bulkSaleDate).length === 0 ? (
+                            <tr><td colSpan={4} className="py-8 text-center text-muted-foreground italic">No expenses recorded for this date</td></tr>
+                          ) : (
+                            opex.filter(o => o.created_at?.split('T')[0] === bulkSaleDate).map(o => (
+                              <tr key={o.id} className="border-b last:border-0">
+                                <td className="py-3 font-medium text-xs">{o.category}</td>
+                                <td className="py-3 text-xs text-muted-foreground italic">{o.notes || '-'}</td>
+                                <td className="py-3 text-right font-mono font-bold">{formatPrice(o.amount)}</td>
+                                <td className="py-3 text-right">
+                                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive/50 hover:text-destructive" onClick={() => handleDeleteExpense(o.id)}>
+                                     <Trash2 className="w-3.5 h-3.5" />
+                                   </Button>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                   </div>
+                </CardContent>
+             </Card>
+           </div>
+        </TabsContent>
+
+        <TabsContent value="inventory">
+          <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-sm mb-6 flex items-start gap-4">
+            <div className="bg-amber-500 text-white p-2 rounded-sm shrink-0">
+              <Package className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-amber-700 uppercase tracking-tight">Apa itu Inventory Impact?</p>
+              <p className="text-xs text-amber-600/80 leading-relaxed mt-1">
+                Angka di bawah ini adalah <strong>prediksi pemakaian bahan baku</strong> berdasarkan jumlah menu yang laku hari ini. 
+                Sistem menghitung otomatis sesuai resep (misal: 1 Kopi = 18g Biji Kopi). Ini membantu Anda memantau sisa stok di meja Bar tanpa harus menimbang manual setiap saat.
+              </p>
+            </div>
+          </div>
 
       {/* Data Visualizations */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
@@ -731,53 +994,7 @@ export default function ReportPage() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Sales Report Table */}
-        <Card className="rounded-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Receipt className="w-5 h-5" />
-              Sales Summary
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {salesReport.length > 0 ? (
-              <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-card">
-                    <tr className="border-b border-border">
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Menu Name</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Qty Sold</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {salesReport.map((report) => (
-                      <tr key={report.menu_id} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
-                        <td className="py-3 px-4 font-medium">{report.menu_name}</td>
-                        <td className="py-3 px-4 text-right font-mono">{report.total_sold}</td>
-                        <td className="py-3 px-4 text-right font-mono">{formatPrice(report.revenue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="sticky bottom-0 bg-card">
-                    <tr className="bg-muted/50">
-                      <td className="py-3 px-4 font-medium text-xs uppercase tracking-wider">Total</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold">{totalItemsSold}</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold">{formatPrice(totalRevenue)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <Receipt className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No sales data yet</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 gap-6">
         {/* Inventory Impact - Usage Analysis */}
         <Card className="rounded-sm">
           <CardHeader>
@@ -788,10 +1005,10 @@ export default function ReportPage() {
           </CardHeader>
           <CardContent>
             {inventory.length > 0 ? (
-              <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[450px] overflow-y-auto pr-1">
                 <table className="w-full">
                   <thead className="sticky top-0 bg-card">
-                    <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground font-bold">
+                    <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
                       <th className="text-left py-3 px-4">Item</th>
                       <th className="text-right py-3 px-4">Consumption</th>
                       <th className="text-right py-3 px-4">Current Stock</th>
@@ -807,14 +1024,8 @@ export default function ReportPage() {
                       const itemOpenedBatches = batches.filter(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
                       const activeBarStockBase = itemOpenedBatches.reduce((sum, b) => sum + (b.remaining_quantity || b.currentQuantity || 0), 0)
                       
-                      const baseStock = item.stock || item.current_stock || 0
-                      const maxStock = item.max_stock || 100 
                       const baseConsumption = inventoryConsumption[item.id] || 0
-                      
-                      // Values for display - use RAW BASE UNIT (gram/ml) for precision
                       const unitToDisplay = item.unit || "g"
-                      const stock = activeBarStockBase
-                      const consumption = baseConsumption
                       
                       // Progress bar reflects active stock against some threshold 
                       const progress = Math.min(100, Math.max(0, (activeBarStockBase / (item.max_stock || 1000)) * 100))
@@ -837,15 +1048,15 @@ export default function ReportPage() {
                           </td>
                           <td className="py-3 px-4 text-right font-mono text-sm group">
                             <div className="flex flex-col items-end">
-                              <span className={cn(consumption > 0 ? "text-orange-500 font-bold" : "text-muted-foreground")}>
-                                {consumption > 0 ? `-${Number(consumption.toFixed(2))}` : '0'} 
+                              <span className={cn(baseConsumption > 0 ? "text-orange-500 font-bold" : "text-muted-foreground")}>
+                                {baseConsumption > 0 ? `-${Number(baseConsumption.toFixed(2))}` : '0'} 
                               </span>
                               <span className="text-[10px] text-muted-foreground font-bold">{unitToDisplay}</span>
                             </div>
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="font-mono font-bold text-sm">{Number(stock.toFixed(2))}</span>
+                              <span className="font-mono font-bold text-sm">{Number(activeBarStockBase.toFixed(2))}</span>
                               <span className="text-[10px] text-muted-foreground font-bold">{unitToDisplay}</span>
                             </div>
                           </td>
@@ -856,78 +1067,17 @@ export default function ReportPage() {
                 </table>
               </div>
             ) : (
-              <div className="text-center py-8">
-                <Package className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No inventory data</p>
+              <div className="text-center py-12 bg-muted/20 rounded-sm border border-dashed">
+                <Package className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
+                <p className="text-muted-foreground font-medium">No active inventory tracked at the bar</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Open a batch in the Inventory module to see live consumption</p>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Recent Sales Log - Grouped by Date */}
-      <Card className="rounded-sm mt-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarDays className="w-5 h-5" />
-            Recent Sales (by Date)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {salesLogsGrouped.length > 0 ? (
-            <div className="space-y-6 max-h-[500px] overflow-y-auto">
-              {salesLogsGrouped.slice(0, 7).map((group) => (
-                <div key={group.date}>
-                  {/* Date Header */}
-                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-border">
-                    <h4 className="font-medium flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-muted-foreground" />
-                      {new Date(group.date).toLocaleDateString("id-ID", {
-                        weekday: "long",
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric"
-                      })}
-                    </h4>
-                    <div className="text-right">
-                      <p className="text-sm font-medium">{group.total_quantity} items</p>
-                      <p className="text-sm text-muted-foreground">{formatPrice(group.total_revenue)}</p>
-                    </div>
-                  </div>
-                  
-                  {/* Sales for this date */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Menu</th>
-                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">Qty</th>
-                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">Revenue</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.logs.map((log) => (
-                          <tr key={log.id} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
-                            <td className="py-2 px-3 text-sm font-medium">{log.menu_name || "Unknown"}</td>
-                            <td className="py-2 px-3 text-sm text-right font-mono">{log.quantity}</td>
-                            <td className="py-2 px-3 text-sm text-right font-mono">{formatPrice(log.total_price)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <CalendarDays className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No recent sales</p>
-              <p className="text-sm text-muted-foreground mt-1">Use the Daily Sales Input above to record sales</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    </TabsContent>
+  </Tabs>
+</div>
   )
 }

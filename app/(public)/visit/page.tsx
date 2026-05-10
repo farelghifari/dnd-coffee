@@ -59,8 +59,8 @@ export default function VisitPage() {
                     <h3 className="font-black text-xs tracking-widest uppercase">Sessions</h3>
                   </div>
                   <div className="space-y-1 font-bold text-[#2A1B14]">
-                    <p>Mon - Fri: {shopInfo.hours.weekday}</p>
-                    <p>Sat - Sun: {shopInfo.hours.weekend}</p>
+                    <p>Mon - Thu: {shopInfo.hours.weekday}</p>
+                    <p>Fri - Sun: {shopInfo.hours.weekend}</p>
                   </div>
                 </div>
               </div>

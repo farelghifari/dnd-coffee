@@ -61,6 +61,7 @@ export default function AttendanceReportPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [outlets, setOutlets] = useState<Outlet[]>([])
+  const [activeTab, setActiveTab] = useState<"employees" | "casual">("employees")
   
   // Resolve Absent Modal State
   const [resolveModalOpen, setResolveModalOpen] = useState(false)
@@ -237,6 +238,34 @@ export default function AttendanceReportPage() {
       })
   }, [reportData, searchQuery])
 
+  const casualShifts = useMemo(() => {
+    const now = new Date()
+    const todayStr = format(now, "yyyy-MM-dd")
+    const currentTimeStr = format(now, "HH:mm")
+
+    return shifts
+      .filter(s => !s.employee_id && s.date >= format(dateRange.from, "yyyy-MM-dd") && s.date <= format(dateRange.to, "yyyy-MM-dd"))
+      .filter(s => {
+        if (s.date < todayStr) return true
+        if (s.date === todayStr) {
+          // If it's today, only show if the shift has already started
+          return s.start_time <= currentTimeStr
+        }
+        return false
+      })
+      .filter(s => (s.employee_name || "").toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }, [shifts, dateRange, searchQuery])
+
+  const calculateDuration = (start: string, end: string) => {
+    if (!start || !end) return 0
+    const [h1, m1] = start.split(':').map(Number)
+    const [h2, m2] = end.split(':').map(Number)
+    let diff = (h2 * 60 + m2) - (h1 * 60 + m1)
+    if (diff < 0) diff += 24 * 60 // Handle overnight shifts
+    return diff
+  }
+
   // Rule 6: Stats for the summary cards
   const summaryStats = useMemo(() => {
     const stats = {
@@ -360,74 +389,173 @@ export default function AttendanceReportPage() {
         </Card>
       </div>
 
-      {/* Controls */}
-      <Card className="rounded-sm border-border shadow-sm">
-        <CardContent className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
-            <div className="lg:col-span-5 grid gap-2">
-              <label className="text-sm font-medium">Period Selection</label>
-              <div className="flex items-center gap-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(dateRange.from, "MMM d, yyyy")}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 rounded-sm" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={dateRange.from}
-                      onSelect={(date) => date && setDateRange(prev => ({ ...prev, from: date }))}
-                      initialFocus
+      {/* Tabs */}
+      <div className="flex border-b border-border mb-6">
+        <button
+          className={cn(
+            "px-6 py-3 text-sm font-medium transition-colors relative",
+            activeTab === "employees" ? "text-primary" : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setActiveTab("employees")}
+        >
+          Employee Attendance
+          {activeTab === "employees" && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+        <button
+          className={cn(
+            "px-6 py-3 text-sm font-medium transition-colors relative",
+            activeTab === "casual" ? "text-primary" : "text-muted-foreground hover:text-foreground"
+          )}
+          onClick={() => setActiveTab("casual")}
+        >
+          Casual Barista Schedule
+          {activeTab === "casual" && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+        </button>
+      </div>
+
+      {activeTab === "employees" ? (
+        <>
+          <Card className="rounded-sm border-border shadow-sm">
+            <CardContent className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+                <div className="lg:col-span-5 grid gap-2">
+                  <label className="text-sm font-medium">Period Selection</label>
+                  <div className="flex items-center gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {format(dateRange.from, "MMM d, yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 rounded-sm" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={dateRange.from}
+                          onSelect={(date) => date && setDateRange(prev => ({ ...prev, from: date }))}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <span className="text-muted-foreground shrink-0">—</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {format(dateRange.to, "MMM d, yyyy")}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 rounded-sm" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={dateRange.to}
+                          onSelect={(date) => date && setDateRange(prev => ({ ...prev, to: date }))}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-4 grid gap-2">
+                  <label className="text-sm font-medium">Search Barista</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Name..."
+                      className="pl-9 rounded-sm"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                  </PopoverContent>
-                </Popover>
-                <span className="text-muted-foreground shrink-0">—</span>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(dateRange.to, "MMM d, yyyy")}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 rounded-sm" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={dateRange.to}
-                      onSelect={(date) => date && setDateRange(prev => ({ ...prev, to: date }))}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-3">
+                  <Button 
+                    className="w-full rounded-sm gap-2 bg-foreground text-background hover:bg-foreground/90"
+                    onClick={() => refreshReport()}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Loading..." : "Generate Report"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <Card className="rounded-sm border-border shadow-sm">
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+              <div className="lg:col-span-5 grid gap-2">
+                <label className="text-sm font-medium">Period Selection</label>
+                <div className="flex items-center gap-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {format(dateRange.from, "MMM d, yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 rounded-sm" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={dateRange.from}
+                        onSelect={(date) => date && setDateRange(prev => ({ ...prev, from: date }))}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <span className="text-muted-foreground shrink-0">—</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="flex-1 justify-start text-left font-normal rounded-sm">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {format(dateRange.to, "MMM d, yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 rounded-sm" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={dateRange.to}
+                        onSelect={(date) => date && setDateRange(prev => ({ ...prev, to: date }))}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+
+              <div className="lg:col-span-4 grid gap-2">
+                <label className="text-sm font-medium">Search Casual Barista</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Name..."
+                    className="pl-9 rounded-sm"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="lg:col-span-3">
+                <Button 
+                  className="w-full rounded-sm gap-2 bg-foreground text-background hover:bg-foreground/90"
+                  onClick={() => refreshReport()}
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Loading..." : "Filter Results"}
+                </Button>
               </div>
             </div>
-
-            <div className="lg:col-span-4 grid gap-2">
-              <label className="text-sm font-medium">Search Barista</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Name..."
-                  className="pl-9 rounded-sm"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="lg:col-span-3">
-              <Button 
-                className="w-full rounded-sm gap-2 bg-foreground text-background hover:bg-foreground/90"
-                onClick={() => refreshReport()}
-                disabled={isLoading}
-              >
-                {isLoading ? "Loading..." : "Generate Report"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Resolve Absent Modal */}
       <Dialog open={resolveModalOpen} onOpenChange={setResolveModalOpen}>
@@ -551,234 +679,297 @@ export default function AttendanceReportPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Card className="rounded-sm border-border shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-muted/50 border-b border-border">
-                <th className="text-left p-4 font-medium text-sm text-muted-foreground">Barista</th>
-                <th className="text-left p-4 font-medium text-sm text-muted-foreground">Date</th>
-                <th className="text-left p-4 font-medium text-sm text-muted-foreground">Shift</th>
-                <th className="text-left p-4 font-medium text-sm text-muted-foreground">Actual Clock</th>
-                <th className="text-center p-4 font-medium text-sm text-muted-foreground">Method</th>
-                <th className="text-center p-4 font-medium text-sm text-muted-foreground">Performance</th>
-                <th className="text-right p-4 font-medium text-sm text-muted-foreground">Reg. Hours</th>
-                <th className="text-right p-4 font-medium text-sm text-muted-foreground">OT Hours</th>
-                <th className="text-right p-4 font-medium text-sm text-muted-foreground">Total Hours</th>
-                <th className="text-center p-4 font-medium text-sm text-muted-foreground">Penalty</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReport.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                    No attendance records found for the selected period
-                  </td>
+      {activeTab === "employees" ? (
+        <Card className="rounded-sm border-border shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-muted/50 border-b border-border">
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Barista</th>
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Date</th>
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Shift</th>
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Actual Clock</th>
+                  <th className="text-center p-4 font-medium text-sm text-muted-foreground">Method</th>
+                  <th className="text-center p-4 font-medium text-sm text-muted-foreground">Performance</th>
+                  <th className="text-right p-4 font-medium text-sm text-muted-foreground">Reg. Hours</th>
+                  <th className="text-right p-4 font-medium text-sm text-muted-foreground">OT Hours</th>
+                  <th className="text-right p-4 font-medium text-sm text-muted-foreground">Total Hours</th>
+                  <th className="text-center p-4 font-medium text-sm text-muted-foreground">Penalty</th>
                 </tr>
-              ) : (
-                filteredReport.map((row, idx) => {
-                  const shift = row.shift // Use the matched shift from the backend
-                  const totalMinutes = row.regularMinutes + row.overtimeMinutes
-                  
-                  return (
-                    <tr key={`${row.employee_id}-${row.date}-${idx}`} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-medium">
-                            {row.employee_name.charAt(0)}
+              </thead>
+              <tbody>
+                {filteredReport.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                      No attendance records found for the selected period
+                    </td>
+                  </tr>
+                ) : (
+                  filteredReport.map((row, idx) => {
+                    const shift = row.shift // Use the matched shift from the backend
+                    const totalMinutes = row.regularMinutes + row.overtimeMinutes
+                    
+                    return (
+                      <tr key={`${row.employee_id}-${row.date}-${idx}`} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-medium">
+                              {row.employee_name.charAt(0)}
+                            </div>
+                            <span className="font-medium text-sm">{row.employee_name}</span>
                           </div>
-                          <span className="font-medium text-sm">{row.employee_name}</span>
-                        </div>
-                      </td>
-                      <td className="p-4 text-sm whitespace-nowrap">
-                        {format(parseLocalDate(row.date), "EEE, MMM d")}
-                      </td>
-                      <td className="p-4">
-                        {shift ? (
+                        </td>
+                        <td className="p-4 text-sm whitespace-nowrap">
+                          {format(parseLocalDate(row.date), "EEE, MMM d")}
+                        </td>
+                        <td className="p-4">
+                          {shift ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-mono">{shift.start_time} - {shift.end_time}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-widest leading-none">
+                                {shift.shift_name || "Assigned"}
+                              </span>
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] uppercase font-bold text-muted-foreground/50">NO SHIFT</Badge>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {row.isAbsent ? (
+                            <div className="flex flex-col items-start gap-1 text-xs">
+                              <span className="font-bold text-destructive">Did not clock in</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-muted-foreground">Subject to penalty/deduction</span>
+                                {isSuperAdmin() && (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="h-5 text-[10px] px-2 py-0 border-primary/20 text-primary hover:bg-primary/10"
+                                    onClick={() => {
+                                      setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
+                                      setResolveTimes({ 
+                                        clockIn: row.shift?.start_time?.substring(0,5) || "08:00", 
+                                        clockOut: row.shift?.end_time?.substring(0,5) || "17:00" 
+                                      })
+                                      setResolveModalOpen(true)
+                                    }}
+                                  >
+                                    Resolve
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5 text-xs">
+                                 <span className="font-mono text-green-600 dark:text-green-500">{format(new Date(row.sessions[0].clockIn), "HH:mm")}</span>
+                                 <span className="text-muted-foreground">—</span>
+                                 <span className="font-mono text-muted-foreground">
+                                   {row.sessions[row.sessions.length - 1].clockOut 
+                                     ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
+                                     : (row.sessions[0]?.otStatus === 'rejected') ? (
+                                       <span className="text-destructive font-bold text-[10px] uppercase tracking-wider bg-destructive/10 px-1 py-0.5 rounded-sm">Rejected</span>
+                                     ) : (row.sessions[0]?.otStatus === 'pending') ? (
+                                       <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending</span>
+                                     ) : (row.sessions[0]?.otStatus === 'approved') ? (
+                                       <span className="text-green-500 font-bold text-[10px] uppercase tracking-wider bg-green-500/10 px-1 py-0.5 rounded-sm">Active</span>
+                                     ) : (
+                                       <div className="flex items-center gap-2">
+                                         <span className="text-primary font-bold text-[10px] uppercase tracking-wider bg-primary/10 px-1 py-0.5 rounded-sm">Active</span>
+                                         {isSuperAdmin() && (
+                                           <button 
+                                             onClick={() => triggerForceClockOut(row.employee_id, row.employee_name, row.date)}
+                                             className="text-[9px] font-bold text-destructive hover:underline flex items-center gap-1"
+                                           >
+                                             <UserMinus className="w-3 h-3" /> Force Out
+                                           </button>
+                                         )}
+                                       </div>
+                                     )}
+                                 </span>
+                              </div>
+                              {row.sessions[row.sessions.length - 1].isAutoClockOut && (
+                                <span className="text-[9px] text-orange-500 uppercase font-bold mt-0.5">
+                                  Auto Tap-out
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button className="flex flex-col items-center gap-0.5 hover:bg-muted p-1 rounded-md transition-colors">
+                                  {row.method === 'personal' ? (
+                                    <>
+                                      <Smartphone className="w-4 h-4 text-primary" />
+                                      <span className="text-[9px] font-bold text-primary uppercase">Mobile</span>
+                                    </>
+                                  ) : row.method === 'nfc' ? (
+                                    <>
+                                      <Fingerprint className="w-4 h-4 text-orange-500" />
+                                      <span className="text-[9px] font-bold text-orange-600 uppercase tracking-tighter">OPS NFC</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">—</span>
+                                  )}
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-4 rounded-sm shadow-xl border-primary/20" align="center">
+                                <div className="space-y-3">
+                                  <div className="flex items-center gap-2 border-b pb-2">
+                                    <Info className="w-4 h-4 text-primary" />
+                                    <h4 className="font-bold text-sm tracking-tight">Clock-in Metadata</h4>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-3 gap-y-2 text-xs">
+                                    <span className="text-muted-foreground">Method</span>
+                                    <span className="col-span-2 font-medium capitalize">{row.method || 'NFC (System)'}</span>
+                                    
+                                    <span className="text-muted-foreground">Outlet</span>
+                                    <span className="col-span-2 font-medium">{outlets.find(o => o.id === row.outletId)?.name || 'Main Outlet / Onsite'}</span>
+                                    
+                                    <span className="text-muted-foreground">Device</span>
+                                    <span className="col-span-2 font-mono text-[10px] break-all leading-tight">
+                                      {row.deviceInfo || (row.method === 'nfc' ? 'Operational Terminal' : 'Unknown')}
+                                    </span>
+                                    
+                                    <span className="text-muted-foreground">IP Addr</span>
+                                    <span className="col-span-2 font-mono text-[10px]">{row.sessions?.[0]?.ipAddress || '—'}</span>
+                                  </div>
+
+                                  {row.method === 'personal' && row.sessions?.[0]?.latitude && (
+                                    <div className="pt-2 border-t text-[10px] text-muted-foreground italic">
+                                      Coord: {row.sessions[0].latitude}, {row.sessions[0].longitude}
+                                    </div>
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                        </td>
+                         <td className="p-4 text-center">
+                          <div className="flex justify-center gap-2">
+                            {row.isAbsent ? (
+                              <Badge className="bg-destructive/10 text-destructive border-none rounded-sm text-[10px] font-black tracking-widest uppercase">
+                                ABSENT
+                              </Badge>
+                            ) : !shift ? (
+                              <Badge variant="outline" className="text-[10px] rounded-sm text-muted-foreground border-dashed uppercase">UNSCHEDULED</Badge>
+                            ) : row.isLate ? (
+                              <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 rounded-sm text-[10px] font-bold uppercase">
+                                LATE {row.lateMinutes}m
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] rounded-sm text-green-500 border-green-500/20 uppercase">Punctual</Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right font-mono text-sm">
+                          {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.regularMinutes)}
+                        </td>
+                        <td className="p-4 text-right font-mono text-sm">
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={cn(row.overtimeMinutes > 0 ? "text-amber-600 font-bold" : "text-muted-foreground")}>
+                              {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.overtimeMinutes)}
+                            </span>
+                            {!row.isAbsent && row.sessions[0]?.otStatus && row.sessions[0].otStatus !== 'none' && (
+                              <Badge variant="outline" className={cn(
+                                "text-[8.5px] uppercase px-1 py-0 h-4 border-none leading-none tracking-tight",
+                                row.sessions[0].otStatus === 'approved' ? "text-green-600 bg-green-500/10" :
+                                row.sessions[0].otStatus === 'rejected' ? "text-destructive bg-destructive/10" :
+                                "text-amber-600 bg-amber-500/10"
+                              )}>
+                                OT {row.sessions[0].otStatus}
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 text-right font-mono text-sm font-bold">
+                          {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(totalMinutes)}
+                        </td>
+                        <td className="p-4 text-center">
+                          {row.isAbsent ? (
+                             <span className="text-muted-foreground text-[10px]">—</span>
+                          ) : row.isPenalty ? (
+                            <Badge className="bg-destructive text-destructive-foreground border-none rounded-sm text-[10px] font-black animate-pulse">
+                              LATE &gt;15m
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-[10px]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : (
+        <Card className="rounded-sm border-border shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-muted/50 border-b border-border">
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Casual Barista Name</th>
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Date</th>
+                  <th className="text-left p-4 font-medium text-sm text-muted-foreground">Scheduled Shift</th>
+                  <th className="text-right p-4 font-medium text-sm text-muted-foreground">Total Duration</th>
+                  <th className="text-center p-4 font-medium text-sm text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {casualShifts.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-muted-foreground">
+                      No casual barista shifts found for the selected period
+                    </td>
+                  </tr>
+                ) : (
+                  casualShifts.map((shift, idx) => {
+                    const duration = calculateDuration(shift.start_time, shift.end_time)
+                    
+                    return (
+                      <tr key={`${shift.id}-${idx}`} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-xs font-medium text-amber-800">
+                              {shift.employee_name?.charAt(0) || "C"}
+                            </div>
+                            <span className="font-medium text-sm">{shift.employee_name || "Casual Barista"}</span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-sm">
+                          {format(parseLocalDate(shift.date), "EEE, MMM d, yyyy")}
+                        </td>
+                        <td className="p-4">
                           <div className="flex flex-col">
                             <span className="text-xs font-mono">{shift.start_time} - {shift.end_time}</span>
                             <span className="text-[10px] text-muted-foreground uppercase tracking-widest leading-none">
-                              {shift.shift_name || "Assigned"}
+                              {shift.shift_name || "Casual Assignment"}
                             </span>
                           </div>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] uppercase font-bold text-muted-foreground/50">NO SHIFT</Badge>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {row.isAbsent ? (
-                          <div className="flex flex-col items-start gap-1 text-xs">
-                            <span className="font-bold text-destructive">Did not clock in</span>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] text-muted-foreground">Subject to penalty/deduction</span>
-                              {isSuperAdmin() && (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
-                                  className="h-5 text-[10px] px-2 py-0 border-primary/20 text-primary hover:bg-primary/10"
-                                  onClick={() => {
-                                    setResolveData({ employee_id: row.employee_id, employee_name: row.employee_name, date: row.date })
-                                    setResolveTimes({ 
-                                      clockIn: row.shift?.start_time?.substring(0,5) || "08:00", 
-                                      clockOut: row.shift?.end_time?.substring(0,5) || "17:00" 
-                                    })
-                                    setResolveModalOpen(true)
-                                  }}
-                                >
-                                  Resolve
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-1.5 text-xs">
-                               <span className="font-mono text-green-600 dark:text-green-500">{format(new Date(row.sessions[0].clockIn), "HH:mm")}</span>
-                               <span className="text-muted-foreground">—</span>
-                               <span className="font-mono text-muted-foreground">
-                                 {row.sessions[row.sessions.length - 1].clockOut 
-                                   ? format(new Date(row.sessions[row.sessions.length - 1].clockOut), "HH:mm")
-                                   : (row.sessions[0]?.otStatus === 'rejected') ? (
-                                     <span className="text-destructive font-bold text-[10px] uppercase tracking-wider bg-destructive/10 px-1 py-0.5 rounded-sm">Rejected</span>
-                                   ) : (row.sessions[0]?.otStatus === 'pending') ? (
-                                     <span className="text-amber-500 font-bold text-[10px] uppercase tracking-wider bg-amber-500/10 px-1 py-0.5 rounded-sm">Pending</span>
-                                   ) : (row.sessions[0]?.otStatus === 'approved') ? (
-                                     <span className="text-green-500 font-bold text-[10px] uppercase tracking-wider bg-green-500/10 px-1 py-0.5 rounded-sm">Active</span>
-                                   ) : (
-                                     <div className="flex items-center gap-2">
-                                       <span className="text-primary font-bold text-[10px] uppercase tracking-wider bg-primary/10 px-1 py-0.5 rounded-sm">Active</span>
-                                       {isSuperAdmin() && (
-                                         <button 
-                                           onClick={() => triggerForceClockOut(row.employee_id, row.employee_name, row.date)}
-                                           className="text-[9px] font-bold text-destructive hover:underline flex items-center gap-1"
-                                         >
-                                           <UserMinus className="w-3 h-3" /> Force Out
-                                         </button>
-                                       )}
-                                     </div>
-                                   )}
-                               </span>
-                            </div>
-                            {row.sessions[row.sessions.length - 1].isAutoClockOut && (
-                              <span className="text-[9px] text-orange-500 uppercase font-bold mt-0.5">
-                                Auto Tap-out
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-4 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button className="flex flex-col items-center gap-0.5 hover:bg-muted p-1 rounded-md transition-colors">
-                                {row.method === 'personal' ? (
-                                  <>
-                                    <Smartphone className="w-4 h-4 text-primary" />
-                                    <span className="text-[9px] font-bold text-primary uppercase">Mobile</span>
-                                  </>
-                                ) : row.method === 'nfc' ? (
-                                  <>
-                                    <Fingerprint className="w-4 h-4 text-orange-500" />
-                                    <span className="text-[9px] font-bold text-orange-600 uppercase tracking-tighter">OPS NFC</span>
-                                  </>
-                                ) : (
-                                  <span className="text-muted-foreground text-xs">—</span>
-                                )}
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-64 p-4 rounded-sm shadow-xl border-primary/20" align="center">
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-2 border-b pb-2">
-                                  <Info className="w-4 h-4 text-primary" />
-                                  <h4 className="font-bold text-sm tracking-tight">Clock-in Metadata</h4>
-                                </div>
-                                
-                                <div className="grid grid-cols-3 gap-y-2 text-xs">
-                                  <span className="text-muted-foreground">Method</span>
-                                  <span className="col-span-2 font-medium capitalize">{row.method || 'NFC (System)'}</span>
-                                  
-                                  <span className="text-muted-foreground">Outlet</span>
-                                  <span className="col-span-2 font-medium">{outlets.find(o => o.id === row.outletId)?.name || 'Main Outlet / Onsite'}</span>
-                                  
-                                  <span className="text-muted-foreground">Device</span>
-                                  <span className="col-span-2 font-mono text-[10px] break-all leading-tight">
-                                    {row.deviceInfo || (row.method === 'nfc' ? 'Operational Terminal' : 'Unknown')}
-                                  </span>
-                                  
-                                  <span className="text-muted-foreground">IP Addr</span>
-                                  <span className="col-span-2 font-mono text-[10px]">{row.sessions?.[0]?.ipAddress || '—'}</span>
-                                </div>
-
-                                {row.method === 'personal' && row.sessions?.[0]?.latitude && (
-                                  <div className="pt-2 border-t text-[10px] text-muted-foreground italic">
-                                    Coord: {row.sessions[0].latitude}, {row.sessions[0].longitude}
-                                  </div>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      </td>
-                       <td className="p-4 text-center">
-                        <div className="flex justify-center gap-2">
-                          {row.isAbsent ? (
-                            <Badge className="bg-destructive/10 text-destructive border-none rounded-sm text-[10px] font-black tracking-widest uppercase">
-                              ABSENT
-                            </Badge>
-                          ) : !shift ? (
-                            <Badge variant="outline" className="text-[10px] rounded-sm text-muted-foreground border-dashed uppercase">UNSCHEDULED</Badge>
-                          ) : row.isLate ? (
-                            <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 rounded-sm text-[10px] font-bold uppercase">
-                              LATE {row.lateMinutes}m
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] rounded-sm text-green-500 border-green-500/20 uppercase">Punctual</Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-mono text-sm">
-                        {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.regularMinutes)}
-                      </td>
-                      <td className="p-4 text-right font-mono text-sm">
-                        <div className="flex flex-col items-end gap-1">
-                          <span className={cn(row.overtimeMinutes > 0 ? "text-amber-600 font-bold" : "text-muted-foreground")}>
-                            {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(row.overtimeMinutes)}
-                          </span>
-                          {!row.isAbsent && row.sessions[0]?.otStatus && row.sessions[0].otStatus !== 'none' && (
-                            <Badge variant="outline" className={cn(
-                              "text-[8.5px] uppercase px-1 py-0 h-4 border-none leading-none tracking-tight",
-                              row.sessions[0].otStatus === 'approved' ? "text-green-600 bg-green-500/10" :
-                              row.sessions[0].otStatus === 'rejected' ? "text-destructive bg-destructive/10" :
-                              "text-amber-600 bg-amber-500/10"
-                            )}>
-                              OT {row.sessions[0].otStatus}
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-mono text-sm font-bold">
-                        {row.isAbsent ? <span className="text-muted-foreground">—</span> : formatHours(totalMinutes)}
-                      </td>
-                      <td className="p-4 text-center">
-                        {row.isAbsent ? (
-                           <span className="text-muted-foreground text-[10px]">—</span>
-                        ) : row.isPenalty ? (
-                          <Badge className="bg-destructive text-destructive-foreground border-none rounded-sm text-[10px] font-black animate-pulse">
-                            LATE &gt;15m
+                        </td>
+                        <td className="p-4 text-right font-mono text-sm font-bold">
+                          {formatHours(duration)}
+                        </td>
+                        <td className="p-4 text-center">
+                          <Badge variant="outline" className="text-[10px] rounded-sm bg-gray-50 text-gray-500 border-gray-200 uppercase">
+                            Scheduled
                           </Badge>
-                        ) : (
-                          <span className="text-muted-foreground text-[10px]">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

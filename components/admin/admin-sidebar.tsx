@@ -62,7 +62,8 @@ export function AdminSidebar() {
       item.href !== "/admin/employees" && 
       item.href !== "/admin/overtime" && 
       item.href !== "/admin/outlets" &&
-      item.href !== "/admin/logs"
+      item.href !== "/admin/logs" &&
+      item.href !== "/admin/analytics"
     )
   }
 

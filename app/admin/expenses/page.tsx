@@ -63,7 +63,8 @@ export default function ExpensesPage() {
     category: "",
     amount: "",
     notes: "",
-    month: format(new Date(), "yyyy-MM")
+    month: format(new Date(), "yyyy-MM"),
+    includeInCosting: true
   })
 
   const categories = [
@@ -107,7 +108,7 @@ export default function ExpensesPage() {
         month: formData.month,
         category: formData.category,
         amount: parseFloat(formData.amount),
-        notes: formData.notes
+        notes: formData.includeInCosting ? formData.notes : `[EXCLUDE] ${formData.notes}`.trim()
       })
 
       if (result) {
@@ -117,7 +118,8 @@ export default function ExpensesPage() {
           category: "",
           amount: "",
           notes: "",
-          month: format(new Date(), "yyyy-MM")
+          month: format(new Date(), "yyyy-MM"),
+          includeInCosting: true
         })
         fetchData()
       } else {
@@ -239,6 +241,23 @@ export default function ExpensesPage() {
                     onChange={(e) => setFormData({...formData, notes: e.target.value})}
                   />
                 </div>
+                <div className="flex items-center space-x-2 bg-muted/50 p-3 rounded-sm border border-border/50">
+                  <input 
+                    type="checkbox" 
+                    id="includeInCosting" 
+                    checked={formData.includeInCosting}
+                    onChange={(e) => setFormData({...formData, includeInCosting: e.target.checked})}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <Label htmlFor="includeInCosting" className="text-sm font-medium leading-none cursor-pointer">
+                      Include in Menu Costing
+                    </Label>
+                    <p className="text-[10px] text-muted-foreground">
+                      If unchecked, this expense won't affect the price of your coffee.
+                    </p>
+                  </div>
+                </div>
                 <DialogFooter className="mt-4">
                   <Button type="submit" disabled={isSubmitting} className="w-full">
                     {isSubmitting ? "Saving..." : "Save Expense"}
@@ -302,11 +321,16 @@ export default function ExpensesPage() {
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <Tag className="w-4 h-4 text-muted-foreground" />
-                            <span className="font-medium text-sm">{item.category}</span>
+                            <div className="flex flex-col">
+                              <span className="font-medium text-sm">{item.category}</span>
+                              {item.notes?.includes('[EXCLUDE]') && (
+                                <span className="text-[9px] text-amber-600 font-bold uppercase tracking-tighter">Excluded from Menu Cost</span>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="p-4 text-sm text-muted-foreground italic">
-                          {item.notes || "-"}
+                          {item.notes?.replace('[EXCLUDE]', '').trim() || "-"}
                         </td>
                         <td className="p-4 text-sm text-muted-foreground">
                           {format(new Date(item.created_at || new Date()), "MMM d, yyyy")}

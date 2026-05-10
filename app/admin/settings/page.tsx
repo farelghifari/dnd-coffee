@@ -48,6 +48,11 @@ import {
   ArrowDown,
   ShieldCheck,
   User,
+  FileText,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
   CalendarClock,
   Timer,
   XCircle
@@ -235,11 +240,20 @@ export default function SettingsPage() {
 
     // Build the shift slot arrays based on current counts
     const finalFtShifts = Array.from({ length: Math.max(ftFromDb, ftCount) }).map((_, i) => {
-      const configName = `Full-time Shift ${i + 1}`
-      const existing = data.find(c => c.name === configName)
+      // Find configs that are either legacy "Full-time Shift X" or new "FT:..." format
+      const legacyName = `Full-time Shift ${i + 1}`
+      const existing = data.find(c => c.name === legacyName || c.name.startsWith(`FT:${i+1}:`))
+      
+      let displayLabel = legacyName
+      if (existing?.name.startsWith(`FT:${i+1}:`)) {
+        displayLabel = existing.name.split(`FT:${i+1}:`)[1]
+      } else if (existing) {
+        displayLabel = existing.name
+      }
+
       return {
         id: existing?.id || `ft-${i + 1}`,
-        label: configName,
+        label: displayLabel,
         start_time: existing?.start_time || "06:00",
         end_time: existing?.end_time || "14:00",
         type: "full-time" as const
@@ -248,11 +262,19 @@ export default function SettingsPage() {
     setFullTimeShifts(finalFtShifts)
 
     const finalPtShifts = Array.from({ length: Math.max(ptFromDb, ptCount) }).map((_, i) => {
-      const configName = `Part-time Shift ${i + 1}`
-      const existing = data.find(c => c.name === configName)
+      const legacyName = `Part-time Shift ${i + 1}`
+      const existing = data.find(c => c.name === legacyName || c.name.startsWith(`PT:${i+1}:`))
+      
+      let displayLabel = legacyName
+      if (existing?.name.startsWith(`PT:${i+1}:`)) {
+        displayLabel = existing.name.split(`PT:${i+1}:`)[1]
+      } else if (existing) {
+        displayLabel = existing.name
+      }
+
       return {
         id: existing?.id || `pt-${i + 1}`,
-        label: configName,
+        label: displayLabel,
         start_time: existing?.start_time || "06:00",
         end_time: existing?.end_time || "10:00",
         type: "part-time" as const
@@ -481,19 +503,21 @@ export default function SettingsPage() {
       const currentFtShifts = fullTimeShifts.slice(0, ftCount)
       for (let i = 0; i < currentFtShifts.length; i++) {
         const shift = currentFtShifts[i]
-        const configName = `Full-time Shift ${i + 1}`
+        const legacyName = `Full-time Shift ${i + 1}`
+        const newName = `FT:${i+1}:${shift.label}`
         
-        const existingConfig = dbShiftConfigs.find(c => c.name === configName)
+        // Find by legacy name or the new prefixed format with same index
+        const existingConfig = dbShiftConfigs.find(c => c.name === legacyName || c.name.startsWith(`FT:${i+1}:`))
         
         if (existingConfig) {
           await updateShiftConfig(existingConfig.id, {
-            name: configName,
+            name: newName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
         } else {
           await addShiftConfig({
-            name: configName,
+            name: newName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
@@ -501,10 +525,13 @@ export default function SettingsPage() {
       }
 
       // Delete removed full-time shifts from DB
-      const ftConfigsToDelete = dbShiftConfigs.filter(c => 
-        c.name.startsWith("Full-time Shift") && 
-        parseInt(c.name.split(" ").pop() || "0") > ftCount
-      )
+      const ftConfigsToDelete = dbShiftConfigs.filter(c => {
+        const isFt = c.name.startsWith("Full-time Shift") || c.name.startsWith("FT:")
+        let index = 0
+        if (c.name.startsWith("Full-time Shift")) index = parseInt(c.name.split(" ").pop() || "0")
+        else if (c.name.startsWith("FT:")) index = parseInt(c.name.split(":")[1])
+        return isFt && index > ftCount
+      })
       for (const config of ftConfigsToDelete) {
         await deleteShiftConfig(config.id)
       }
@@ -513,19 +540,20 @@ export default function SettingsPage() {
       const currentPtShifts = partTimeShifts.slice(0, ptCount)
       for (let i = 0; i < currentPtShifts.length; i++) {
         const shift = currentPtShifts[i]
-        const configName = `Part-time Shift ${i + 1}`
+        const legacyName = `Part-time Shift ${i + 1}`
+        const newName = `PT:${i+1}:${shift.label}`
         
-        const existingConfig = dbShiftConfigs.find(c => c.name === configName)
+        const existingConfig = dbShiftConfigs.find(c => c.name === legacyName || c.name.startsWith(`PT:${i+1}:`))
         
         if (existingConfig) {
           await updateShiftConfig(existingConfig.id, {
-            name: configName,
+            name: newName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
         } else {
           await addShiftConfig({
-            name: configName,
+            name: newName,
             start_time: shift.start_time,
             end_time: shift.end_time
           })
@@ -533,10 +561,13 @@ export default function SettingsPage() {
       }
 
       // Delete removed part-time shifts from DB
-      const ptConfigsToDelete = dbShiftConfigs.filter(c => 
-        c.name.startsWith("Part-time Shift") && 
-        parseInt(c.name.split(" ").pop() || "0") > ptCount
-      )
+      const ptConfigsToDelete = dbShiftConfigs.filter(c => {
+        const isPt = c.name.startsWith("Part-time Shift") || c.name.startsWith("PT:")
+        let index = 0
+        if (c.name.startsWith("Part-time Shift")) index = parseInt(c.name.split(" ").pop() || "0")
+        else if (c.name.startsWith("PT:")) index = parseInt(c.name.split(":")[1])
+        return isPt && index > ptCount
+      })
       for (const config of ptConfigsToDelete) {
         await deleteShiftConfig(config.id)
       }
@@ -557,7 +588,7 @@ export default function SettingsPage() {
   const updateShiftTime = (
     type: "full-time" | "part-time", 
     index: number, 
-    field: "start_time" | "end_time", 
+    field: "start_time" | "end_time" | "label", 
     value: string
   ) => {
     if (type === "full-time") {
@@ -671,11 +702,11 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="weekday">Weekday Hours (Mon-Fri)</Label>
+              <Label htmlFor="weekday">Mon - Thu Hours</Label>
               <Input id="weekday" defaultValue={shopInfo.hours.weekday} className="rounded-sm" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="weekend">Weekend Hours (Sat-Sun)</Label>
+              <Label htmlFor="weekend">Fri - Sun Hours</Label>
               <Input id="weekend" defaultValue={shopInfo.hours.weekend} className="rounded-sm" />
             </div>
             <Button 
@@ -795,8 +826,26 @@ export default function SettingsPage() {
                     return (
                       <div key={shift.id || index} className="group p-4 rounded-sm border bg-card hover:border-primary/30 transition-all shadow-sm">
                         <div className="flex items-center justify-between mb-4">
-                          <p className="text-xs font-bold uppercase tracking-widest text-primary/70">{shift.label || `FT Shift ${index+1}`}</p>
-                          <Clock className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+                          <div className="space-y-1 w-full">
+                            <Label className="text-[10px] text-muted-foreground/60 font-bold uppercase tracking-widest">Shift Name</Label>
+                            <div className="flex items-center gap-2 group/name">
+                              <Input 
+                                value={shift.label}
+                                onChange={(e) => updateShiftTime("full-time", index, "label", e.target.value)}
+                                className="text-xs font-bold uppercase tracking-widest text-primary/80 bg-muted/30 border-muted-foreground/10 h-8 focus-visible:ring-primary/20 w-full rounded-sm"
+                                placeholder="e.g. Morning Shift"
+                              />
+                              <Pencil className="w-3 h-3 text-muted-foreground/40 group-hover/name:text-primary transition-colors shrink-0" />
+                            </div>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive transition-colors rounded-full shrink-0 -mt-4"
+                            onClick={() => setFtCount(prev => Math.max(1, prev - 1))}
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </Button>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1.5">
@@ -850,8 +899,26 @@ export default function SettingsPage() {
                     return (
                       <div key={shift.id || index} className="group p-4 rounded-sm border bg-card hover:border-teal-500/30 transition-all shadow-sm">
                         <div className="flex items-center justify-between mb-4">
-                          <p className="text-xs font-bold uppercase tracking-widest text-teal-600/70">{shift.label || `PT Shift ${index+1}`}</p>
-                          <Timer className="w-3 h-3 text-muted-foreground group-hover:text-teal-600 transition-colors" />
+                          <div className="space-y-1 w-full">
+                            <Label className="text-[10px] text-muted-foreground/60 font-bold uppercase tracking-widest">Shift Name</Label>
+                            <div className="flex items-center gap-2 group/name">
+                              <Input 
+                                value={shift.label}
+                                onChange={(e) => updateShiftTime("part-time", index, "label", e.target.value)}
+                                className="text-xs font-bold uppercase tracking-widest text-teal-600/80 bg-muted/30 border-muted-foreground/10 h-8 focus-visible:ring-teal-500/20 w-full rounded-sm"
+                                placeholder="e.g. Flexible 1"
+                              />
+                              <Pencil className="w-3 h-3 text-muted-foreground/40 group-hover/name:text-teal-600 transition-colors shrink-0" />
+                            </div>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive transition-colors rounded-full shrink-0 -mt-4"
+                            onClick={() => setPtCount(prev => Math.max(1, prev - 1))}
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </Button>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">

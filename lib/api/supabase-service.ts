@@ -272,6 +272,7 @@ export interface MonthlyOpex {
   amount: number
   notes?: string
   attachment_url?: string
+  exclude_from_costing?: boolean
   created_at: string
 }
 
@@ -368,7 +369,7 @@ export interface ShiftConfig {
 // DB Schema: shifts(id, employee_id, date, start_time, end_time, shift_config_id)
 export interface ShiftAssignment {
   id: string
-  employee_id: string
+  employee_id: string | null
   date: string
   start_time: string
   end_time: string
@@ -377,6 +378,7 @@ export interface ShiftAssignment {
   employee_name?: string
   day_of_week?: number
   shift_name?: string
+  is_casual?: boolean
 }
 
 export interface OvertimeRequest {
@@ -3050,7 +3052,7 @@ export async function getShiftAssignments(): Promise<ShiftAssignment[]> {
     // Map the joined data to include employee_name
     return (data || []).map(shift => ({
       ...shift,
-      employee_name: (shift.employees as any)?.name || 'Unknown'
+      employee_name: (shift.employees as any)?.name || shift.employee_name || 'Casual Barista'
     })) as ShiftAssignment[]
   }
   
@@ -3138,7 +3140,7 @@ export async function getShiftOnDate(employeeId: string, date: string): Promise<
 
 // SCHEDULING FIX - Insert into shifts: employee_id, date, start_time, end_time, shift_config_id (optional)
 export async function addShiftAssignment(assignment: { 
-  employee_id: string; 
+  employee_id: string | null; 
   date: string; 
   start_time: string; 
   end_time: string; 
@@ -3146,6 +3148,7 @@ export async function addShiftAssignment(assignment: {
   shift_config_id?: string;
   shift_name?: string;
   day_of_week?: number;
+  is_casual?: boolean;
 }): Promise<ShiftAssignment | null> {
   console.log("[v0] addShiftAssignment (INSERT) called with:", assignment)
   
@@ -3158,6 +3161,7 @@ export async function addShiftAssignment(assignment: {
   if (isSupabaseConfigured()) {
     const shiftData: any = {
       employee_id: assignment.employee_id,
+      employee_name: assignment.employee_name,
       date: assignment.date,
       start_time: assignment.start_time,
       end_time: assignment.end_time,
@@ -3177,7 +3181,7 @@ export async function addShiftAssignment(assignment: {
     }
     return {
       ...data,
-      employee_name: (data.employees as any)?.name || assignment.employee_name || 'Unknown'
+      employee_name: (data.employees as any)?.name || data.employee_name || assignment.employee_name || 'Casual Barista'
     } as ShiftAssignment
   }
   
@@ -3250,11 +3254,12 @@ export async function updateShiftAssignment(id: string, updates: Partial<ShiftAs
   if (isSupabaseConfigured()) {
     // Only include valid database columns
     const updateData: any = {}
-    if (updates.employee_id) updateData.employee_id = updates.employee_id
+    if (updates.employee_id !== undefined) updateData.employee_id = updates.employee_id
+    if (updates.employee_name !== undefined) updateData.employee_name = updates.employee_name
     if (updates.date) updateData.date = updates.date
     if (updates.start_time) updateData.start_time = updates.start_time
     if (updates.end_time) updateData.end_time = updates.end_time
-    if (updates.shift_config_id) updateData.shift_config_id = updates.shift_config_id
+    if (updates.shift_config_id !== undefined) updateData.shift_config_id = updates.shift_config_id
     
     console.log("[v0] updateShiftAssignment calling supabase with payload:", updateData)
     
@@ -4064,7 +4069,7 @@ export async function getMenuCOGS(menuId: string, month?: string, totalMenusSold
   let overheadPerItem = 0
   if (month && totalMenusSold && totalMenusSold > 0) {
     const opexList = await getMonthlyOpex(month)
-    const totalOverhead = opexList.reduce((sum, o) => sum + o.amount, 0)
+    const totalOverhead = opexList.filter(o => !o.exclude_from_costing).reduce((sum, o) => sum + o.amount, 0)
     overheadPerItem = totalOverhead / totalMenusSold
   }
   
@@ -5154,7 +5159,7 @@ export async function lockPayrollToAnalytics(month: string, amount: number): Pro
   return false
 }
 
-export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id' | 'created_at'>): Promise<MonthlyOpex | null> {
+export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id'>): Promise<MonthlyOpex | null> {
   if (isSupabaseConfigured()) {
     const { data: result, error } = await supabase
       .from('monthly_opex')

@@ -1072,7 +1072,9 @@ export default function InventoryPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{formatPrice(monthlyOpex.reduce((sum, o) => sum + o.amount, 0))}</p>
-                <p className="text-[10px] text-muted-foreground mt-1">Sum of all operational expenses</p>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Active for Costing: {formatPrice(monthlyOpex.filter(o => !o.notes?.includes('[EXCLUDE]')).reduce((sum, o) => sum + o.amount, 0))}
+                </p>
               </CardContent>
             </Card>
             <Card className="rounded-sm bg-primary/5 border-primary/20">
@@ -1090,13 +1092,13 @@ export default function InventoryPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold text-emerald-700">
-                  {formatPrice(
-                    salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
-                      ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
-                      : 0
-                  )}
+                  {(() => {
+                    const activeOpex = monthlyOpex.filter(o => !o.notes?.includes('[EXCLUDE]')).reduce((sum, o) => sum + o.amount, 0);
+                    const totalSold = salesReport.reduce((sum, s) => sum + s.total_sold, 0);
+                    return formatPrice(totalSold > 0 ? activeOpex / totalSold : 0);
+                  })()}
                 </p>
-                <p className="text-[10px] text-emerald-600/70 mt-1">Rule 3: (Total BOP / Total Sold)</p>
+                <p className="text-[10px] text-emerald-600/70 mt-1">Rule 3: (Active BOP / Total Sold)</p>
               </CardContent>
             </Card>
           </div>
@@ -1177,9 +1179,11 @@ export default function InventoryPage() {
                         <span className="text-emerald-700 font-medium">Overhead Share (Rule 3)</span>
                         <span className="font-mono font-bold text-emerald-700">
                           +{formatPrice(
-                            salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
-                              ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
-                              : 0
+                            (() => {
+                              const activeOpex = monthlyOpex.filter(o => !o.notes?.includes('[EXCLUDE]')).reduce((sum, o) => sum + o.amount, 0);
+                              const totalSold = salesReport.reduce((sum, s) => sum + s.total_sold, 0);
+                              return totalSold > 0 ? activeOpex / totalSold : 0;
+                            })()
                           )}
                         </span>
                       </div>
@@ -1194,9 +1198,11 @@ export default function InventoryPage() {
                           return acc + (invItem?.unit_cost || 0) * ing.quantity;
                         }, 0) || 0) + 
                         (item.packaging_cost || 0) +
-                        (salesReport.reduce((sum, s) => sum + s.total_sold, 0) > 0 
-                          ? monthlyOpex.reduce((sum, o) => sum + o.amount, 0) / salesReport.reduce((sum, s) => sum + s.total_sold, 0)
-                          : 0)
+                        (() => {
+                          const activeOpex = monthlyOpex.filter(o => !o.notes?.includes('[EXCLUDE]')).reduce((sum, o) => sum + o.amount, 0);
+                          const totalSold = salesReport.reduce((sum, s) => sum + s.total_sold, 0);
+                          return totalSold > 0 ? activeOpex / totalSold : 0;
+                        })()
                       )}
                     </span>
                   </div>

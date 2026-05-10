@@ -105,6 +105,10 @@ export default function SchedulingPage() {
   const [customEndTime, setCustomEndTime] = useState("17:00")
   const [editingShift, setEditingShift] = useState<ShiftAssignment | null>(null)
 
+  // Casual barista state
+  const [isCasual, setIsCasual] = useState(false)
+  const [casualName, setCasualName] = useState("")
+
   // Custom Alert State
   const [alertModal, setAlertModal] = useState<{ open: boolean; title: string; description: string }>({
     open: false,
@@ -150,7 +154,7 @@ export default function SchedulingPage() {
     return shiftAssignments
       .filter(shift => 
         shift.date === dateStr && 
-        employees.some(e => e.id === shift.employee_id)
+        (shift.employee_id === null || employees.some(e => e.id === shift.employee_id))
       )
       .sort((a, b) => a.start_time.localeCompare(b.start_time))
   }
@@ -203,6 +207,8 @@ export default function SchedulingPage() {
   const handleCellClick = (dateStr: string, dayOfWeek: number) => {
     setSelectedCell({ date: dateStr, dayOfWeek })
     setSelectedEmployeeId("")
+    setCasualName("")
+    setIsCasual(false)
     setSelectedShiftConfigId("")
     setEditingShift(null)
     setIsAddShiftOpen(true)
@@ -211,7 +217,16 @@ export default function SchedulingPage() {
   const handleEditShiftClick = (shift: ShiftAssignment) => {
     setEditingShift(shift)
     setSelectedCell({ date: shift.date, dayOfWeek: shift.day_of_week || 0 })
-    setSelectedEmployeeId(shift.employee_id)
+    
+    if (shift.employee_id) {
+      setSelectedEmployeeId(shift.employee_id)
+      setIsCasual(false)
+      setCasualName("")
+    } else {
+      setSelectedEmployeeId("")
+      setIsCasual(true)
+      setCasualName(shift.employee_name || "")
+    }
     
     if (shift.shift_config_id) {
       setShiftType("predefined")
@@ -226,10 +241,12 @@ export default function SchedulingPage() {
   }
 
   const handleSaveShift = async () => {
-    if (!selectedCell || !selectedEmployeeId) return
+    if (!selectedCell) return
+    if (!isCasual && !selectedEmployeeId) return
+    if (isCasual && !casualName) return
     
-    const employee = employees.find(e => e.id === selectedEmployeeId)
-    if (!employee) return
+    const employee = isCasual ? null : employees.find(e => e.id === selectedEmployeeId)
+    if (!isCasual && !employee) return
 
     // Determine start and end times based on shift type
     let startTime: string
@@ -253,8 +270,8 @@ export default function SchedulingPage() {
     if (editingShift) {
       console.log("[v0] Updating shift assignment:", {
         id: editingShift.id,
-        employee_id: selectedEmployeeId,
-        employee_name: employee.nickname || employee.name,
+        employee_id: isCasual ? null : selectedEmployeeId,
+        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
         date: selectedCell.date,
         start_time: startTime,
         end_time: endTime,
@@ -263,8 +280,8 @@ export default function SchedulingPage() {
       })
 
       const result = await updateShiftAssignment(editingShift.id, {
-        employee_id: selectedEmployeeId,
-        employee_name: employee.nickname || employee.name,
+        employee_id: isCasual ? null : selectedEmployeeId,
+        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
         date: selectedCell.date,
         day_of_week: selectedCell.dayOfWeek,
         start_time: startTime,
@@ -277,14 +294,14 @@ export default function SchedulingPage() {
         await logActivity(
           "shift_change",
           "Admin",
-          employee.nickname || employee.name,
+          isCasual ? casualName : (employee?.nickname || employee?.name || "Unknown"),
           `Updated shift on ${selectedCell.date}: ${startTime} - ${endTime}`
         )
       }
     } else {
       console.log("[v0] Adding shift assignment:", {
-        employee_id: selectedEmployeeId,
-        employee_name: employee.nickname || employee.name,
+        employee_id: isCasual ? null : selectedEmployeeId,
+        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
         date: selectedCell.date,
         start_time: startTime,
         end_time: endTime,
@@ -293,8 +310,8 @@ export default function SchedulingPage() {
       })
 
       const result = await addShiftAssignment({
-        employee_id: selectedEmployeeId,
-        employee_name: employee.nickname || employee.name,
+        employee_id: isCasual ? null : selectedEmployeeId,
+        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
         date: selectedCell.date,
         day_of_week: selectedCell.dayOfWeek,
         start_time: startTime,
@@ -307,7 +324,7 @@ export default function SchedulingPage() {
         await logActivity(
           "shift_change",
           "Admin",
-          employee.nickname || employee.name,
+          isCasual ? casualName : (employee?.nickname || employee?.name || "Unknown"),
           `Assigned shift on ${selectedCell.date}: ${startTime} - ${endTime}`
         )
       }
@@ -320,6 +337,8 @@ export default function SchedulingPage() {
     setIsAddShiftOpen(false)
     setSelectedCell(null)
     setSelectedEmployeeId("")
+    setCasualName("")
+    setIsCasual(false)
     setSelectedShiftConfigId("")
     setEditingShift(null)
     setShiftType("predefined")
@@ -347,6 +366,16 @@ export default function SchedulingPage() {
 
   // Get time slot info from shift times
   const getTimeSlotInfo = (shift: ShiftAssignment) => {
+    // Priority: Casual Barista Color
+    if (!shift.employee_id) {
+      return {
+        label: "Casual",
+        color: "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 shadow-sm italic",
+        start: shift.start_time,
+        end: shift.end_time
+      }
+    }
+
     // Check if shift has a config id and find matching config
     if (shift.shift_config_id) {
       const configIndex = shiftConfigs.findIndex(c => c.id === shift.shift_config_id)
@@ -631,20 +660,54 @@ export default function SchedulingPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {/* Casual Barista Toggle */}
+            <div className="flex items-center justify-between p-3 bg-muted/30 rounded-sm border border-dashed">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">Casual Barista</Label>
+                <p className="text-[10px] text-muted-foreground">From outside DND (Not in payroll)</p>
+              </div>
+              <Button 
+                variant={isCasual ? "default" : "outline"} 
+                size="sm" 
+                className="h-8 text-xs rounded-sm"
+                onClick={() => {
+                  setIsCasual(!isCasual)
+                  if (!isCasual) {
+                    setSelectedEmployeeId("")
+                    setShiftType("custom") // Default to manual for casual
+                  } else {
+                    setCasualName("")
+                    setShiftType("predefined")
+                  }
+                }}
+              >
+                {isCasual ? "Casual Selected" : "Set as Casual"}
+              </Button>
+            </div>
+
             <div className="space-y-2">
-              <Label>Employee</Label>
-              <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
-                <SelectTrigger className="rounded-sm">
-                  <SelectValue placeholder="Select employee" />
-                </SelectTrigger>
-                <SelectContent className="rounded-sm">
-                  {employees.map((emp) => (
-                    <SelectItem key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.nickname})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>{isCasual ? "Barista Name" : "Employee"}</Label>
+              {isCasual ? (
+                <Input 
+                  placeholder="Enter barista name..." 
+                  value={casualName} 
+                  onChange={(e) => setCasualName(e.target.value)}
+                  className="rounded-sm"
+                />
+              ) : (
+                <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+                  <SelectTrigger className="rounded-sm">
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-sm">
+                    {employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.nickname})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
 {/* Show employee type info */}
@@ -682,19 +745,36 @@ export default function SchedulingPage() {
             {shiftType === "predefined" && (
               <div className="space-y-4">
                 {["Full-time", "Part-time"].map((type) => {
-                  const filteredConfigs = shiftConfigs
-                    .filter(c => c.name.includes(type))
-                    .sort((a, b) => a.start_time.localeCompare(b.start_time))
-                  
-                  if (filteredConfigs.length === 0) return null
+                  // Get unique configs by name to avoid duplicates
+                  const uniqueConfigs = Array.from(
+                    new Map(
+                      shiftConfigs
+                        .filter(c => {
+                          const isMatch = c.name.includes(type) || 
+                            (type === "Full-time" && c.name.startsWith("FT:")) ||
+                            (type === "Part-time" && c.name.startsWith("PT:"))
+                          return isMatch
+                        })
+                        .map(c => {
+                          // Extract display label for uniqueness check if using prefixed format
+                          let displayLabel = c.name
+                          if (c.name.startsWith("FT:") || c.name.startsWith("PT:")) {
+                            displayLabel = c.name.split(":").slice(2).join(":")
+                          }
+                          return [displayLabel, c]
+                        })
+                    ).values()
+                  ).sort((a, b) => a.start_time.localeCompare(b.start_time))
 
+                  if (uniqueConfigs.length === 0) return null
+                  
                   return (
                     <div key={type} className="space-y-2">
                       <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">
                         {type} Shifts
                       </Label>
                       <div className="grid grid-cols-1 gap-2">
-                        {filteredConfigs.map((config) => {
+                        {uniqueConfigs.map((config) => {
                           const configIndex = shiftConfigs.findIndex(c => c.id === config.id)
                           return (
                             <button
@@ -703,14 +783,16 @@ export default function SchedulingPage() {
                               className={cn(
                                 "p-3 rounded-sm border text-left transition-all",
                                 selectedShiftConfigId === config.id
-                                  ? "border-primary bg-primary/5 ring-1 ring-primary/20"
-                                  : "border-border hover:border-primary/30"
+                                  ? "border-primary bg-primary/5 ring-1 ring-primary shadow-sm" 
+                                  : "bg-card hover:bg-muted border-border"
                               )}
                             >
                               <div className="flex items-center justify-between">
-                                <span className="font-medium text-sm">{config.name}</span>
-                                <Badge variant="outline" className={cn("rounded-sm font-mono text-[10px]", SHIFT_COLORS[configIndex % SHIFT_COLORS.length])}>
-                                  {config.start_time.substring(0, 5)} - {config.end_time.substring(0, 5)}
+                                <span className="text-sm font-semibold tracking-tight">
+                                  {config.name.includes(":") ? config.name.split(":").slice(2).join(":") : config.name}
+                                </span>
+                                <Badge variant="secondary" className="font-mono text-[10px] rounded-sm bg-muted-foreground/10 text-muted-foreground border-none">
+                                  {config.start_time} - {config.end_time}
                                 </Badge>
                               </div>
                             </button>
@@ -765,7 +847,7 @@ export default function SchedulingPage() {
           </Button>
           <Button 
             onClick={handleSaveShift} 
-            disabled={!selectedEmployeeId || (shiftType === "predefined" && !selectedShiftConfigId)}
+            disabled={(!isCasual && !selectedEmployeeId) || (isCasual && !casualName) || (shiftType === "predefined" && !selectedShiftConfigId)}
             className="rounded-sm"
             >
               {editingShift ? "Save Changes" : "Add Shift"}
