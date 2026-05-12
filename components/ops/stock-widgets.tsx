@@ -10,7 +10,7 @@ import {
   type InventoryItem,
   type Employee
 } from "@/lib/api/supabase-service"
-import { Package, AlertTriangle, Clock, Users } from "lucide-react"
+import { Package, AlertTriangle, Clock, Users, ShoppingCart, Info } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export function StockWidgets() {
@@ -66,99 +66,114 @@ export function StockWidgets() {
   }
 
   return (
-    <div className="space-y-3">
-      {/* On Shift */}
-      <div className="bg-card rounded-sm p-4 border border-border">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-sm bg-muted flex items-center justify-center">
-            <Users className="w-4 h-4 text-muted-foreground" />
-          </div>
-          <div>
-            <h3 className="text-xs text-muted-foreground">On Shift</h3>
-            <p className="text-xl font-light">{onShiftEmployees.length}</p>
-          </div>
+    <div className="flex flex-col h-full space-y-2 overflow-hidden">
+      {/* On Shift - Compact */}
+      <div className="bg-card rounded-sm p-3 border border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Users className="w-3 h-3 text-muted-foreground" />
+          <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">On Shift</h3>
         </div>
-        {onShiftEmployees.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
-            {onShiftEmployees.map((emp) => (
-              <span key={emp.id} className="text-xs px-2 py-1 bg-muted rounded-sm">
+        <div className="flex gap-1.5 flex-wrap justify-end">
+          {onShiftEmployees.length > 0 ? (
+            onShiftEmployees.map((emp) => (
+              <span key={emp.id} className="text-[9px] px-1.5 py-0.5 bg-muted rounded-full font-medium">
                 {emp.nickname}
               </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Stock Health */}
-      <div className="bg-card rounded-sm p-4 border border-border">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-sm bg-muted flex items-center justify-center">
-            <Package className="w-4 h-4 text-muted-foreground" />
-          </div>
-          <div>
-            <h3 className="text-xs text-muted-foreground">Stock Health</h3>
-            <p className={cn("text-xl font-light", getHealthColor(stockHealth))}>
-              {stockHealth}%
-            </p>
-          </div>
-        </div>
-        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all",
-              stockHealth >= 80 && "bg-[var(--status-healthy)]",
-              stockHealth >= 50 && stockHealth < 80 && "bg-[var(--status-warning)]",
-              stockHealth < 50 && "bg-[var(--status-critical)]"
-            )}
-            style={{ width: `${stockHealth}%` }}
-          />
+            ))
+          ) : (
+            <span className="text-[9px] text-muted-foreground italic">None</span>
+          )}
         </div>
       </div>
 
-      {/* Operational Capacity */}
-      <div className="bg-card rounded-sm p-4 border border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-sm bg-muted flex items-center justify-center">
-            <Clock className="w-4 h-4 text-muted-foreground" />
+      {/* Stock Health & Capacity - Side by Side */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-card rounded-sm p-3 border border-border">
+          <div className="flex items-center gap-2 mb-1">
+            <Package className="w-3 h-3 text-muted-foreground" />
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Health</h3>
           </div>
-          <div>
-            <h3 className="text-xs text-muted-foreground">Operational Capacity</h3>
-            <p className={cn("text-xl font-light", getCapacityColor(operationalCapacity))}>
-              {operationalCapacity} <span className="text-sm">days</span>
-            </p>
+          <p className={cn("text-lg font-bold", getHealthColor(stockHealth))}>
+            {stockHealth}%
+          </p>
+        </div>
+
+        <div className="bg-card rounded-sm p-3 border border-border">
+          <div className="flex items-center gap-2 mb-1">
+            <Clock className="w-3 h-3 text-muted-foreground" />
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Capacity</h3>
           </div>
+          <p className={cn("text-lg font-bold", getCapacityColor(operationalCapacity))}>
+            {operationalCapacity} <span className="text-[10px] font-normal opacity-50">d</span>
+          </p>
         </div>
       </div>
 
-      {/* Low Stock Alerts */}
-      <div className="bg-card rounded-sm p-4 border border-border">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-sm bg-[var(--status-warning)]/10 flex items-center justify-center">
-            <AlertTriangle className="w-4 h-4 text-[var(--status-warning)]" />
+      {/* Stock Alerts (Shopping List) - Expanded to fill remaining space */}
+      <div className="bg-card rounded-sm p-3 border border-border flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between mb-3 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <ShoppingCart className="w-4 h-4 text-primary" />
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-primary">Shopping List</h3>
           </div>
-          <h3 className="text-xs text-muted-foreground">Low Stock Alert</h3>
+          <span className="text-[9px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold">
+            {lowStockItems.length}
+          </span>
         </div>
 
         {lowStockItems.length === 0 ? (
-          <p className="text-xs text-muted-foreground">All stock levels healthy</p>
+          <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted rounded-sm">
+             <Package className="w-6 h-6 text-muted/30 mb-2" />
+             <p className="text-[9px] text-muted-foreground uppercase font-bold">Stock Healthy</p>
+          </div>
         ) : (
-          <ul className="space-y-2 max-h-32 overflow-y-auto">
-            {lowStockItems.slice(0, 4).map((item) => (
-              <li key={item.id} className="flex items-center justify-between text-sm">
-                <span className="truncate">{item.name}</span>
-                <span
-                  className={cn(
-                    "text-xs font-mono ml-2",
-                    item.daysRemaining <= 1 && "text-[var(--status-critical)]",
-                    item.daysRemaining > 1 && item.daysRemaining <= 3 && "text-[var(--status-warning)]",
-                    item.daysRemaining > 3 && "text-[var(--status-healthy)]"
-                  )}
-                >
-                  {item.daysRemaining}d
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+            {/* 1. OUT OF STOCK SECTION */}
+            {lowStockItems.filter(i => (i.stock || i.current_stock || 0) <= 0).length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[8px] font-bold text-[var(--status-critical)] uppercase tracking-tighter flex items-center gap-1 sticky top-0 bg-card py-1 z-10">
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  Out of Stock
+                </p>
+                <div className="space-y-1">
+                  {lowStockItems.filter(i => (i.stock || i.current_stock || 0) <= 0).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-1.5 bg-[var(--status-critical)]/5 border border-[var(--status-critical)]/10 rounded-sm">
+                      <span className="text-[11px] font-medium truncate pr-2">{item.name}</span>
+                      <span className="text-[8px] font-bold text-[var(--status-critical)] bg-[var(--status-critical)]/10 px-1 py-0.5 rounded-sm flex-shrink-0">OUT</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. LOW STOCK SECTION */}
+            {lowStockItems.filter(i => (i.stock || i.current_stock || 0) > 0).length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[8px] font-bold text-[var(--status-warning)] uppercase tracking-tighter flex items-center gap-1 sticky top-0 bg-card py-1 z-10">
+                  <Info className="w-2.5 h-2.5" />
+                  Low Stock
+                </p>
+                <div className="space-y-1">
+                  {lowStockItems.filter(i => (i.stock || i.current_stock || 0) > 0).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-1.5 bg-muted/20 border border-border/50 rounded-sm">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[11px] font-medium truncate">{item.name}</span>
+                        <span className="text-[8px] text-muted-foreground">
+                          {item.current_stock || item.stock} {item.unit}
+                        </span>
+                      </div>
+                      <span className={cn(
+                        "text-[9px] font-mono font-bold flex-shrink-0 ml-2",
+                        item.daysRemaining <= 1 ? "text-[var(--status-critical)]" : "text-[var(--status-warning)]"
+                      )}>
+                        {item.daysRemaining}d
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

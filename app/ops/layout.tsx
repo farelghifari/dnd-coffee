@@ -61,7 +61,7 @@ export default function OpsLayout({
   }
 
   return (
-    <div className="dark min-h-screen bg-background text-foreground">
+    <div className="dark h-screen overflow-hidden bg-background text-foreground flex flex-col">
       {children}
       <Toaster />
     </div>

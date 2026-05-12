@@ -389,15 +389,11 @@ export default function ReportPage() {
 
       const menuRecipes = recipes.filter(r => r.menu_item_id === saleItem.menu_id);
       menuRecipes.forEach(recipe => {
-        // Check if there is ANY opened/active batch for this ingredient on the FLOOR
-        const hasOpenedBatch = batches.some(b => 
-          (b.item_id === recipe.inventory_item_id || b.inventoryItemId === recipe.inventory_item_id) && 
-          b.is_opened && 
-          (b.remaining_quantity || b.currentQuantity || 0) > 0
-        );
+        // Check if there is ANY stock available for this item in the inventory
+        const invItem = inventory.find(i => i.id === recipe.inventory_item_id);
+        const hasStock = invItem && (invItem.stock || invItem.current_stock || 0) > 0;
 
-        if (!hasOpenedBatch) {
-          const invItem = inventory.find(i => i.id === recipe.inventory_item_id);
+        if (!hasStock) {
           missing.push({
             menuName: menu.name,
             itemName: invItem?.name || "Unknown Ingredient"
@@ -437,27 +433,32 @@ export default function ReportPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em] flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              Live Performance: {bulkSaleDate === todayDate ? "Today" : bulkSaleDate}
+              Performance Overview: {bulkSaleDate === todayDate ? "Today" : bulkSaleDate}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-emerald-600/70 uppercase tracking-tight mb-1">Income</span>
-                <span className="text-3xl font-bold tracking-tight text-emerald-700">{formatPrice(selectedIncomeData.revenue)}</span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium">{selectedIncomeData.count} items sold</span>
+                <span className="text-[10px] font-bold text-blue-600/70 uppercase tracking-tight mb-1">Total Revenue</span>
+                <span className="text-2xl font-bold tracking-tight text-blue-700">{formatPrice(totalRevenue)}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium">All-time accumulation</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-rose-600/70 uppercase tracking-tight mb-1">Expenses</span>
-                <span className="text-3xl font-bold tracking-tight text-rose-700">-{formatPrice(selectedExpenses)}</span>
+                <span className="text-[10px] font-bold text-rose-600/70 uppercase tracking-tight mb-1">Total Expenses</span>
+                <span className="text-2xl font-bold tracking-tight text-rose-700">-{formatPrice(selectedExpenses)}</span>
                 <span className="text-[10px] text-muted-foreground mt-1 font-medium">Daily purchases</span>
               </div>
-              <div className="flex flex-col border-l border-border/50 pl-8">
-                <span className="text-[10px] font-bold text-primary/70 uppercase tracking-tight mb-1">Net Balance</span>
-                <span className={cn("text-3xl font-bold tracking-tight", selectedIncomeData.revenue - selectedExpenses >= 0 ? "text-primary" : "text-rose-600")}>
+              <div className="flex flex-col border-l border-border/50 pl-6">
+                <span className="text-[10px] font-bold text-emerald-600/70 uppercase tracking-tight mb-1">Net Balance</span>
+                <span className={cn("text-2xl font-bold tracking-tight", selectedIncomeData.revenue - selectedExpenses >= 0 ? "text-emerald-700" : "text-rose-600")}>
                   {formatPrice(selectedIncomeData.revenue - selectedExpenses)}
                 </span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Margin status</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Available margin</span>
+              </div>
+              <div className="flex flex-col border-l border-border/50 pl-6">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight mb-1">Items Sold</span>
+                <span className="text-2xl font-bold tracking-tight">{selectedIncomeData.count}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Portions</span>
               </div>
             </div>
           </CardContent>
@@ -688,7 +689,7 @@ export default function ReportPage() {
                   {Array.from(new Set(missingIngredients.map(m => m.itemName))).map((item, i) => (
                     <div key={i} className="flex items-center gap-2 text-[10px] font-bold text-destructive uppercase animate-pulse">
                       <Package className="w-3 h-3" />
-                      Must Open Batch: {item}
+                      Stock Missing: {item}
                     </div>
                   ))}
                 </div>
@@ -1016,20 +1017,15 @@ export default function ReportPage() {
                   </thead>
                   <tbody>
                     {inventory
-                      .filter(item => 
-                        batches.some(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
-                      )
                       .map((item) => {
-                      // CALC: Get only "OPENED" batches for this item (Active Bar Stock)
-                      const itemOpenedBatches = batches.filter(b => (b.item_id === item.id || b.inventoryItemId === item.id) && b.is_opened)
-                      const activeBarStockBase = itemOpenedBatches.reduce((sum, b) => sum + (b.remaining_quantity || b.currentQuantity || 0), 0)
+                      const totalStockBase = item.stock || item.current_stock || 0
                       
                       const baseConsumption = inventoryConsumption[item.id] || 0
                       const unitToDisplay = item.unit || "g"
                       
-                      // Progress bar reflects active stock against some threshold 
-                      const progress = Math.min(100, Math.max(0, (activeBarStockBase / (item.max_stock || 1000)) * 100))
-                      const statusColor = activeBarStockBase <= 0 ? "bg-[var(--status-critical)]" : activeBarStockBase <= (item.min_stock || 100) ? "bg-[var(--status-warning)]" : "bg-[var(--status-healthy)]"
+                      // Progress bar reflects total stock against max_stock threshold 
+                      const progress = Math.min(100, Math.max(0, (totalStockBase / (item.max_stock || 1000)) * 100))
+                      const statusColor = totalStockBase <= 0 ? "bg-[var(--status-critical)]" : totalStockBase <= (item.min_stock || 100) ? "bg-[var(--status-warning)]" : "bg-[var(--status-healthy)]"
                       
                       return (
                         <tr key={item.id} className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors">
@@ -1056,7 +1052,7 @@ export default function ReportPage() {
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex flex-col items-end">
-                              <span className="font-mono font-bold text-sm">{Number(activeBarStockBase.toFixed(2))}</span>
+                              <span className="font-mono font-bold text-sm">{Number(totalStockBase.toFixed(2))}</span>
                               <span className="text-[10px] text-muted-foreground font-bold">{unitToDisplay}</span>
                             </div>
                           </td>
@@ -1069,8 +1065,8 @@ export default function ReportPage() {
             ) : (
               <div className="text-center py-12 bg-muted/20 rounded-sm border border-dashed">
                 <Package className="w-12 h-12 mx-auto text-muted-foreground/30 mb-4" />
-                <p className="text-muted-foreground font-medium">No active inventory tracked at the bar</p>
-                <p className="text-xs text-muted-foreground/70 mt-1">Open a batch in the Inventory module to see live consumption</p>
+                <p className="text-muted-foreground font-medium">No inventory items found</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Add items in the Inventory module to see live consumption</p>
               </div>
             )}
           </CardContent>

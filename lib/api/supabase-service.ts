@@ -99,15 +99,16 @@ export function getConversionRate(displayUnit: string, baseUnit: string): number
 // Convert display unit to base unit
 export function toBaseUnit(value: number, unit: string, item?: Partial<InventoryItem>): number {
   const normalizedUnit = unit.toLowerCase()
-  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
   
-  if (conversion) {
-    return value * conversion.multiplier
-  }
-  
-  // If it's a custom unit (like 'batch') and matches the item's display unit
+  // 1. ALWAYS prioritize custom conversion rate if the unit matches the item's display_unit
   if (item && item.display_unit && normalizedUnit === item.display_unit.toLowerCase()) {
     return value * (item.conversion_rate || 1)
+  }
+
+  // 2. Fallback to standard conversions (kg, gram, liter, ml)
+  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
+  if (conversion) {
+    return value * conversion.multiplier
   }
   
   return value
@@ -116,15 +117,16 @@ export function toBaseUnit(value: number, unit: string, item?: Partial<Inventory
 // Convert base unit to display unit
 export function fromBaseUnit(value: number, unit: string, item?: Partial<InventoryItem>): number {
   const normalizedUnit = unit.toLowerCase()
-  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
   
-  if (conversion) {
-    return value / conversion.multiplier
-  }
-  
-  // If it's a custom unit (like 'batch') and matches the item's display unit
+  // 1. ALWAYS prioritize custom conversion rate if the unit matches the item's display_unit
   if (item && item.display_unit && normalizedUnit === item.display_unit.toLowerCase()) {
     return value / (item.conversion_rate || 1)
+  }
+
+  // 2. Fallback to standard conversions (kg, gram, liter, ml)
+  const conversion = UNIT_CONVERSIONS[normalizedUnit as DisplayUnit]
+  if (conversion) {
+    return value / conversion.multiplier
   }
   
   return value
@@ -960,11 +962,11 @@ export async function getInventory(): Promise<InventoryItem[]> {
       return []
     }
 
-    // Fetch warehouse batches to guarantee perfectly accurate stock
+    // Fetch all active batches to guarantee perfectly accurate stock
     const { data: batches, error: batchesError } = await supabase
       .from('inventory_batches')
       .select('item_id, remaining_quantity')
-      .eq('location', 'warehouse');
+      .gt('remaining_quantity', 0);
 
     if (batchesError) {
       console.error("ERROR (getInventory batches):", batchesError)
@@ -1186,58 +1188,6 @@ export async function updateInventoryStock(itemId: string, quantity: number, typ
       }
 
       return result;
-    } else if (type === 'out' || type === 'waste') {
-      let remainingToDeduct = quantity;
-      const { data: batches } = await supabase
-        .from('inventory_batches')
-        .select('*')
-        .eq('item_id', itemId)
-        .eq('location', 'warehouse')
-        .gt('remaining_quantity', 0)
-        .order('received_date', { ascending: true })
-        .order('batch_number', { ascending: true });
-
-      for (const batch of batches || []) {
-        if (remainingToDeduct <= 0) break;
-        const available = Number(batch.remaining_quantity);
-        const amountFromThisBatch = Math.min(available, remainingToDeduct);
-        
-        if (type === 'out') {
-          // Use specialized transfer function to ensure it appears in Batch Tracking (Floor)
-          // We use conversion_rate as split_size to create multiple rows if multiple units are moved
-          await transferToFloor(
-            batch.id, 
-            amountFromThisBatch, 
-            actorName, 
-            notes || `Ops Stock Out by ${actorName}`, 
-            item.conversion_rate || 1
-          );
-        } else {
-          // Waste: Simple deduction from warehouse
-          if (available >= amountFromThisBatch) {
-            await supabase.from('inventory_batches').update({ remaining_quantity: available - amountFromThisBatch }).eq('id', batch.id);
-          } else {
-            await supabase.from('inventory_batches').update({ remaining_quantity: 0 }).eq('id', batch.id);
-          }
-          
-          // Also decrement the master stock column for consistency
-          await supabase.rpc('decrement_inventory_stock', { p_item_id: itemId, p_quantity: amountFromThisBatch });
-
-          // Record individual transaction log for this batch to keep the batch info visible
-          if (type === 'waste') {
-            await supabase.from('inventory_transactions').insert({
-              item_id: itemId,
-              type: type,
-              quantity: amountFromThisBatch,
-              actor_name: actorName,
-              waste_reason: notes ? `${notes} (Batch: ${batch.batch_number})` : `Recorded via Ops (Batch: ${batch.batch_number})`,
-              created_at: new Date().toISOString()
-            });
-          }
-        }
-        
-        remainingToDeduct -= amountFromThisBatch;
-      }
     } else if (type === 'opname') {
       const theoretical = await getInventory().then(items => items.find(i => i.id === itemId)?.stock || 0);
       return await addInventoryOpname({
@@ -1249,11 +1199,6 @@ export async function updateInventoryStock(itemId: string, quantity: number, typ
         actor_name: actorName
       });
     }
-
-    // Update master stock for legacy (only reached for 'out' or 'waste' types)
-    const currentStock = item.stock || 0;
-    const newStock = Math.max(0, currentStock - quantity);
-    await supabase.from('inventory_items').update({ stock: newStock }).eq('id', itemId);
 
     return { success: true };
   } catch (err) {
@@ -1465,30 +1410,8 @@ export async function addStock(itemId: string, quantity: number, unitCost: numbe
 // STEP 5: Call RPC: stock_out(item_id, quantity)
 
 export async function stockOut(itemId: string, quantity: number): Promise<boolean> {
-  if (isSupabaseConfigured()) {
-    // Call RPC: stock_out
-    const { error } = await supabase.rpc('stock_out', {
-      p_item_id: itemId,
-      p_quantity: quantity
-    })
-    
-    if (error) {
-      console.log("ERROR (stockOut RPC):", error)
-      return false
-    }
-    
-    return true
-  }
-  
-  // Fallback for localStorage
-  const inventory = await getInventory()
-  const index = inventory.findIndex(i => i.id === itemId)
-  if (index === -1) return false
-  
-  const newStock = (inventory[index].stock || inventory[index].current_stock || 0) - quantity
-  inventory[index] = { ...inventory[index], stock: newStock, current_stock: newStock }
-  setStoredData(STORAGE_KEYS.inventory, inventory)
-  return true
+  console.warn("stockOut is deprecated. Use sales or opname for deductions.");
+  return false;
 }
 
 
@@ -1989,7 +1912,7 @@ export async function getStockLogs(): Promise<StockLog[]> {
         item_name: item?.name || 'Unknown Item',
         unit: displayUnit,
         type: t.type,
-        amount: displayAmount,
+        amount: t.quantity,
         employee_id: t.employee_id,
         employee_name: (t.employees as any)?.name || t.actor_name || 'Unknown User',
         timestamp: t.created_at,
@@ -3706,7 +3629,17 @@ export function getOverallStockHealth(inventory: InventoryItem[]): number {
 export function getLowStockItems(inventory: InventoryItem[]) {
   return inventory
     .map(item => ({ ...item, daysRemaining: getDaysRemaining(item) }))
-    .filter(item => item.daysRemaining <= 5)
+    .filter(item => {
+      // 1. Time-based: Will run out in <= 7 days (1 week buffer)
+      const isTimeLow = item.daysRemaining <= 7
+      
+      // 2. Quantity-based: Reached Min Stock Alert threshold
+      const currentStock = item.current_stock || item.stock || 0
+      const minStock = item.min_stock || 0
+      const isQuantityLow = currentStock <= minStock && currentStock > 0
+      
+      return isTimeLow || isQuantityLow
+    })
     .sort((a, b) => a.daysRemaining - b.daysRemaining)
 }
 
@@ -4181,10 +4114,9 @@ export async function bulkSellMenu(items: BulkSaleItem[], customDate?: string): 
           .from('inventory_batches')
           .select('*')
           .eq('item_id', ing.inventory_item_id)
-          .eq('location', 'floor')
           .gt('remaining_quantity', 0)
           .order('received_date', { ascending: true })
-          .order('batch_number', { ascending: true });
+          .order('created_at', { ascending: true });
 
         if (!batches || batches.length === 0) {
           console.warn(`No floor batch found for ingredient ${ing.inventory_item_id}`);
@@ -4805,137 +4737,8 @@ export async function getInventoryMovements(): Promise<any[]> {
 
 // Transfer from Warehouse to Floor (Stock Out to Bar)
 export async function transferToFloor(batchIdOrIds: string | string[], quantity: number, actorName: string, reason?: string, splitSize?: number, itemId?: string): Promise<boolean> {
-  if (!isSupabaseConfigured()) return false;
-  
-  try {
-    const batchIds = Array.isArray(batchIdOrIds) ? batchIdOrIds : [batchIdOrIds];
-    const firstBatchId = batchIds[0];
-
-    let derivedItemId = itemId;
-    let initialBatch = null;
-    
-    if (firstBatchId && firstBatchId !== '') {
-      const { data } = await supabase.from('inventory_batches').select('*').eq('id', firstBatchId).single();
-      initialBatch = data;
-    }
-
-    if (!derivedItemId) {
-      if (!initialBatch) return false;
-      derivedItemId = initialBatch.item_id;
-    }
-    const finalItemId = derivedItemId;
-
-    // 2. Get the target batches to deduct from
-    let targetBatches = [];
-    if (Array.isArray(batchIdOrIds)) {
-      // Explicitly selected batches
-      const { data } = await supabase.from('inventory_batches').select('*').in('id', batchIds);
-      // Sort them in the order they were selected or by date
-      targetBatches = (data || []).sort((a, b) => batchIds.indexOf(a.id) - batchIds.indexOf(b.id));
-    } else {
-      // FIFO Overflow logic starting from batchId
-      const { data: allWarehouse } = await supabase
-        .from('inventory_batches')
-        .select('*')
-        .eq('item_id', finalItemId)
-        .eq('location', 'warehouse')
-        .gt('remaining_quantity', 0)
-        .order('received_date', { ascending: true })
-        .order('batch_number', { ascending: true });
-      
-      const startIndex = (allWarehouse || []).findIndex(b => b.id === firstBatchId);
-      targetBatches = (allWarehouse || []).slice(startIndex === -1 ? 0 : startIndex);
-    }
-
-    let remainingToTransfer = quantity;
-    let totalDeducted = 0;
-    const sourceBatches = [];
-
-    for (const b of targetBatches) {
-      if (remainingToTransfer <= 0) break;
-      const deduct = Math.min(b.remaining_quantity, remainingToTransfer);
-      
-      await supabase.from('inventory_batches').update({ remaining_quantity: b.remaining_quantity - deduct }).eq('id', b.id);
-      
-      remainingToTransfer -= deduct;
-      totalDeducted += deduct;
-      sourceBatches.push({ ...b, deducted: deduct });
-    }
-
-    // 3. Smart Auto-Waste: Only waste existing floor batches if they are older than 5 minutes
-    // This allows multiple transfers in a single 'session' to stay active together.
-    const { data: floorBatches } = await supabase
-      .from('inventory_batches')
-      .select('*')
-      .eq('item_id', finalItemId)
-      .eq('location', 'floor')
-      .gt('remaining_quantity', 0);
-      
-    if (floorBatches && floorBatches.length > 0) {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      
-      for (const old of floorBatches) {
-        // Only waste if the batch was created more than 5 minutes ago
-        if (old.created_at < fiveMinutesAgo) {
-          await supabase.from('inventory_transactions').insert({
-            item_id: finalItemId,
-            type: 'waste',
-            quantity: old.remaining_quantity,
-            waste_reason: `Auto-waste (Stale stock): ${reason || 'Diganti stok baru'}`,
-            actor_name: actorName,
-            created_at: new Date().toISOString()
-          });
-          await supabase.from('inventory_batches').update({ remaining_quantity: 0 }).eq('id', old.id);
-        }
-      }
-    }
-
-    // 4. Update master stock
-    await supabase.rpc('decrement_inventory_stock', { p_item_id: finalItemId, p_quantity: totalDeducted });
-
-    // 5. Create new floor batch(es)
-    const mainBatch = sourceBatches[0] || initialBatch;
-    let chunks = [];
-    const sSize = splitSize || 1;
-    if (sSize > 0 && totalDeducted > sSize) {
-      const numFullChunks = Math.floor(totalDeducted / sSize);
-      const remainder = totalDeducted % sSize;
-      for (let i = 0; i < numFullChunks; i++) chunks.push(sSize);
-      if (remainder > 0) chunks.push(remainder);
-    } else {
-      chunks.push(totalDeducted);
-    }
-
-    for (let i = 0; i < chunks.length; i++) {
-      await supabase.from('inventory_batches').insert({
-        item_id: finalItemId,
-        quantity: chunks[i],
-        remaining_quantity: chunks[i],
-        cost_per_unit: mainBatch.cost_per_unit,
-        supplier_name: (mainBatch.supplier_name && !mainBatch.supplier_name.includes('General Supplier')) ? mainBatch.supplier_name : 'Unknown',
-        received_date: mainBatch.received_date,
-        expired_date: mainBatch.expired_date,
-        batch_number: (mainBatch.batch_number || '').substring(0, 16) + (chunks.length > 1 ? `-${i+1}` : 'F'),
-        is_opened: true,
-        location: 'floor'
-      });
-    }
-
-    // 6. Log transaction
-    await supabase.from('inventory_transactions').insert({
-      item_id: finalItemId,
-      type: 'out',
-      quantity: totalDeducted,
-      actor_name: actorName,
-      waste_reason: reason ? `${reason} (Transfer: ${mainBatch.batch_number})` : `Transfer to Bar: ${mainBatch.batch_number} (Used ${sourceBatches.length} batches)`,
-      created_at: new Date().toISOString()
-    });
-
-    return true;
-  } catch (err) {
-    console.error("CRITICAL ERROR (transferToFloor):", err);
-    return false;
-  }
+  console.warn("transferToFloor is deprecated. System now uses unified warehouse model.");
+  return false;
 }
 
 // Manual Stock Out (Waste, Damage, etc.) with Multi-Batch support
@@ -5222,60 +5025,100 @@ export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'cre
       .single();
     
     if (error) {
-      console.error("ERROR (addInventoryOpname):", error);
+      console.error("ERROR (addInventoryOpname Insert):", error);
       return null;
     }
 
     const difference = data.difference;
     const itemId = data.item_id;
 
+    // 2. Update master stock column IMMEDIATELY (FORCE UPDATE)
+    const { error: updateError } = await supabase.from('inventory_items')
+      .update({ 
+        stock: data.actual_stock
+      })
+      .eq('id', itemId);
+
+    if (updateError) {
+      console.error("ERROR (addInventoryOpname Force Update):", updateError);
+    }
+
+    // 3. Handle Batch Adjustments
     if (difference < 0) {
-      // CASE: Shrinkage (Missing stock)
-      // Deduct from ALL active batches using FIFO (Warehouse first, then Floor)
+      // CASE: Shrinkage (Missing stock) - Deduct from batches using FIFO
       let neededToDeduct = Math.abs(difference);
       
-      // Fetch all batches with stock, prioritize warehouse for audit deductions
-      const { data: batches } = await supabase
+      // Fetch all batches with stock
+      const { data: batches, error: fetchError } = await supabase
         .from('inventory_batches')
         .select('*')
         .eq('item_id', itemId)
         .gt('remaining_quantity', 0)
-        .order('location', { ascending: false }) // 'warehouse' comes after 'floor' alphabetically, but we want warehouse first? 
-        // Wait, 'warehouse' > 'floor'. Ascending=false puts warehouse first.
-        .order('received_date', { ascending: true });
+        .order('received_date', { ascending: true })
+        .order('created_at', { ascending: true });
 
-      for (const batch of batches || []) {
-        if (neededToDeduct <= 0) break;
-        
-        const available = Number(batch.remaining_quantity);
-        const deduct = Math.min(available, neededToDeduct);
-        
-        await supabase.from('inventory_batches')
-          .update({ remaining_quantity: available - deduct })
-          .eq('id', batch.id);
+      if (fetchError) console.error("Error fetching batches for deduction:", fetchError);
+
+      if (batches && batches.length > 0) {
+        for (const batch of batches) {
+          if (neededToDeduct <= 0) break;
+          const available = Number(batch.remaining_quantity);
+          const deduct = Math.min(available, neededToDeduct);
           
-        neededToDeduct -= deduct;
+          const { error: bError } = await supabase.from('inventory_batches')
+            .update({ 
+              remaining_quantity: available - deduct
+            })
+            .eq('id', batch.id);
+            
+          if (bError) console.error(`Error updating batch ${batch.id}:`, bError);
+          neededToDeduct -= deduct;
+        }
+      } else {
+        // If no batches found but we need to deduct, something is wrong with data sync
+        // We'll create a negative adjustment batch to at least keep the math correct
+        console.warn("No active batches found for deduction, creating adjustment batch");
+        await supabase.from('inventory_batches').insert({
+          item_id: itemId,
+          quantity: -neededToDeduct,
+          remaining_quantity: -neededToDeduct,
+          batch_number: `ADJ-SHRINK-${Date.now().toString().slice(-4)}`,
+          location: 'warehouse',
+          notes: 'Auto-adjustment: Shrinkage with no source batches'
+        });
       }
     } else if (difference > 0) {
-      // CASE: Extra stock found
-      // Create a new adjustment batch with a unique ID
-      const timestamp = new Date().getTime().toString().slice(-4);
-      await supabase.from('inventory_batches').insert({
-        item_id: itemId,
-        quantity: difference,
-        remaining_quantity: difference,
-        batch_number: `ADJ-${new Date().toISOString().split('T')[0]}-${timestamp}`,
-        location: 'warehouse',
-        notes: `Opname Adjustment: ${data.reason || 'Found extra stock'}`
-      });
+      // CASE: Extra stock found - Update the LATEST active batch instead of creating a new one
+      const { data: latestBatches } = await supabase
+        .from('inventory_batches')
+        .select('*')
+        .eq('item_id', itemId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (latestBatches && latestBatches.length > 0) {
+        const latest = latestBatches[0];
+        await supabase.from('inventory_batches')
+          .update({ 
+            remaining_quantity: Number(latest.remaining_quantity) + difference
+          })
+          .eq('id', latest.id);
+      } else {
+        // Only create new if absolutely no batches exist
+        const timestamp = new Date().getTime().toString().slice(-4);
+        await supabase.from('inventory_batches').insert({
+          item_id: itemId,
+          quantity: difference,
+          remaining_quantity: difference,
+          batch_number: `ADJ-${new Date().toISOString().split('T')[0]}-${timestamp}`,
+          location: 'warehouse',
+          notes: `Opname Adjustment: ${data.reason || 'Found extra stock'}`,
+          cost_per_unit: 0 // Fallback if no previous batch
+        });
+      }
     }
 
-    // 2. Update master stock column (legacy support, though UI uses batches)
-    await supabase.from('inventory_items')
-      .update({ stock: data.actual_stock, last_updated: new Date().toISOString() })
-      .eq('id', itemId);
-
-    // 3. Log transaction
+    // 4. Log transaction for Movement Record
     if (difference !== 0) {
       const type = difference < 0 ? 'waste' : 'in';
       await supabase.from('inventory_transactions').insert({
@@ -5283,7 +5126,7 @@ export async function addInventoryOpname(data: Omit<InventoryOpname, 'id' | 'cre
         type: type,
         quantity: Math.abs(difference),
         actor_name: data.actor_name,
-        waste_reason: `Stock Opname Adjustment: ${data.reason || (difference < 0 ? 'Shrinkage' : 'Found extra')}`,
+        waste_reason: `Opname: ${data.reason || (difference < 0 ? 'Shrinkage' : 'Found extra')}`,
         created_at: new Date().toISOString()
       });
     }

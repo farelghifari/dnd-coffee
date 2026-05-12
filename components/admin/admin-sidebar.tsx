@@ -31,7 +31,6 @@ import { Badge } from "@/components/ui/badge"
 const baseNavItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/inventory", label: "Inventory", icon: Package },
-  { href: "/admin/batches", label: "Batch Tracking", icon: Layers },
   { href: "/admin/employees", label: "Employees", icon: Users },
   { href: "/admin/scheduling", label: "Scheduling", icon: CalendarDays },
   { href: "/admin/overtime", label: "Overtime", icon: Clock },

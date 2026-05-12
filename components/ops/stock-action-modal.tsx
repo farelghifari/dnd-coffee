@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { X, Minus, Plus, Check, AlertTriangle, Layers, Clock, ChevronRight } from "lucide-react"
+import { X, Minus, Plus, Check, AlertTriangle, Layers, Clock, ChevronRight, ClipboardList } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { 
   type InventoryItem, 
@@ -23,7 +23,7 @@ interface StockActionModalProps {
   isOpen: boolean
   onClose: () => void
   onSubmit: (data: { itemId: string; amount: number; notes?: string; batchId?: string }) => void
-  actionType: "stock-in" | "stock-out" | "waste" | "opname" | null
+  actionType: "stock-in" | "opname" | "stock-out" | "waste" | null
   title: string
   inventory: InventoryItem[]
   batches: InventoryBatch[]
@@ -91,27 +91,6 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     setAmount(0)
   }
 
-  const handleConfirmSubmit = () => {
-    if (selectedItem && amount > 0) {
-      // If it's a regular stock-out (transfer to bar), check for existing floor stock
-      if (actionType === "stock-out" && !notes) {
-        const floorBatch = batches.find(b => 
-          (b.inventoryItemId === selectedItem || b.item_id === selectedItem) && 
-          b.location === 'floor' && 
-          (b.currentQuantity > 0 || (b.remaining_quantity || 0) > 0)
-        )
-        
-        if (floorBatch) {
-          setActiveFloorBatch(floorBatch)
-          setShowWarning(true)
-          return
-        }
-      }
-      
-      handleSubmit()
-    }
-  }
-
   const handleSubmit = () => {
     if (selectedItem && amount > 0) {
       const selectedInventoryItem = inventory.find((i) => i.id === selectedItem)
@@ -175,9 +154,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
     ? selectedBatchItem.currentQuantity 
     : (selectedInventoryItem?.current_stock || 0)
 
-  const exceedsStock = selectedInventoryItem && 
-    (actionType === "stock-out" || actionType === "waste") && 
-    baseAmount > baseMaxAvailable
+  const exceedsStock = false
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("id-ID", {
@@ -228,7 +205,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
                     <p className="text-xs text-muted-foreground mt-2">
                       Current: {getDisplayStock(item.current_stock || 0, item)} {getDisplayUnit(item)}
                     </p>
-                    {hasBatches && (actionType === "stock-out" || actionType === "waste") && (
+                    {hasBatches && (
                       <div className="flex items-center gap-1 mt-2">
                         <Layers className="w-3 h-3 text-primary" />
                         <span className="text-xs text-primary">{itemBatches.length} batch{itemBatches.length > 1 ? "es" : ""}</span>
@@ -449,7 +426,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
       {step === "amount" && (
         <div className="p-4 border-t border-border">
           <button
-            onClick={handleConfirmSubmit}
+            onClick={handleSubmit}
             disabled={amount === 0 || exceedsStock || isSubmitting}
             className={cn(
               "w-full py-4 rounded-sm text-lg font-medium flex items-center justify-center gap-2 transition-colors",
@@ -464,58 +441,7 @@ export function StockActionModal({ isOpen, onClose, onSubmit, actionType, title,
         </div>
       )}
 
-      {/* Existing Stock Warning Modal */}
-      {showWarning && (
-        <div className="fixed inset-0 z-[100] bg-background flex flex-col p-6 items-center justify-center text-center animate-in fade-in duration-200">
-          <div className="max-w-sm w-full space-y-6">
-            <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
-              <AlertTriangle className="w-10 h-10" />
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="text-2xl font-bold">Existing Stock Detected</h3>
-              <p className="text-muted-foreground">
-                There is still an opened batch of <span className="font-bold text-foreground">{selectedInventoryItem?.name}</span> at the Bar.
-              </p>
-            </div>
 
-            <div className="bg-amber-50 border border-amber-100 p-4 rounded-sm space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-amber-700">Opened Batch:</span>
-                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.batchNumber || activeFloorBatch?.batch_number}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-amber-700">Remaining Qty:</span>
-                <span className="font-mono font-bold text-amber-900">
-                  {selectedInventoryItem ? getDisplayStock(activeFloorBatch?.currentQuantity || activeFloorBatch?.remaining_quantity || 0, selectedInventoryItem) : 0} {displayUnit}
-                </span>
-              </div>
-            </div>
-
-            <p className="text-xs text-muted-foreground italic">
-              Note: Proceeding will auto-waste the old batch if it has been opened for more than 5 minutes.
-            </p>
-
-            <div className="grid grid-cols-1 gap-3 pt-4">
-              <button
-                onClick={() => {
-                  setShowWarning(false);
-                  handleSubmit();
-                }}
-                className="w-full py-4 bg-foreground text-background rounded-sm font-medium text-lg active:scale-95 transition-transform"
-              >
-                Yes, Open New Batch
-              </button>
-              <button
-                onClick={() => setShowWarning(false)}
-                className="w-full py-4 bg-muted text-foreground rounded-sm font-medium text-lg active:scale-95 transition-transform"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

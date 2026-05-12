@@ -39,6 +39,7 @@ import {
   updateBatchesExpiryByItem,
   updateBatchDetails,
   transferToFloor,
+  getStockLogs,
   type InventoryItem,
   type InventoryBatch,
   type MenuItem,
@@ -46,7 +47,8 @@ import {
   type MonthlyOpex,
   type InventoryOpname,
   type DisplayUnit,
-  type SalesReport
+  type SalesReport,
+  type StockLog
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -135,6 +137,7 @@ export default function InventoryPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [filteredMenu, setFilteredMenu] = useState<MenuItem[]>([])
   const [monthlyOpex, setMonthlyOpex] = useState<MonthlyOpex[]>([])
+  const [stockLogs, setStockLogs] = useState<StockLog[]>([])
   const [salesReport, setSalesReport] = useState<SalesReport[]>([])
   const [opnameHistory, setOpnameHistory] = useState<InventoryOpname[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -159,11 +162,9 @@ export default function InventoryPage() {
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
   const [isEditItemModalOpen, setIsEditItemModalOpen] = useState(false)
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false)
-  const [isStockOutModalOpen, setIsStockOutModalOpen] = useState(false)
+  const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
   const [isAddMenuModalOpen, setIsAddMenuModalOpen] = useState(false)
   const [isEditMenuModalOpen, setIsEditMenuModalOpen] = useState(false)
-  const [isRecordOpnameModalOpen, setIsRecordOpnameModalOpen] = useState(false)
-  const [isStockOutWarningOpen, setIsStockOutWarningOpen] = useState(false)
   const [activeFloorBatch, setActiveFloorBatch] = useState<InventoryBatch | null>(null)
   const [isManageWarehouseModalOpen, setIsManageWarehouseModalOpen] = useState(false)
   const [manageWarehouseItemId, setManageWarehouseItemId] = useState<string>("")
@@ -176,12 +177,6 @@ export default function InventoryPage() {
   const [whStockInQty, setWhStockInQty] = useState('')
   const [whStockInCost, setWhStockInCost] = useState('')
   const [whStockInSupplier, setWhStockInSupplier] = useState('')
-  const [whStockOutBatchId, setWhStockOutBatchId] = useState('')
-  const [whStockOutQty, setWhStockOutQty] = useState('')
-  const [whStockOutReason, setWhStockOutReason] = useState('')
-  const [selectedStockOutBatchId, setSelectedStockOutBatchId] = useState<string>('')
-  const [selectedStockOutBatchIds, setSelectedStockOutBatchIds] = useState<string[]>([])
-  const [stockOutBatches, setStockOutBatches] = useState<InventoryBatch[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   
   // Custom Delete Alert State
@@ -218,16 +213,7 @@ export default function InventoryPage() {
     supplierName: "",
     receivedDate: new Date().toISOString().split("T")[0],
     expiredDate: "",
-    notes: "",
-    is_opened: false
-  })
-
-  const [stockOutForm, setStockOutForm] = useState({
-    category: "all" as string,
-    itemId: "",
-    quantity: "",
-    displayUnit: "pcs" as DisplayUnit,
-    reason: ""
+    notes: ""
   })
 
   const [menuForm, setMenuForm] = useState({
@@ -300,13 +286,14 @@ export default function InventoryPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const [invData, menuData, opexData, opnameData, salesData, batchData] = await Promise.all([
+      const [invData, menuData, opexData, opnameData, salesData, batchData, logsData] = await Promise.all([
         getInventory(),
         getMenuItems(),
         getMonthlyOpex(),
         getInventoryOpnames(),
         getSalesReport(),
-        getBatches()
+        getBatches(),
+        getStockLogs()
       ])
       
       const menusWithRecipes = await Promise.all(
@@ -326,6 +313,7 @@ export default function InventoryPage() {
       setSalesReport(salesData)
       setOpnameHistory(opnameData)
       setBatches(batchData)
+      setStockLogs(logsData)
     } catch (err) {
       console.error("Error fetching data:", err)
       setError("Failed to load inventory data")
@@ -587,90 +575,11 @@ export default function InventoryPage() {
         supplierName: "", 
         receivedDate: new Date().toISOString().split("T")[0], 
         expiredDate: "", 
-        notes: "",
-        is_opened: false 
+        notes: ""
       })
       fetchData()
     } catch (err) {
       setError("Failed to add stock")
-    }
-  }
-
-  // Stock Out (Manual Waste/Damage)
-  const handleStockOutAttempt = async () => {
-    if (!selectedStockOutBatchId || !stockOutForm.quantity) {
-      setError("Please select a batch and enter a quantity.");
-      return;
-    }
-
-    // Check if there's an active floor batch for this item
-    // Only check if it's a Transfer to Bar (no waste reason)
-    if (!stockOutForm.reason) {
-      const activeBatch = batches.find(b => 
-        (b.inventoryItemId === stockOutForm.itemId || b.id === stockOutForm.itemId) && 
-        b.location === 'floor' && 
-        b.currentQuantity > 0
-      );
-      
-      if (activeBatch) {
-        setActiveFloorBatch(activeBatch);
-        setIsStockOutWarningOpen(true);
-        return;
-      }
-    }
-
-    await handleStockOutManual();
-  }
-
-  const handleStockOutManual = async () => {
-    
-    setError(null);
-    setIsLoading(true);
-    
-    try {
-      const item = inventory.find(i => i.id === stockOutForm.itemId)
-      const multiplier = item?.conversion_rate || getConversionRate(stockOutForm.displayUnit, item?.unit || 'pcs') || 1
-      const rawQty = parseFloat(stockOutForm.quantity)
-      const baseQty = rawQty * multiplier
-
-      let success = false;
-
-      if (!stockOutForm.reason) {
-        // No waste reason → Transfer to Bar (batch tracking / floor)
-        // Use the first selected batch as starting point, or the whole array
-        const splitSize = multiplier > 1 ? multiplier : undefined;
-        const targetIds = selectedStockOutBatchIds.length > 0 ? selectedStockOutBatchIds : [selectedStockOutBatchId];
-        success = await transferToFloor(targetIds, baseQty, actorName, undefined, splitSize, stockOutForm.itemId);
-      } else {
-        // Waste reason selected → Manual waste
-        const targetIds = selectedStockOutBatchIds.length > 0 ? selectedStockOutBatchIds : [selectedStockOutBatchId];
-        success = await stockOutManual(
-          targetIds,
-          baseQty,
-          stockOutForm.reason,
-          actorName,
-          stockOutForm.itemId
-        );
-      }
-
-      if (!success) {
-        setError("Database rejected the operation. Please try again.");
-        setIsLoading(false);
-        return;
-      }
-      
-      toast.success(stockOutForm.reason ? "Waste recorded successfully" : "Transferred to bar successfully")
-      setIsStockOutModalOpen(false)
-      setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" })
-      setSelectedStockOutBatchId('')
-      setSelectedStockOutBatchIds([])
-      setStockOutBatches([])
-      fetchData()
-    } catch (err) {
-      console.error("Stock out error:", err);
-      setError("Failed: " + (err instanceof Error ? err.message : String(err)))
-    } finally {
-      setIsLoading(false);
     }
   }
 
@@ -916,18 +825,18 @@ export default function InventoryPage() {
             <ClipboardCheck className="w-4 h-4" />
             Stock Take (Opname)
           </TabsTrigger>
+          <TabsTrigger value="movement" className="gap-2">
+            <History className="w-4 h-4" />
+            Movement Record
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="raw-materials">
           {canEdit && (
             <div className="flex gap-2 mb-6">
-              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "", is_opened: false }); setIsAddStockModalOpen(true); }}>
+              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
                 <PackagePlus className="w-4 h-4 mr-2" />
                 Stock In
-              </Button>
-              <Button variant="outline" className="rounded-sm" onClick={() => { setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" }); setIsStockOutModalOpen(true); }}>
-                <ArrowDownCircle className="w-4 h-4 mr-2" />
-                Waste / Stock Out
               </Button>
               <Button variant="outline" className="rounded-sm" onClick={() => { resetItemForm(); setIsAddItemModalOpen(true); }}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -1231,7 +1140,7 @@ export default function InventoryPage() {
                     <th className="text-left py-3 px-4 text-muted-foreground">Item</th>
                     <th className="text-right py-3 px-4 text-muted-foreground">System</th>
                     <th className="text-right py-3 px-4 text-muted-foreground">Actual</th>
-                    <th className="text-right py-3 px-4 text-muted-foreground">Waste</th>
+                    <th className="text-right py-3 px-4 text-muted-foreground">Adjustment</th>
                     <th className="text-left py-3 px-4 text-muted-foreground">Reason</th>
                   </tr>
                 </thead>
@@ -1277,6 +1186,97 @@ export default function InventoryPage() {
                     })}
                 </tbody>
               </table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="movement">
+          <Card className="rounded-sm border-border">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xl">Movement Record</CardTitle>
+                <p className="text-sm text-muted-foreground">Historical logs of all stock additions, deductions, and adjustments.</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading}>
+                  <History className={cn("w-4 h-4 mr-2", isLoading && "animate-spin")} />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 border-b border-border text-left">
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px]">Date & Time</th>
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px]">Item</th>
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px]">Action</th>
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px] text-right">Amount</th>
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px]">By</th>
+                      <th className="py-3 px-4 font-medium uppercase tracking-wider text-[10px]">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-muted-foreground italic">No movement records found.</td>
+                      </tr>
+                    ) : (
+                      stockLogs.map((log) => {
+                        const item = inventory.find(i => i.id === log.item_id);
+                        return (
+                          <tr key={log.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                            <td className="py-4 px-4 text-xs font-mono">
+                              {(() => {
+                                let normalized = log.timestamp;
+                                if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
+                                if (!normalized.includes('Z') && !normalized.includes('+')) normalized += 'Z';
+                                const date = new Date(normalized);
+                                return new Intl.DateTimeFormat('id-ID', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: false,
+                                  timeZone: 'Asia/Jakarta'
+                                }).format(date).replace(/\./g, ':');
+                              })()}
+                            </td>
+                            <td className="py-4 px-4 font-medium">{log.item_name || item?.name || "Unknown Item"}</td>
+                            <td className="py-4 px-4">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase",
+                                log.type === "in" && "bg-emerald-100 text-emerald-700",
+                                log.type === "out" && "bg-blue-100 text-blue-700",
+                                log.type === "waste" && "bg-red-100 text-red-700",
+                                log.type === "opname" && "bg-amber-100 text-amber-700"
+                              )}>
+                                {log.type}
+                              </span>
+                            </td>
+                            <td className={cn(
+                              "py-4 px-4 text-right font-mono font-bold",
+                              log.type === "in" ? "text-emerald-600" : (log.type === "waste" || log.type === "out") ? "text-red-600" : "text-foreground"
+                            )}>
+                              {(log.type === "waste" || log.type === "out") ? "-" : log.type === "in" ? "+" : ""}{(() => {
+                                if (!item) return log.amount;
+                                const dUnit = (item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit) as DisplayUnit;
+                                return `${parseFloat(fromBaseUnit(log.amount, dUnit, item).toFixed(2))} ${dUnit}`;
+                              })()}
+                            </td>
+                            <td className="py-4 px-4 text-xs">{log.employee_name || "-"}</td>
+                            <td className="py-4 px-4 text-xs text-muted-foreground italic max-w-[200px] truncate" title={log.notes || ""}>
+                              {log.notes || "-"}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1606,18 +1606,7 @@ export default function InventoryPage() {
               <Textarea placeholder="Additional details..." value={stockInForm.notes} onChange={(e) => setStockInForm(p => ({ ...p, notes: e.target.value }))} />
             </div>
 
-            <div className="flex items-center space-x-2">
-              <input 
-                type="checkbox" 
-                id="is-opened" 
-                checked={stockInForm.is_opened || false} 
-                onChange={(e) => setStockInForm(p => ({ ...p, is_opened: e.target.checked }))}
-                className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
-              />
-              <Label htmlFor="is-opened" className="text-sm font-medium leading-none cursor-pointer">
-                Opened
-              </Label>
-            </div>
+
           </div>
           <DialogFooter>
             <Button onClick={handleStockIn} disabled={isLoading || !stockInForm.itemId || !stockInForm.quantity}>
@@ -1627,253 +1616,7 @@ export default function InventoryPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Stock Out Modal */}
-      <Dialog open={isStockOutModalOpen} onOpenChange={(open) => {
-        setIsStockOutModalOpen(open);
-        if (!open) setStockOutForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", reason: "" });
-      }}>
-        <DialogContent className="sm:max-w-[425px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle>Stock Out (Manual)</DialogTitle>
-            <DialogDescription>Manually subtract stock for waste, damage, or other reasons.</DialogDescription>
-          </DialogHeader>
-          
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-sm text-xs flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-          <div className="grid gap-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Category</Label>
-                <Select value={stockOutForm.category} onValueChange={(v) => {
-                  setStockOutForm(p => ({ ...p, category: v, itemId: "" }));
-                }}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="All Categories"/></SelectTrigger>
-                  <SelectContent>
-                    {inventoryCategories.map(c => (
-                      <SelectItem key={c} value={c} className="capitalize">
-                        {c === "all" ? "All Categories" : c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Select Item</Label>
-                <Select value={stockOutForm.itemId} onValueChange={(v) => {
-                  const item = inventory.find(i => i.id === v);
-                  setStockOutForm(p => ({ ...p, itemId: v, displayUnit: item ? (item.display_unit as DisplayUnit || getDefaultDisplayUnit(item.unit)) : 'pcs' }));
-                  setSelectedStockOutBatchId('');
-                  getBatchesByItem(v, 'warehouse').then(setStockOutBatches);
-                }}>
-                  <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
-                  <SelectContent>
-                    {inventory
-                      .filter(i => stockOutForm.category === "all" || i.category === stockOutForm.category)
-                      .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Quantity</Label>
-                <Input type="number" placeholder="0" value={stockOutForm.quantity} onChange={(e) => {
-                  setStockOutForm(p => ({ ...p, quantity: e.target.value }));
-                  setSelectedStockOutBatchIds([]);
-                }} />
-              </div>
-              <div className="space-y-2">
-                <Label>Unit</Label>
-                <Select value={stockOutForm.displayUnit} onValueChange={(v) => setStockOutForm(p => ({ ...p, displayUnit: v as DisplayUnit }))}>
-                  <SelectTrigger className="rounded-sm font-semibold uppercase text-[10px]"><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    {(() => {
-                      const item = inventory.find(i => i.id === stockOutForm.itemId);
-                      const base = item?.unit || 'pcs';
-                      const units = getAllowedUnitsForItem(base);
-                      if (item?.display_unit && !units.includes(item.display_unit as any)) {
-                        units.push(item.display_unit as any);
-                      }
-                      return units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>);
-                    })()}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
 
-            {stockOutForm.itemId && (() => {
-              const item = inventory.find(i => i.id === stockOutForm.itemId);
-              const convRate = item?.conversion_rate || 1;
-              const dUnit = (item?.display_unit || item?.unit || 'pcs') as string;
-              const baseUnit = (item?.unit || 'pcs') as string;
-              const activeBatches = stockOutBatches.filter(b => b.currentQuantity > 0);
-              return (
-                <div className="space-y-2">
-                  <Label>Select Warehouse Batches (Multi-select supported)</Label>
-                  <div className="border rounded-sm p-2 bg-muted/30 max-h-[150px] overflow-y-auto space-y-1">
-                    {activeBatches.map(b => {
-                      const dQty = convRate > 1 ? (b.currentQuantity / convRate) : b.currentQuantity;
-                      const rcvDate = b.receivedDate ? new Date(b.receivedDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
-                      const isSelected = selectedStockOutBatchIds.includes(b.id) || selectedStockOutBatchId === b.id;
-                      
-                      return (
-                        <div key={b.id} className={cn(
-                          "flex items-center gap-2 p-1.5 rounded-sm transition-colors hover:bg-muted cursor-pointer",
-                          isSelected && "bg-blue-50 border-blue-100",
-                          (!isSelected && stockOutBatches.filter(id => selectedStockOutBatchIds.includes(id.id)).reduce((s,c) => s+c.currentQuantity, 0) >= (parseFloat(stockOutForm.quantity || '0') * convRate)) && "opacity-50 cursor-not-allowed grayscale-[0.5]"
-                        )} onClick={() => {
-                          const isAlreadySelected = selectedStockOutBatchIds.includes(b.id);
-                          const totalSelected = stockOutBatches
-                            .filter(id => selectedStockOutBatchIds.includes(id.id))
-                            .reduce((sum, curr) => sum + curr.currentQuantity, 0);
-                          const targetQtyBase = parseFloat(stockOutForm.quantity || '0') * convRate;
-
-                          if (isAlreadySelected) {
-                            setSelectedStockOutBatchIds(prev => prev.filter(id => id !== b.id));
-                          } else if (totalSelected < targetQtyBase) {
-                            setSelectedStockOutBatchIds(prev => [...prev, b.id]);
-                            setSelectedStockOutBatchId(b.id);
-                          }
-                        }}>
-                          <div className={cn(
-                            "w-4 h-4 rounded border flex items-center justify-center shrink-0",
-                            isSelected ? "bg-blue-600 border-blue-600 text-white" : 
-                            (stockOutBatches.filter(id => selectedStockOutBatchIds.includes(id.id)).reduce((s,c) => s+c.currentQuantity, 0) >= (parseFloat(stockOutForm.quantity || '0') * convRate) ? "bg-muted border-muted-foreground/30 opacity-50" : "border-input bg-background")
-                          )}>
-                            {isSelected && <Check className="w-3 h-3" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex justify-between text-[11px] font-medium">
-                              <span className="truncate">{b.batchNumber}</span>
-                              <span>{parseFloat(dQty.toFixed(2))} {dUnit}</span>
-                            </div>
-                            <div className="text-[10px] text-muted-foreground">
-                              Rec: {rcvDate} {b.is_opened ? '• Opened' : ''}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="flex justify-between items-center px-1">
-                    <p className="text-[10px] text-muted-foreground italic">
-                      {selectedStockOutBatchIds.length} batch(es) selected
-                    </p>
-                    {selectedStockOutBatchIds.length > 0 && (() => {
-                      const totalAvailableBase = stockOutBatches
-                        .filter(b => selectedStockOutBatchIds.includes(b.id))
-                        .reduce((sum, b) => sum + b.currentQuantity, 0);
-                      const targetBase = parseFloat(stockOutForm.quantity || '0') * convRate;
-                      const totalAvailableDisplay = totalAvailableBase / convRate;
-                      const targetDisplay = parseFloat(stockOutForm.quantity || '0');
-                      
-                      return (
-                        <div className="text-right">
-                          <p className="text-[10px] font-medium text-muted-foreground">
-                            Available in Selection: {parseFloat(totalAvailableDisplay.toFixed(2))} {dUnit}
-                          </p>
-                          <p className="text-[11px] font-bold text-blue-600">
-                            Will Deduct: {targetDisplay} {dUnit}
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  {convRate > 1 && (
-                    <p className="text-[10px] text-muted-foreground italic">1 {dUnit} = {convRate} {baseUnit}</p>
-                  )}
-                </div>
-              );
-            })()}
-
-            <div className="space-y-2">
-              <Label>Waste Category / Reason <span className="text-[10px] text-muted-foreground">(leave empty to Transfer to Bar)</span></Label>
-              <Select value={stockOutForm.reason} onValueChange={(v) => setStockOutForm(p => ({ ...p, reason: v }))}>
-                <SelectTrigger><SelectValue placeholder="No waste - Transfer to Bar" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Spoiled/Expired">Spoiled / Expired</SelectItem>
-                  <SelectItem value="Damaged">Damaged</SelectItem>
-                  <SelectItem value="Operational Waste">Operational Waste</SelectItem>
-                  <SelectItem value="Production Error">Production Error</SelectItem>
-                  <SelectItem value="Shrinkage">Shrinkage / Susut</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-              {stockOutForm.reason && (
-                <button className="text-[10px] text-blue-600 hover:underline" onClick={() => setStockOutForm(p => ({ ...p, reason: '' }))}>Clear reason (switch to Transfer to Bar)</button>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button 
-              variant={stockOutForm.reason ? 'destructive' : 'default'}
-              onClick={handleStockOutAttempt}
-              disabled={isLoading || (!selectedStockOutBatchId && selectedStockOutBatchIds.length === 0) || !stockOutForm.quantity}
-            >
-              {isLoading ? 'Processing...' : (stockOutForm.reason ? 'Confirm Waste' : 'Transfer to Bar')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Stock Out Confirmation Warning */}
-      <Dialog open={isStockOutWarningOpen} onOpenChange={setIsStockOutWarningOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="w-5 h-5" />
-              Existing Stock Detected
-            </DialogTitle>
-            <DialogDescription className="pt-2 text-foreground font-medium">
-              There is still an opened batch of this item at the Bar.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="py-4 space-y-3">
-            <div className="bg-amber-50 border border-amber-100 p-3 rounded-sm space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-amber-700">Opened Batch:</span>
-                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.batchNumber}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-amber-700">Remaining Quantity:</span>
-                <span className="font-mono font-bold text-amber-900">{activeFloorBatch?.currentQuantity} {activeFloorBatch?.unit || ''}</span>
-              </div>
-            </div>
-            
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              If you proceed with this Stock Out, the existing batch will be <span className="font-bold text-destructive">AUTO-WASTED</span> by the system (if it was opened more than 5 minutes ago). 
-              Are you sure you want to open a new batch?
-            </p>
-          </div>
-          
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button 
-              variant="outline" 
-              onClick={() => setIsStockOutWarningOpen(false)}
-              className="rounded-sm"
-            >
-              Cancel
-            </Button>
-            <Button 
-              variant="destructive"
-              onClick={() => {
-                setIsStockOutWarningOpen(false);
-                handleStockOutManual();
-              }}
-              className="rounded-sm"
-            >
-              Yes, Open New Batch
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Add Menu Modal */}
       <Dialog open={isAddMenuModalOpen || isEditMenuModalOpen} onOpenChange={(o) => { if(!o) { setIsAddMenuModalOpen(false); setIsEditMenuModalOpen(false); resetMenuForm(); }}}>

@@ -11,10 +11,12 @@ import {
   ClipboardList,
   ArrowLeft,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  BarChart3
 } from "lucide-react"
 import { NFCModal } from "./nfc-modal"
 import { StockActionModal } from "./stock-action-modal"
+import { DailyReportModal } from "./daily-report-modal"
 import { StockWidgets } from "./stock-widgets"
 import { Button } from "@/components/ui/button"
 import { cn, getLocalYYYYMMDD, getDeviceFingerprint } from "@/lib/utils"
@@ -38,15 +40,14 @@ interface OpsMenuProps {
   idleTimeout?: number
 }
 
-type ActionType = "clock-in" | "clock-out" | "stock-in" | "stock-out" | "waste" | "opname" | null
+type ActionType = "clock-in" | "clock-out" | "stock-in" | "opname" | "report" | "stock-out" | "waste" | null
 
 const menuItems: { id: ActionType; label: string; icon: React.ComponentType<{ className?: string }>; color: string; textColor: string }[] = [
   { id: "clock-in", label: "Clock In", icon: LogIn, color: "bg-[var(--status-healthy)]", textColor: "text-background" },
   { id: "clock-out", label: "Clock Out", icon: LogOut, color: "bg-muted", textColor: "text-foreground" },
   { id: "stock-in", label: "Stock In", icon: Package, color: "bg-foreground", textColor: "text-background" },
-  { id: "stock-out", label: "Stock Out", icon: PackageOpen, color: "bg-[var(--status-warning)]", textColor: "text-background" },
-  { id: "waste", label: "Waste", icon: Trash2, color: "bg-[var(--status-critical)]", textColor: "text-background" },
   { id: "opname", label: "Stock Opname", icon: ClipboardList, color: "bg-secondary", textColor: "text-foreground" },
+  { id: "report", label: "Daily Report", icon: BarChart3, color: "bg-blue-600", textColor: "text-white" },
 ]
 
 export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
@@ -65,6 +66,8 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
   const [otPromptMessage, setOTPromptMessage] = useState("")
   const [pendingOTData, setPendingOTData] = useState<{ employeeId: string; employeeName: string; today: string } | null>(null)
   const [pendingStockAction, setPendingStockAction] = useState<"stock-in" | "stock-out" | "waste" | "opname" | null>(null)
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [currentTime, setCurrentTime] = useState(new Date())
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Load inventory on mount
@@ -103,6 +106,14 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
     return () => clearInterval(timer)
   }, [lastActivity, idleTimeout, onIdle])
 
+  // Update local clock every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   useEffect(() => {
     const handleActivity = () => resetCountdown()
 
@@ -119,7 +130,11 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
 
   const handleActionSelect = (action: ActionType) => {
     resetCountdown()
-    setSelectedAction(action)
+    if (action === "report") {
+      setShowReportModal(true)
+    } else {
+      setSelectedAction(action)
+    }
   }
 
   const handleNFCSuccess = async (employeeId: string, employeeName: string) => {
@@ -257,6 +272,10 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
             is_ops_device: true,
             device_info: getDeviceFingerprint()
           })
+
+          // Reminder for Daily Report during closing hours
+          const hour = new Date().getHours()
+          const isClosingTime = hour >= 1 && hour < 4
           
           // Calculate regulated duration
           const today = getLocalYYYYMMDD()
@@ -266,7 +285,9 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
           const otHours = Math.floor(duration.overtimeMinutes / 60)
           const otMins = duration.overtimeMinutes % 60
           
-          if (duration.overtimeMinutes > 0) {
+          if (isClosingTime) {
+            setShowWarningMessage(`Clock-out Success! DON'T FORGET to submit the Daily Report before leaving, ${employeeName}!`)
+          } else if (duration.overtimeMinutes > 0) {
             setShowWarningMessage(`${employeeName} clocked out — Regular: ${regHours}h ${regMins}m | OT: ${otHours}h ${otMins}m (Pending Approval)`)
           } else {
             setShowSuccessMessage(`${employeeName} clocked out — Shift Total: ${regHours}h ${regMins}m`)
@@ -430,9 +451,9 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8">
+    <div className="h-screen w-full bg-background p-4 md:p-6 lg:p-6 flex flex-col overflow-hidden select-none">
       {/* Header */}
-      <header className="flex items-center justify-between mb-6">
+      <header className="flex items-center justify-between mb-4 flex-shrink-0">
         <button
           onClick={onIdle}
           className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors p-2"
@@ -443,20 +464,56 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
 
         <div className="text-center">
           <h1 className="text-lg font-light tracking-[0.2em]">DONOTDISTURB</h1>
-          <p className="text-xs text-muted-foreground">Operations</p>
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-xs text-muted-foreground">Operations Dashboard</p>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-mono font-bold">
+              {currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Clock className="w-4 h-4" />
-          <span className={cn(
-            "text-sm font-mono tabular-nums w-6",
-            countdown <= 10 && "text-[var(--status-warning)]",
-            countdown <= 5 && "text-[var(--status-critical)] animate-pulse"
-          )}>
-            {countdown}
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Auto-Lock</span>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock className="w-4 h-4" />
+              <span className={cn(
+                "text-sm font-mono tabular-nums w-6",
+                countdown <= 10 && "text-[var(--status-warning)]",
+                countdown <= 5 && "text-[var(--status-critical)] animate-pulse"
+              )}>
+                {countdown}
+              </span>
+            </div>
+          </div>
         </div>
       </header>
+
+      {/* Closing Shift Reminder Banner */}
+      {(() => {
+        const hour = currentTime.getHours()
+        if (hour >= 1 && hour < 4) {
+          return (
+            <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-sm flex items-center justify-between animate-in slide-in-from-top-2 duration-500 flex-shrink-0">
+              <div className="flex items-center gap-3 text-amber-600">
+                <AlertTriangle className="w-5 h-5 animate-bounce" />
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-tight">Closing Shift Reminder</p>
+                  <p className="text-[11px] opacity-80">Please ensure the **Daily Report** is submitted before ending your shift.</p>
+                </div>
+              </div>
+              <Button 
+                size="sm" 
+                className="bg-amber-600 hover:bg-amber-700 text-white rounded-sm text-xs font-bold"
+                onClick={() => setShowReportModal(true)}
+              >
+                Fill Report Now
+              </Button>
+            </div>
+          )
+        }
+        return null
+      })()}
 
       {/* Success Message */}
       {showSuccessMessage && (
@@ -521,30 +578,36 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         </div>
       )}
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Menu Buttons */}
-        <div className="lg:col-span-2">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+      {/* Main Grid Area - Flex-1 to fill space */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
+        {/* Menu Buttons Area */}
+        <div className="lg:col-span-8 flex flex-col">
+          <div className="grid grid-cols-2 gap-3 md:gap-4 h-full">
             {menuItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleActionSelect(item.id)}
                 className={cn(
-                  "aspect-square rounded-sm flex flex-col items-center justify-center gap-3 md:gap-4 transition-all duration-200 active:scale-95 hover:opacity-90",
+                  "flex flex-col items-center justify-center gap-2 md:gap-4 transition-all duration-200 active:scale-95 hover:opacity-90 rounded-sm relative overflow-hidden",
                   item.color,
-                  item.textColor
+                  item.textColor,
+                  item.id === "report" && currentTime.getHours() >= 1 && currentTime.getHours() < 4 && "ring-4 ring-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.4)]"
                 )}
               >
-                <item.icon className="w-10 h-10 md:w-14 md:h-14" />
-                <span className="text-base md:text-lg font-medium">{item.label}</span>
+                {item.id === "report" && currentTime.getHours() >= 1 && currentTime.getHours() < 4 && (
+                  <div className="absolute top-2 right-2 flex items-center gap-1 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest animate-pulse">
+                    Required
+                  </div>
+                )}
+                <item.icon className="w-10 h-10 md:w-16 md:h-16" />
+                <span className="text-base md:text-xl font-medium">{item.label}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Widgets Sidebar */}
-        <div className="lg:col-span-1">
+        {/* Widgets Sidebar Area */}
+        <div className="lg:col-span-4 overflow-y-auto pr-2 custom-scrollbar">
           <StockWidgets />
         </div>
       </div>
@@ -578,6 +641,16 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         inventory={inventory}
         batches={batches}
         isSubmitting={isSubmitting}
+      />
+
+      {/* Daily Report Modal */}
+      <DailyReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmitSuccess={() => {
+          setShowReportModal(false)
+          // Refresh widgets data if needed
+        }}
       />
     </div>
   )
