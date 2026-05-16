@@ -9,8 +9,8 @@ export default function ActivityPage() {
     <div className="min-h-screen bg-[#1C1C1E] text-[#BFC0C2] py-32 md:py-48 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       
       {/* Background Ambience */}
-      <div className="absolute top-0 left-0 w-[800px] h-[800px] bg-[#2D2D30] rounded-full blur-[300px] opacity-[0.2] pointer-events-none" />
-      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[#D4A24A] rounded-full blur-[250px] opacity-[0.05] pointer-events-none" />
+      <div className="absolute top-0 left-0 w-[800px] h-[800px] bg-[radial-gradient(circle,_#2D2D30_0%,_transparent_70%)] opacity-[0.2] pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[radial-gradient(circle,_#D4A24A_0%,_transparent_70%)] opacity-[0.05] pointer-events-none" />
 
       <div className="max-w-4xl mx-auto relative z-10 text-center">
         {/* Animated Icon */}

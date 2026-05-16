@@ -8,8 +8,8 @@ export function CommunityHighlightsSection() {
     <section className="py-24 md:py-32 px-6 bg-[#2D2D30] text-[#BFC0C2] font-sans relative overflow-hidden">
       
       {/* Decorative Blur Orbs */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#D4A24A] rounded-full blur-[150px] opacity-20 pointer-events-none translate-x-1/3 -translate-y-1/3" />
-      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#1C1C1E] rounded-full blur-[120px] opacity-10 pointer-events-none -translate-x-1/2 translate-y-1/3" />
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[radial-gradient(circle,_#D4A24A_0%,_transparent_70%)] opacity-20 pointer-events-none translate-x-1/3 -translate-y-1/3" />
+      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[radial-gradient(circle,_#1C1C1E_0%,_transparent_70%)] opacity-10 pointer-events-none -translate-x-1/2 translate-y-1/3" />
 
       <div className="max-w-7xl mx-auto relative z-10 flex flex-col xl:flex-row items-center gap-16">
         

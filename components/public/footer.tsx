@@ -8,8 +8,8 @@ export function Footer() {
     <footer id="visit" className="bg-[#1C1C1E] text-[#BFC0C2] pt-32 pb-20 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
 
       {/* Subtle brand glow for depth */}
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#D4A24A] rounded-full blur-[250px] opacity-[0.05] pointer-events-none translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#2D2D30] rounded-full blur-[200px] opacity-[0.05] pointer-events-none -translate-x-1/2 translate-y-1/2" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[radial-gradient(circle,_#D4A24A_0%,_transparent_70%)] opacity-[0.05] pointer-events-none translate-x-1/2 -translate-y-1/2" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[radial-gradient(circle,_#2D2D30_0%,_transparent_70%)] opacity-[0.05] pointer-events-none -translate-x-1/2 translate-y-1/2" />
 
       <div className="max-w-7xl mx-auto relative z-10">
 
