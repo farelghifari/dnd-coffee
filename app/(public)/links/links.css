@@ -75,17 +75,18 @@
 }
 
 .logo-container {
-  width: 120px;
-  height: 120px;
-  border-radius: 40px;
-  background: #111;
+  width: 180px;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
   display: flex;
   justify-content: center;
   align-items: center;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-  margin-bottom: 28px;
+  padding: 0;
+  border: none;
+  overflow: visible;
+  box-shadow: none;
+  margin-bottom: 0;
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
@@ -97,6 +98,7 @@
   font-size: 34px;
   font-weight: 800;
   margin: 0;
+  margin-top: -30px;
   letter-spacing: 2px;
   line-height: 1.2;
   background: linear-gradient(to bottom, #fff, #999);
@@ -108,7 +110,7 @@
 .tagline {
   font-size: 14px;
   color: var(--muted-text);
-  margin-top: 12px;
+  margin-top: -30px;
   font-weight: 600;
   letter-spacing: 3px;
   text-transform: uppercase;

@@ -5,24 +5,24 @@ import config from "@/lib/links-config.json"
 
 export function Footer() {
   return (
-    <footer id="visit" className="bg-[#000000] text-[#F9F4EB] pt-32 pb-20 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+    <footer id="visit" className="bg-[#1C1C1E] text-[#BFC0C2] pt-32 pb-20 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
 
       {/* Subtle brand glow for depth */}
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#DC6835] rounded-full blur-[250px] opacity-[0.07] pointer-events-none translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#1B3629] rounded-full blur-[200px] opacity-[0.05] pointer-events-none -translate-x-1/2 translate-y-1/2" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#D4A24A] rounded-full blur-[250px] opacity-[0.05] pointer-events-none translate-x-1/2 -translate-y-1/2" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#2D2D30] rounded-full blur-[200px] opacity-[0.05] pointer-events-none -translate-x-1/2 translate-y-1/2" />
 
       <div className="max-w-7xl mx-auto relative z-10">
 
         {/* TOP ROW: REFINED VISIT & MAP */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 mb-32 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#DC6835] text-[#DC6835] font-bold text-xs tracking-[0.3em] uppercase mb-10 w-fit">
+            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#D4A24A] text-[#D4A24A] font-bold text-xs tracking-[0.3em] uppercase mb-10 w-fit">
               <MapPin size={16} />
               <span>THE DESTINATION</span>
             </div>
 
             <h2 className="text-5xl md:text-7xl font-bold tracking-tighter mb-10 leading-none">
-              Visit <br /> <span className="text-[#DC6835]">DONOTDISTURB</span>
+              Visit <br /> <span className="text-[#D4A24A]">DONOTDISTURB</span>
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-10 mb-12">
@@ -47,14 +47,14 @@ export function Footer() {
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shopInfo.address)}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-4 px-10 py-5 bg-[#DC6835] text-white font-black text-xl rounded-2xl hover:bg-[#DC6835]/90 transition-all hover:scale-[1.02] active:scale-95 group shadow-[0_20px_40px_rgba(220,104,53,0.2)]"
+              className="inline-flex items-center gap-4 px-10 py-5 bg-[#D4A24A] text-[#1C1C1E] font-black text-xl rounded-2xl hover:bg-[#D4A24A]/90 transition-all hover:scale-[1.02] active:scale-95 group shadow-[0_20px_40px_rgba(212,162,74,0.15)]"
             >
               <span>GET DIRECTIONS</span>
               <ExternalLink size={20} className="transition-transform group-hover:translate-x-1 group-hover:-translate-y-1" />
             </a>
           </div>
 
-          <div className="h-[500px] rounded-[3rem] overflow-hidden border-2 border-white/5 relative bg-[#111] shadow-2xl">
+          <div className="h-[500px] rounded-[3rem] overflow-hidden border border-[#515153] relative bg-[#2D2D30] shadow-2xl">
             <iframe
               src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.258179902994!2d110.40710899999999!3d-6.978833199999995!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e708b85cbe263fb%3A0x33e46ec6b85f5d89!2sDo%20Not%20Disturb!5e0!3m2!1sen!2ssg!4v1777114121203!5m2!1sen!2ssg"
               width="100%"
@@ -74,7 +74,7 @@ export function Footer() {
             {/* Col 1: Brand Soul */}
             <div className="flex flex-col items-center md:items-start">
               <div className="h-40 w-full relative mb-3 group flex items-center justify-center md:justify-start">
-                <div className="absolute inset-0 bg-[#DC6835]/10 blur-[60px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute inset-0 bg-[#D4A24A]/10 blur-[60px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                 <svg
                   viewBox="0 0 200 200"
                   className="h-full w-auto filter drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]"
@@ -86,16 +86,15 @@ export function Footer() {
 
                   {/* WIDER Signage to fit COFFEE */}
                   <rect x="15" y="35" width="170" height="30" fill="none" stroke="white" strokeWidth="2.5" />
-                  <text
-                    x="100"
-                    y="56"
-                    textAnchor="middle"
-                    fill="white"
-                    className="font-black text-[15px] uppercase tracking-[0.25em]"
-                    style={{ fontFamily: "inherit" }}
-                  >
-                    DND COFFEE
-                  </text>
+                  <image
+                    href="/images/logo-text-only.png"
+                    x="25"
+                    y="38"
+                    width="150"
+                    height="24"
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ filter: "brightness(0) invert(1)" }}
+                  />
 
                   {/* Details */}
                   <line x1="30" y1="170" x2="170" y2="170" stroke="white" strokeWidth="4" strokeLinecap="round" />
@@ -103,28 +102,28 @@ export function Footer() {
                   <rect x="110" y="105" width="35" height="25" fill="none" stroke="white" strokeWidth="1" opacity="0.3" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold uppercase tracking-widest mb-3">DND COFFEE</h3>
+              <h3 className="text-xl font-bold uppercase tracking-widest mb-3">DONOTDISTURB</h3>
               <p className="opacity-40 leading-relaxed text-[13px] italic pr-4 max-w-[220px]">"Quietly brewing since 2026. Architecting havens for your restless ideas."</p>
             </div>
 
             {/* Col 2: Navigation */}
             <div>
-              <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-6">Navigation</h4>
+              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-6">Navigation</h4>
               <ul className="space-y-3 text-base">
-                <li><Link href="/" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
-                  <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
+                <li><Link href="/" className="hover:text-[#D4A24A] transition-colors flex items-center gap-2 group">
+                  <span className="w-0 h-0.5 bg-[#D4A24A] transition-all group-hover:w-4" />
                   Home
                 </Link></li>
-                <li><Link href="/activity" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
-                  <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
+                <li><Link href="/activity" className="hover:text-[#D4A24A] transition-colors flex items-center gap-2 group">
+                  <span className="w-0 h-0.5 bg-[#D4A24A] transition-all group-hover:w-4" />
                   Journal
                 </Link></li>
-                <li><Link href="/album" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
-                  <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
+                <li><Link href="/album" className="hover:text-[#D4A24A] transition-colors flex items-center gap-2 group">
+                  <span className="w-0 h-0.5 bg-[#D4A24A] transition-all group-hover:w-4" />
                   Album
                 </Link></li>
-                <li><Link href="/visit" className="hover:text-[#DC6835] transition-colors flex items-center gap-2 group">
-                  <span className="w-0 h-0.5 bg-[#DC6835] transition-all group-hover:w-4" />
+                <li><Link href="/visit" className="hover:text-[#D4A24A] transition-colors flex items-center gap-2 group">
+                  <span className="w-0 h-0.5 bg-[#D4A24A] transition-all group-hover:w-4" />
                   Visit
                 </Link></li>
               </ul>
@@ -132,7 +131,7 @@ export function Footer() {
 
             {/* Col 3: Community & Social */}
             <div>
-              <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-6">Stay Connected</h4>
+              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-6">Stay Connected</h4>
               <div className="flex gap-3 mb-8">
                 {config.socials.map((social, i) => {
                   const platformIcons: Record<string, any> = {
@@ -143,20 +142,20 @@ export function Footer() {
                   };
                   const Icon = platformIcons[social.platform] || Instagram;
                   return (
-                    <a key={i} href={social.url} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center hover:bg-[#DC6835] hover:border-[#DC6835] transition-all transform hover:-translate-y-1">
+                    <a key={i} href={social.url} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full border border-white/10 flex items-center justify-center hover:bg-[#D4A24A] hover:border-[#D4A24A] transition-all transform hover:-translate-y-1">
                       <Icon size={14} />
                     </a>
                   );
                 })}
               </div>
-              <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-4">Newsletter</h4>
+              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-4">Newsletter</h4>
               <div className="relative max-w-[180px]">
                 <input
                   type="email"
                   placeholder="Join..."
-                  className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:border-[#DC6835] transition-colors text-[11px]"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-2 px-3 focus:outline-none focus:border-[#D4A24A] transition-colors text-[11px]"
                 />
-                <button className="absolute right-1.5 top-1.5 bottom-1.5 aspect-square bg-[#DC6835] text-white rounded-lg flex items-center justify-center shadow-lg transform active:scale-90 transition-transform">
+                <button className="absolute right-1.5 top-1.5 bottom-1.5 aspect-square bg-[#D4A24A] text-white rounded-lg flex items-center justify-center shadow-lg transform active:scale-90 transition-transform">
                   <Send size={10} />
                 </button>
               </div>
@@ -164,16 +163,16 @@ export function Footer() {
 
             {/* Col 4: Reach Us */}
             <div className="space-y-4 lg:text-right flex flex-col lg:items-end">
-              <h4 className="text-[#DC6835] font-black uppercase tracking-widest text-xs mb-2">Reach Us</h4>
+              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-2">Reach Us</h4>
 
               <a
                 href={`https://wa.me/${shopInfo.phone.replace(/[^0-9]/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#F9F4EB]/40 hover:scale-[1.02] active:scale-95 w-full max-w-[220px]"
+                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 w-full max-w-[220px]"
               >
                 <div className="py-2 px-4 border-b border-white/5 font-bold text-center text-base">{shopInfo.phone}</div>
-                <div className="py-3 px-4 bg-[#F9F4EB] text-black font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter">
+                <div className="py-3 px-4 bg-[#1C1C1E] text-[#BFC0C2] font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter">
                   <MessageCircle size={16} />
                   <span>OFFICIAL WHATSAPP</span>
                 </div>
@@ -181,12 +180,12 @@ export function Footer() {
 
               <a
                 href={`mailto:${shopInfo.email}`}
-                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#DC6835]/40 hover:scale-[1.02] active:scale-95 leading-none w-full max-w-[220px]"
+                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 leading-none w-full max-w-[220px]"
               >
                 <div className="py-2 px-4 border-b border-white/5 font-bold text-center text-[11px] truncate opacity-60 leading-none h-6 flex items-center justify-center">
                   {shopInfo.email}
                 </div>
-                <div className="py-3 px-4 bg-[#DC6835] text-white font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter leading-none">
+                <div className="py-3 px-4 bg-[#D4A24A] text-white font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter leading-none">
                   <FooterFlame size={16} />
                   <span>BULK EVENT ORDER</span>
                 </div>

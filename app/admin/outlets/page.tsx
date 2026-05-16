@@ -253,7 +253,7 @@ export default function OutletsPage() {
                       <Label htmlFor="name">Outlet Name</Label>
                       <Input 
                         id="name" 
-                        placeholder="e.g. DND Coffee Senopati" 
+                        placeholder="e.g. DONOTDISTURB Senopati" 
                         value={form.name}
                         onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                         required

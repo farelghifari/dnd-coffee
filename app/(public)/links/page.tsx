@@ -59,13 +59,12 @@ export default function LinksPage() {
         {/* Header */}
         <header className="header fade-in">
           <div className="logo-container">
-            {config.logo === "/images/logo-placeholder.png" ? (
-              <Coffee size={48} strokeWidth={1.2} color="#fff" />
-            ) : (
-              <img src={config.logo} alt={config.shopName} className="menu-img" />
-            )}
+            <img 
+              src="/images/logo-text-only.png" 
+              alt="DONOTDISTURB" 
+              className="w-full h-auto object-contain brightness-0 invert"
+            />
           </div>
-          <h1 className="shop-name">{config.shopName}</h1>
           <div className="tagline">{config.tagline}</div>
         </header>
 

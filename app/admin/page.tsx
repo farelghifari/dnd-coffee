@@ -101,7 +101,7 @@ export default function AdminDashboard() {
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-light tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome to DONOTDISTURB management system</p>
+          <p className="text-muted-foreground uppercase tracking-widest text-[10px] font-bold">Welcome to DONOTDISTURB management system</p>
         </div>
         <div className="flex items-center gap-2">
           {pendingOvertimeRequests.length > 0 && (

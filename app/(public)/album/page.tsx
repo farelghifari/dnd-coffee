@@ -39,11 +39,11 @@ export default function AlbumPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#000000] text-[#F9F4EB] py-32 md:py-48 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+    <div className="min-h-screen bg-[#1C1C1E] text-[#BFC0C2] py-32 md:py-48 px-6 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       
       {/* Background Ambience */}
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#DC6835] rounded-full blur-[300px] opacity-[0.03] pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#2A1B14] rounded-full blur-[250px] opacity-[0.05] pointer-events-none" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#D4A24A] rounded-full blur-[300px] opacity-[0.05] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#2D2D30] rounded-full blur-[250px] opacity-[0.2] pointer-events-none" />
 
       {/* Header */}
       <section className="mb-24 relative z-10">
@@ -51,7 +51,7 @@ export default function AlbumPage() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#DC6835]/30 text-[#DC6835] font-bold text-xs tracking-[0.3em] uppercase mb-10 w-fit mx-auto"
+            className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#D4A24A]/30 text-[#D4A24A] font-bold text-xs tracking-[0.3em] uppercase mb-10 w-fit mx-auto"
           >
              <ImageIcon size={16} />
              <span>MOMENTS CAPTURED</span>
@@ -69,7 +69,7 @@ export default function AlbumPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
-            className="text-[#F9F4EB]/40 max-w-2xl mx-auto leading-relaxed text-xl italic"
+            className="text-[#7A7A7D] max-w-2xl mx-auto leading-relaxed text-xl italic"
           >
             A visual curation of our specialized coffee culture, quiet corners, and the restless ideas that bubble within {shopInfo.name}.
           </motion.p>
@@ -87,7 +87,7 @@ export default function AlbumPage() {
                 className={cn(
                   "px-8 py-3 rounded-2xl text-lg capitalize transition-all border border-white/5",
                   selectedCategory === category
-                    ? "bg-[#DC6835] text-white border-[#DC6835] shadow-[0_10px_20px_rgba(220,104,53,0.2)]"
+                    ? "bg-[#D4A24A] text-[#1C1C1E] border-[#D4A24A] shadow-[0_10px_20px_rgba(212,162,74,0.2)] font-bold"
                     : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
                 )}
               >
@@ -113,15 +113,15 @@ export default function AlbumPage() {
                   className="relative cursor-pointer group"
                   onClick={() => openLightbox(index)}
                 >
-                  <div className="aspect-[4/5] overflow-hidden rounded-[2.5rem] bg-[#111] border border-white/10 transition-all group-hover:border-[#DC6835]/40 group-hover:scale-[1.02]">
+                  <div className="aspect-[4/5] overflow-hidden rounded-[2.5rem] bg-[#2D2D30] border border-white/10 transition-all group-hover:border-[#D4A24A]/40 group-hover:scale-[1.02]">
                     <img 
                       src={image.src} 
                       alt={image.alt}
                       className="w-full h-full object-cover grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100 transition-all duration-700" 
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#1C1C1E]/90 via-[#1C1C1E]/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
                        <div className="flex items-center gap-3">
-                         <div className="p-3 rounded-full bg-[#DC6835] text-white shadow-lg">
+                         <div className="p-3 rounded-full bg-[#D4A24A] text-[#1C1C1E] shadow-lg">
                            <Sparkles size={16} />
                          </div>
                          <span className="font-bold text-sm uppercase tracking-widest">{image.category}</span>

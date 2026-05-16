@@ -19,11 +19,11 @@ export function BrandStorySection() {
   }
 
   return (
-    <section className="py-24 md:py-32 px-6 bg-[#2A1B14] text-[#F9F4EB] relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+    <section className="py-24 md:py-32 px-6 bg-[#2D2D30] text-[#BFC0C2] relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       
       {/* Decorative Background Assets */}
-      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#1B3629] rounded-full blur-[150px] opacity-40 pointer-events-none translate-x-1/2 -translate-y-1/4" />
-      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#DC6835] rounded-full blur-[150px] opacity-20 pointer-events-none -translate-x-1/3 translate-y-1/3" />
+      <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-[#2D2D30] rounded-full blur-[150px] opacity-40 pointer-events-none translate-x-1/2 -translate-y-1/4" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[#D4A24A] rounded-full blur-[150px] opacity-20 pointer-events-none -translate-x-1/3 translate-y-1/3" />
 
       <div className="max-w-7xl mx-auto relative z-10">
         
@@ -35,14 +35,14 @@ export function BrandStorySection() {
             viewport={{ once: true, margin: "-100px" }}
             className="flex-1"
           >
-            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#DC6835] text-[#DC6835] font-bold text-xs tracking-[0.3em] uppercase mb-8">
+            <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full border border-[#D4A24A] text-[#D4A24A] font-bold text-xs tracking-[0.3em] uppercase mb-8">
               <Flame size={16} />
               <span>THE DND MANIFESTO</span>
             </div>
             
             <h2 className="text-5xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-[0.9]">
               Born From <br/>
-              <span className="text-[#DC6835] italic tracking-normal">Restless</span><br/>
+              <span className="text-[#D4A24A] italic tracking-normal">Restless</span><br/>
               Creativity
             </h2>
           </motion.div>
@@ -51,7 +51,7 @@ export function BrandStorySection() {
             initial={{ opacity: 0, x: 50 }}
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true, margin: "-100px" }}
-            className="flex-1 text-xl md:text-3xl leading-relaxed font-light text-[#F9F4EB]/80 flex flex-col justify-between"
+            className="flex-1 text-xl md:text-3xl leading-relaxed font-light text-[#BFC0C2] flex flex-col justify-between"
           >
             <div>
               <p className="mb-6 pointer-events-none">
@@ -88,7 +88,7 @@ export function BrandStorySection() {
                  className="relative w-44 h-44 lg:w-72 lg:h-72 opacity-100 z-30 pointer-events-auto"
               >
                 <div 
-                  className="speech-bubble absolute -top-16 left-1/2 -translate-x-1/2 bg-[#F9F4EB] text-[#2A1B14] font-bold py-3 px-6 rounded-3xl shadow-2xl border-2 border-[#DC6835] whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none transition-all duration-300 ease-out text-lg"
+                  className="speech-bubble absolute -top-16 left-1/2 -translate-x-1/2 bg-[#1C1C1E] text-[#BFC0C2] font-bold py-3 px-6 rounded-3xl shadow-2xl border-2 border-[#D4A24A] whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none transition-all duration-300 ease-out text-lg"
                 >
                    Every cup has a story... 📖
                 </div>
@@ -131,7 +131,7 @@ export function BrandStorySection() {
                  className="relative w-44 h-44 lg:w-72 lg:h-72 opacity-100 z-40 pointer-events-auto flex items-center justify-center"
               >
                 <div 
-                  className="speech-bubble absolute -top-16 left-1/2 -translate-x-1/2 bg-[#DC6835] text-white font-bold py-3 px-6 rounded-3xl shadow-2xl border-2 border-[#F9F4EB] whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none transition-all duration-300 ease-out text-lg"
+                  className="speech-bubble absolute -top-16 left-1/2 -translate-x-1/2 bg-[#D4A24A] text-white font-bold py-3 px-6 rounded-3xl shadow-2xl border-2 border-[#1C1C1E] whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none transition-all duration-300 ease-out text-lg"
                 >
                    Freshly roasted thoughts! 🧠⚡
                 </div>
@@ -158,12 +158,12 @@ export function BrandStorySection() {
           className="grid grid-cols-1 md:grid-cols-12 gap-6"
         >
           {/* Card 1 */}
-          <motion.div variants={itemVariants} className="md:col-span-5 bg-[#1B3629] p-8 md:p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
+          <motion.div variants={itemVariants} className="md:col-span-5 bg-[#2D2D30] p-8 md:p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
             <div className="absolute -right-6 -bottom-6 opacity-10 group-hover:scale-150 transition-transform duration-700 ease-out">
               <Eye size={160} />
             </div>
             <div className="p-4 bg-white/10 backdrop-blur-md rounded-2xl mb-6 inline-block">
-              <Eye size={24} className="text-[#F9F4EB]" />
+              <Eye size={24} className="text-[#BFC0C2]" />
             </div>
             <h3 className="text-2xl md:text-3xl font-black mb-3 uppercase tracking-tighter">THE PRODUCTIVE VIBE.</h3>
             <p className="text-base md:text-lg opacity-80 leading-relaxed font-medium">
@@ -172,25 +172,25 @@ export function BrandStorySection() {
           </motion.div>
 
           {/* Card 2 */}
-          <motion.div variants={itemVariants} className="md:col-span-7 bg-[#DC6835] p-8 md:p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
+          <motion.div variants={itemVariants} className="md:col-span-7 bg-[#D4A24A] p-8 md:p-10 rounded-[2.5rem] shadow-2xl relative overflow-hidden group">
             <div className="absolute -right-8 -bottom-8 opacity-20 group-hover:rotate-45 transition-transform duration-700 ease-out">
               <Coffee size={200} />
             </div>
             <div className="p-4 bg-black/10 backdrop-blur-md rounded-2xl mb-6 inline-block">
-              <Coffee size={24} className="text-[#2A1B14]" />
+              <Coffee size={24} className="text-[#BFC0C2]" />
             </div>
-            <h3 className="text-2xl md:text-3xl font-black text-[#2A1B14] mb-3 uppercase tracking-tighter">SPECIALTY ARSENAL.</h3>
-            <p className="text-base md:text-lg text-[#2A1B14]/80 leading-relaxed max-w-xl font-bold">
+            <h3 className="text-2xl md:text-3xl font-black text-[#BFC0C2] mb-3 uppercase tracking-tighter">SPECIALTY ARSENAL.</h3>
+            <p className="text-base md:text-lg text-[#BFC0C2]/80 leading-relaxed max-w-xl font-bold">
               Handraised in Indonesia. We source our beans with a meticulous soul, hand-graded and hand-roasted to fuel your restless creativity with uncompromising precision.
             </p>
           </motion.div>
 
           {/* Card 3 (Full Width) */}
-          <motion.div variants={itemVariants} className="md:col-span-12 bg-[#F9F4EB] text-[#2A1B14] p-8 md:p-12 rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-10 group cursor-pointer hover:bg-white transition-colors duration-500">
+          <motion.div variants={itemVariants} className="md:col-span-12 bg-[#1C1C1E] text-[#BFC0C2] p-8 md:p-12 rounded-[2.5rem] shadow-2xl flex flex-col md:flex-row items-center justify-between gap-10 group cursor-pointer hover:bg-[#515153] transition-colors duration-500">
             <div className="flex-1">
               <div className="flex items-center gap-4 mb-4">
-                <div className="p-3 bg-[#1B3629]/10 rounded-2xl">
-                  <PenTool size={28} className="text-[#1B3629]" />
+                <div className="p-3 bg-[#2D2D30]/10 rounded-2xl">
+                  <PenTool size={28} className="text-[#2D2D30]" />
                 </div>
                 <h3 className="text-3xl md:text-4xl font-black uppercase tracking-tighter">CREATORS&apos; CANVAS.</h3>
               </div>
@@ -201,9 +201,9 @@ export function BrandStorySection() {
             <motion.div 
                animate={{ rotate: 360 }}
                transition={{ repeat: Infinity, duration: 20, ease: "linear" }}
-               className="w-24 h-24 rounded-full border-4 border-dashed border-[#DC6835] flex items-center justify-center flex-shrink-0"
+               className="w-24 h-24 rounded-full border-4 border-dashed border-[#D4A24A] flex items-center justify-center flex-shrink-0"
             >
-              <span className="font-bold tracking-widest text-[#DC6835] uppercase text-xs">Create</span>
+              <span className="font-bold tracking-widest text-[#D4A24A] uppercase text-xs">Create</span>
             </motion.div>
           </motion.div>
         </motion.div>

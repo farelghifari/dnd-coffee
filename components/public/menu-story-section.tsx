@@ -8,8 +8,8 @@ const menuStructure = [
   {
     category: "Classic Coffee",
     desc: "Uncompromising traditional espresso beverages.",
-    color: "bg-[#F9F4EB]",
-    textColor: "text-[#2A1B14]",
+    color: "bg-[#1C1C1E]",
+    textColor: "text-white",
     icon: <Coffee size={24} />,
     items: [
       { name: "Americano", price: "20k" },
@@ -22,8 +22,8 @@ const menuStructure = [
   {
     category: "Flavor Coffee",
     desc: "Sweet, curated blends with a twisted personality.",
-    color: "bg-[#1B3629]",
-    textColor: "text-[#F9F4EB]",
+    color: "bg-[#2D2D30]",
+    textColor: "text-white",
     icon: <Sparkles size={24} />,
     items: [
       { name: "Brown Sugar Signature", price: "22k" },
@@ -35,8 +35,8 @@ const menuStructure = [
   {
     category: "Non Coffee",
     desc: "For those looking for focus beyond caffeine.",
-    color: "bg-[#DC6835]",
-    textColor: "text-[#F9F4EB]",
+    color: "bg-[#1C1C1E]",
+    textColor: "text-white",
     icon: <Leaf size={24} />,
     items: [
       { name: "Peach Tea", price: "18k" },
@@ -50,10 +50,9 @@ const menuStructure = [
   {
     category: "Cake & Pastries",
     desc: "Freshly baked daily. The perfect companion.",
-    color: "bg-[#1B3629]",
-    textColor: "text-[#F9F4EB]",
+    color: "bg-[#2D2D30]",
+    textColor: "text-white",
     icon: <UtensilsCrossed size={24} />,
-    comingSoon: true,
     items: [
       { name: "Burnt Cheesecake", price: "22k" },
       { name: "Butter Croissant", price: "24k" },
@@ -67,8 +66,8 @@ const menuStructure = [
   {
     category: "Snacks",
     desc: "Light bites for heavy thinking sessions.",
-    color: "bg-[#F9F4EB]",
-    textColor: "text-[#2A1B14]",
+    color: "bg-[#1C1C1E]",
+    textColor: "text-white",
     icon: <Droplets size={24} />,
     items: [
       { name: "Mix Platter", price: "28k" },
@@ -81,8 +80,8 @@ const menuStructure = [
   {
     category: "Others",
     desc: "Essential sidekicks for your session.",
-    color: "bg-[#DC6835]",
-    textColor: "text-[#F9F4EB]",
+    color: "bg-[#2D2D30]",
+    textColor: "text-white",
     icon: <Star size={24} />,
     items: [
       { name: "Mineral Water", price: "8k" }
@@ -92,10 +91,10 @@ const menuStructure = [
 
 export function MenuStorySection() {
   return (
-    <section id="menu" className="bg-[#2A1B14] text-[#F9F4EB] py-24 md:py-32 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+    <section id="menu" className="bg-[#1C1C1E] text-[#BFC0C2] py-24 md:py-32 relative overflow-hidden" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
       
       {/* Decorative Assets - Subtle Brown Grain */}
-      <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-[#DC6835]/5 to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-[#D4A24A]/5 to-transparent pointer-events-none" />
 
       <div className="container mx-auto px-6 max-w-7xl relative z-10">
         
@@ -109,7 +108,7 @@ export function MenuStorySection() {
           >
             <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-6">
               Our Curated <br/>
-              <span className="text-[#DC6835]">Arsenal.</span>
+              <span className="text-[#D4A24A]">Arsenal.</span>
             </h2>
             <p className="text-xl md:text-2xl opacity-80 font-medium">
               Everything you need to fuel your focus. Presented transparently, crafted intentionally.
@@ -123,7 +122,7 @@ export function MenuStorySection() {
           >
             <Link 
               href="/links" 
-              className="inline-flex items-center gap-2 bg-[#F9F4EB] text-[#2A1B14] hover:bg-[#DC6835] hover:text-white px-8 py-5 rounded-full font-bold text-lg transition-colors duration-300 shadow-xl hover:scale-105"
+              className="inline-flex items-center gap-2 bg-[#D4A24A] text-[#1C1C1E] hover:bg-[#BFC0C2] hover:text-[#1C1C1E] px-8 py-5 rounded-full font-bold text-lg transition-colors duration-300 shadow-xl hover:scale-105"
             >
               Order Online <ArrowRight size={20} />
             </Link>
@@ -143,7 +142,7 @@ export function MenuStorySection() {
               className={`${section.color} ${section.textColor} p-8 md:p-10 rounded-[2.5rem] shadow-2xl flex flex-col h-[480px]`}
             >
               <div className="flex items-center justify-between mb-6">
-                <div className={`p-4 rounded-2xl ${section.color === 'bg-[#F9F4EB]' ? 'bg-[#2A1B14]/5' : 'bg-white/10'}`}>
+                <div className={`p-4 rounded-2xl ${section.color === 'bg-[#1C1C1E]' ? 'bg-[#515153]' : 'bg-[#2D2D30]'}`}>
                   {section.icon}
                 </div>
               </div>
@@ -164,7 +163,7 @@ export function MenuStorySection() {
               </h3>
               <p className="text-sm font-medium opacity-80 mb-6">{section.desc}</p>
               
-              <div className={`flex flex-col gap-6 mt-auto overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-[#DC6835]/30 scrollbar-track-transparent ${section.comingSoon ? 'opacity-40 grayscale-[0.5]' : ''}`}>
+              <div className={`flex flex-col gap-6 mt-8 overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-[#D4A24A]/30 scrollbar-track-transparent ${section.comingSoon ? 'opacity-40 grayscale-[0.5]' : ''}`}>
                 {section.items.map((item: any, itemIdx: number) => (
                    <div key={itemIdx} className="flex items-end justify-between group">
                     <div className="flex flex-col">
@@ -184,7 +183,7 @@ export function MenuStorySection() {
         </div>
 
         {/* Elegantly Styled Ingredient & Ordering Section (Not a rigid table) */}
-        <div className="mt-32 pt-16 border-t border-[#F9F4EB]/10">
+        <div className="mt-32 pt-16 border-t border-[#1C1C1E]/10">
           
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
@@ -192,7 +191,7 @@ export function MenuStorySection() {
             viewport={{ once: true }}
             className="text-center mb-12"
           >
-            <h4 className="text-[#DC6835] font-bold tracking-[0.3em] uppercase text-xs sm:text-sm mb-3">Integrity in Every Drop</h4>
+            <h4 className="text-[#D4A24A] font-bold tracking-[0.3em] uppercase text-xs sm:text-sm mb-3">Integrity in Every Drop</h4>
             <p className="text-3xl font-black">100% Genuine Ingredients</p>
           </motion.div>
 
@@ -214,9 +213,9 @@ export function MenuStorySection() {
               <motion.div 
                 key={idx}
                 whileHover={{ scale: 1.05, backgroundColor: "rgba(220,104,53, 0.15)", borderColor: "rgba(220,104,53, 0.4)" }}
-                className="flex items-center gap-4 px-6 py-4 bg-[#F9F4EB]/5 backdrop-blur-sm rounded-full border border-[#F9F4EB]/10 transition-all duration-300 w-full sm:w-auto justify-center cursor-default"
+                className="flex items-center gap-4 px-6 py-4 bg-[#2D2D30]/50 backdrop-blur-sm rounded-full border border-[#515153] transition-all duration-300 w-full sm:w-auto justify-center cursor-default"
               >
-                <div className="text-[#DC6835]">{ing.icon}</div>
+                <div className="text-[#D4A24A]">{ing.icon}</div>
                 <span className="font-bold tracking-widest text-sm uppercase">{ing.label}</span>
               </motion.div>
             ))}
@@ -229,14 +228,14 @@ export function MenuStorySection() {
             viewport={{ once: true }}
             className="text-center"
           >
-            <span className="text-[#F9F4EB]/40 font-bold tracking-[0.3em] uppercase text-sm mb-8 block font-sans">
+            <span className="text-[#7A7A7D] font-bold tracking-[0.3em] uppercase text-sm mb-8 block font-sans">
               DELIVERED TO YOUR DESK:
             </span>
-            <div className="flex flex-wrap justify-center items-center gap-6 sm:gap-10 text-2xl sm:text-3xl font-black uppercase text-[#DC6835] hover:text-[#F9F4EB] transition-colors duration-500">
+            <div className="flex flex-wrap justify-center items-center gap-6 sm:gap-10 text-2xl sm:text-3xl font-black uppercase text-[#D4A24A] hover:text-[#BFC0C2] transition-colors duration-500">
                <span className="cursor-pointer hover:scale-110 transition-transform">GOFOOD</span>
-               <span className="w-2 h-2 rounded-full bg-[#F9F4EB]/20 hidden sm:block"></span>
+               <span className="w-2 h-2 rounded-full bg-[#515153] hidden sm:block"></span>
                <span className="cursor-pointer hover:scale-110 transition-transform">GRABFOOD</span>
-               <span className="w-2 h-2 rounded-full bg-[#F9F4EB]/20 hidden sm:block"></span>
+               <span className="w-2 h-2 rounded-full bg-[#515153] hidden sm:block"></span>
                <span className="cursor-pointer hover:scale-110 transition-transform">SHOPEE</span>
             </div>
 
@@ -266,7 +265,7 @@ export function MenuStorySection() {
                className="relative lg:absolute lg:-right-6 lg:bottom-0 mt-16 lg:mt-0 mx-auto w-48 h-48 opacity-60 hidden md:block z-30 pointer-events-auto"
             >
               <div 
-                className="speech-bubble absolute -top-10 -left-16 bg-[#F9F4EB] text-[#DC6835] text-sm font-bold py-3 px-5 rounded-3xl rounded-br-none shadow-2xl border-2 border-[#1B3629]/20 whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none origin-bottom-right transition-all duration-300 ease-out"
+                className="speech-bubble absolute -top-10 -left-16 bg-[#1C1C1E] text-[#D4A24A] text-sm font-bold py-3 px-5 rounded-3xl rounded-br-none shadow-2xl border-2 border-[#2D2D30]/20 whitespace-nowrap z-50 opacity-0 scale-50 pointer-events-none origin-bottom-right transition-all duration-300 ease-out"
                 style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}
               >
                 Delivery? I'm your guy! 🛵

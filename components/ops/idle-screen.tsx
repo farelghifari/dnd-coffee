@@ -49,15 +49,9 @@ export function IdleScreen({ onTap }: IdleScreenProps) {
       }}
       aria-label="Tap to start"
     >
-      {/* Logo */}
-      <div className="mb-16">
-        <div className="w-28 h-28 rounded-sm bg-foreground/10 flex items-center justify-center mb-8 mx-auto">
-          <Coffee className="w-14 h-14 text-foreground" />
-        </div>
-        <h1 className="text-4xl font-light tracking-[0.3em] text-center">
-          DONOTDISTURB
-        </h1>
-        <p className="text-sm text-muted-foreground text-center mt-2 tracking-widest">
+      <div className="mb-24 text-center">
+        <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="w-[80%] max-w-[400px] mx-auto mb-4" />
+        <p className="text-sm text-muted-foreground mt-4 tracking-[0.4em] uppercase font-bold">
           OPERATIONS
         </p>
       </div>

@@ -102,7 +102,7 @@ export function AdminSidebar() {
       <div className="p-4 border-b border-border flex items-center justify-between">
         {!collapsed && (
           <Link href="/admin" className="font-semibold text-sm tracking-wider">
-            DONOTDISTURB
+            <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="h-4 w-auto object-contain" />
           </Link>
         )}
         <button

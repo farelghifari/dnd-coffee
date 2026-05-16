@@ -45,7 +45,7 @@ export function Navigation() {
         !isHomePage && "opacity-100 translate-y-0",
         // Background styles
         scrolled || !isHomePage
-          ? "bg-neutral-900/95 backdrop-blur-md border-b border-neutral-800" 
+          ? "bg-[#2D2D30]/95 backdrop-blur-md border-b border-[#515153]" 
           : "bg-transparent border-b border-transparent"
       )}
     >
@@ -53,13 +53,15 @@ export function Navigation() {
         <div className="flex items-center justify-between">
           <Link 
             href="/" 
-            onClick={() => { if (pathname === '/') window.location.reload(); }}
             className={cn(
-              "font-semibold text-lg tracking-tight transition-colors",
-              "text-white"
+              "font-bold text-2xl tracking-tighter transition-all hover:scale-105 active:scale-95"
             )}
           >
-            DONOTDISTURB
+            <img 
+              src="/images/logo-horizontal-solid-white.png" 
+              alt="DONOTDISTURB" 
+              className="h-5 w-auto object-contain" 
+            />
           </Link>
 
           {/* Desktop Navigation */}
@@ -70,14 +72,14 @@ export function Navigation() {
                   <Link
                     href={item.href}
                     className={cn(
-                      "text-sm tracking-wide transition-colors",
+                      "text-xl font-bold tracking-wide transition-colors",
                       scrolled 
                         ? pathname === item.href
-                          ? "text-white"
-                          : "text-neutral-400 hover:text-white"
+                          ? "text-[#D4A24A]"
+                          : "text-[#7A7A7D] hover:text-[#BFC0C2]"
                         : pathname === item.href
-                          ? "text-white"
-                          : "text-white/70 hover:text-white"
+                          ? "text-[#D4A24A]"
+                          : "text-[#BFC0C2]/70 hover:text-[#BFC0C2]"
                     )}
                   >
                     {item.label}
@@ -91,7 +93,7 @@ export function Navigation() {
           <button
             className={cn(
               "md:hidden p-2 transition-colors",
-              "text-white"
+              "text-[#BFC0C2]"
             )}
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
@@ -114,10 +116,10 @@ export function Navigation() {
                     href={item.href}
                     onClick={() => setMobileMenuOpen(false)}
                     className={cn(
-                      "block text-sm tracking-wide transition-colors",
+                      "block text-2xl font-bold tracking-wide transition-colors",
                       pathname === item.href
-                        ? "text-white"
-                        : "text-neutral-400 hover:text-white"
+                        ? "text-[#D4A24A]"
+                        : "text-[#7A7A7D] hover:text-[#BFC0C2]"
                     )}
                   >
                     {item.label}

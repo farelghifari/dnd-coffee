@@ -153,15 +153,9 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-foreground flex items-center justify-center p-6">
       <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-background/10 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Coffee className="w-8 h-8 text-background" />
-          </div>
-          <h1 className="text-2xl font-light tracking-widest text-background">
-            DONOTDISTURB
-          </h1>
-          <p className="text-background/50 text-sm mt-2">Management System</p>
+        <div className="text-center mb-12">
+          <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="w-[60%] mx-auto mb-4 brightness-0 invert" />
+          <p className="text-background/40 text-[10px] uppercase tracking-[0.3em] mt-4 font-bold">Management System</p>
         </div>
 
         <Card className="bg-background border-0 rounded-sm">

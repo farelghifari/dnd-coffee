@@ -463,7 +463,7 @@ export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
         </button>
 
         <div className="text-center">
-          <h1 className="text-lg font-light tracking-[0.2em]">DONOTDISTURB</h1>
+          <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="h-4 w-auto object-contain mx-auto" />
           <div className="flex items-center justify-center gap-2">
             <p className="text-xs text-muted-foreground">Operations Dashboard</p>
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-mono font-bold">
