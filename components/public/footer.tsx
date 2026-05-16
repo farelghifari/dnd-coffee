@@ -31,8 +31,8 @@ export function Footer() {
                   <Clock size={16} />
                   <span>Door Hours</span>
                 </div>
-                <p className="text-xl">Mon-Fri: {shopInfo.hours.weekday}</p>
-                <p className="text-xl">Sat-Sun: {shopInfo.hours.weekend}</p>
+                <p className="text-xl">Mon-Thu: {shopInfo.hours.weekday}</p>
+                <p className="text-xl">Fri-Sun: {shopInfo.hours.weekend}</p>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center gap-2 opacity-40 uppercase font-black tracking-widest text-sm">
@@ -44,7 +44,7 @@ export function Footer() {
             </div>
 
             <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shopInfo.address)}`}
+              href={shopInfo.mapsUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-4 px-10 py-5 bg-[#D4A24A] text-[#1C1C1E] font-black text-xl rounded-2xl hover:bg-[#D4A24A]/90 transition-all hover:scale-[1.02] active:scale-95 group shadow-[0_20px_40px_rgba(212,162,74,0.15)]"
