@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { shopInfo } from "@/lib/data"
 import { Instagram, MessageCircle, MapPin, Clock, Mail, ExternalLink, Send, Music, Globe } from "lucide-react"
+import { TikTokIcon, WhatsAppIcon } from "@/components/ui/social-icons"
 import config from "@/lib/links-config.json"
 
 export function Footer() {
@@ -136,8 +137,8 @@ export function Footer() {
                 {config.socials.map((social, i) => {
                   const platformIcons: Record<string, any> = {
                     Instagram,
-                    TikTok: Music,
-                    WhatsApp: MessageCircle,
+                    TikTok: TikTokIcon,
+                    WhatsApp: WhatsAppIcon,
                     Website: Globe
                   };
                   const Icon = platformIcons[social.platform] || Instagram;

@@ -20,12 +20,14 @@ import {
   Check
 } from 'lucide-react';
 
+import { TikTokIcon, WhatsAppIcon } from '@/components/ui/social-icons';
+
 const iconMap: Record<string, any> = {
-  MapPin, ShoppingBag, MessageCircle, FileText, Instagram, Globe, ExternalLink, Send, Music
+  MapPin, ShoppingBag, MessageCircle: WhatsAppIcon, FileText, Instagram, Globe, ExternalLink, Send, Music: TikTokIcon
 };
 
 const socialIconMap: Record<string, any> = {
-  Instagram, TikTok: Music, WhatsApp: MessageCircle, Website: Globe
+  Instagram, TikTok: TikTokIcon, WhatsApp: WhatsAppIcon, Website: Globe
 };
 
 export default function LinksPage() {
@@ -46,15 +48,11 @@ export default function LinksPage() {
 
   return (
     <div className="links-page-wrapper">
-      <div className="bg-glow" />
+      {/* Ambient Glassmorphism Orbs */}
+      <div className="absolute top-0 right-0 w-[700px] h-[700px] bg-[radial-gradient(circle,_#D4A24A_0%,_transparent_70%)] opacity-20 pointer-events-none translate-x-1/4 -translate-y-1/4" />
+      <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-[radial-gradient(circle,_#515153_0%,_transparent_70%)] opacity-40 pointer-events-none -translate-x-1/4 translate-y-1/4" />
       
-      <div 
-        className="links-container"
-        style={config.backgroundImage ? { 
-          '--bg-image': `url(${config.backgroundImage})`
-        } as any : {}}
-      >
-        <div className="bg-overlay" />
+      <div className="links-container">
 
         {/* Header */}
         <header className="header fade-in">
@@ -104,11 +102,8 @@ export default function LinksPage() {
         </section>
         )}
 
-        {/* Quick Links */}
-        <section className="links-section fade-in delay-3" style={{ marginTop: '32px' }}>
-          <div className="section-header">
-            <h3 className="section-title">Quick Actions</h3>
-          </div>
+        {/* Quick Links (Without Header) */}
+        <section className="links-section fade-in delay-3" style={{ marginTop: '16px' }}>
           {config.quickLinks
             .filter(link => link.visible)
             .map((link, idx) => {

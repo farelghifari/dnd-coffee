@@ -93,11 +93,11 @@
   ],
   "operatingHours": [
     {
-      "days": "Monday - Friday",
+      "days": "Monday - Thursday",
       "time": "09:00 - 00:00"
     },
     {
-      "days": "Saturday - Sunday",
+      "days": "Friday - Sunday",
       "time": "09:00 - 02:00"
     }
   ],
