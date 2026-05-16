@@ -70,10 +70,10 @@ export function Footer() {
 
         {/* BOTTOM SECTION: ULTRA TIGHT GRID */}
         <div className="max-w-5xl mx-auto border-t border-white/10 pt-12">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_1fr_1.2fr] gap-x-10 gap-y-10">
+          <div className="grid grid-cols-2 lg:grid-cols-[1.2fr_0.8fr_1fr_1.2fr] gap-x-6 gap-y-10">
 
             {/* Col 1: Brand Soul */}
-            <div className="flex flex-col items-center md:items-start">
+            <div className="col-span-2 md:col-span-1 flex flex-col items-center md:items-start">
               <div className="h-40 w-full relative mb-3 group flex items-center justify-center md:justify-start">
                 <div className="absolute inset-0 bg-[#D4A24A]/10 blur-[60px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                 <svg
@@ -163,34 +163,36 @@ export function Footer() {
             </div>
 
             {/* Col 4: Reach Us */}
-            <div className="space-y-4 lg:text-right flex flex-col lg:items-end">
-              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-2">Reach Us</h4>
+            <div className="col-span-2 lg:col-span-1 lg:text-right flex flex-col lg:items-end mt-4 lg:mt-0">
+              <h4 className="text-[#D4A24A] font-black uppercase tracking-widest text-xs mb-4">Reach Us</h4>
 
-              <a
-                href={`https://wa.me/${shopInfo.phone.replace(/[^0-9]/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 w-full max-w-[220px]"
-              >
-                <div className="py-2 px-4 border-b border-white/5 font-bold text-center text-base">{shopInfo.phone}</div>
-                <div className="py-3 px-4 bg-[#1C1C1E] text-[#BFC0C2] font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter">
-                  <MessageCircle size={16} />
-                  <span>OFFICIAL WHATSAPP</span>
-                </div>
-              </a>
+              <div className="flex flex-row lg:flex-col gap-4 w-full lg:items-end">
+                <a
+                  href={`https://wa.me/${shopInfo.phone.replace(/[^0-9]/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 w-full lg:max-w-[220px]"
+                >
+                  <div className="py-2 px-2 md:px-4 border-b border-white/5 font-bold text-center text-xs md:text-base truncate">{shopInfo.phone}</div>
+                  <div className="py-3 px-2 md:px-4 bg-[#1C1C1E] text-[#BFC0C2] font-black flex items-center justify-center gap-1 md:gap-2 text-[10px] md:text-xs uppercase tracking-tighter text-center">
+                    <MessageCircle size={14} className="shrink-0" />
+                    <span className="truncate">OFFICIAL WHATSAPP</span>
+                  </div>
+                </a>
 
-              <a
-                href={`mailto:${shopInfo.email}`}
-                className="block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 leading-none w-full max-w-[220px]"
-              >
-                <div className="py-2 px-4 border-b border-white/5 font-bold text-center text-[11px] truncate opacity-60 leading-none h-6 flex items-center justify-center">
-                  {shopInfo.email}
-                </div>
-                <div className="py-3 px-4 bg-[#D4A24A] text-white font-black flex items-center justify-center gap-2 text-xs uppercase tracking-tighter leading-none">
-                  <FooterFlame size={16} />
-                  <span>BULK EVENT ORDER</span>
-                </div>
-              </a>
+                <a
+                  href={`mailto:${shopInfo.email}`}
+                  className="flex-1 block group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm transition-all hover:border-[#D4A24A]/40 hover:scale-[1.02] active:scale-95 leading-none w-full lg:max-w-[220px]"
+                >
+                  <div className="py-2 px-2 md:px-4 border-b border-white/5 font-bold text-center text-[9px] md:text-[11px] truncate opacity-60 leading-none h-[28px] md:h-8 flex items-center justify-center">
+                    {shopInfo.email}
+                  </div>
+                  <div className="py-3 px-2 md:px-4 bg-[#D4A24A] text-white font-black flex items-center justify-center gap-1 md:gap-2 text-[10px] md:text-xs uppercase tracking-tighter leading-none text-center">
+                    <FooterFlame size={14} className="shrink-0" />
+                    <span className="truncate">BULK EVENT ORDER</span>
+                  </div>
+                </a>
+              </div>
             </div>
           </div>
         </div>

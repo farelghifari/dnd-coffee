@@ -45,7 +45,7 @@ export function Navigation() {
         !isHomePage && "opacity-100 translate-y-0",
         // Background styles
         scrolled || !isHomePage
-          ? "bg-[#2D2D30]/95 backdrop-blur-md border-b border-[#515153]" 
+          ? "bg-[#1C1C1E]/95 backdrop-blur-md border-b border-[#515153]" 
           : "bg-transparent border-b border-transparent"
       )}
     >

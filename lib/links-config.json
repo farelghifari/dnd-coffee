@@ -64,7 +64,7 @@
     },
     {
       "label": "📖 Full Menu",
-      "url": "/images/menu_dnd.jpg",
+      "url": "/menu",
       "icon": "FileText",
       "highlight": false,
       "visible": true

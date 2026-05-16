@@ -14,7 +14,7 @@ export function CommunityHighlightsSection() {
       <div className="max-w-7xl mx-auto relative z-10 flex flex-col xl:flex-row items-center gap-16">
         
         {/* Left Typography Block */}
-        <div className="flex-1 w-full relative z-20">
+        <div className="w-full xl:flex-1 relative z-20">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -62,48 +62,51 @@ export function CommunityHighlightsSection() {
         </div>
 
         {/* Right Mood-board / Scattered Pictures Block */}
-        <div className="flex-1 w-full h-[400px] md:h-[500px] relative mt-12 xl:mt-0">
+        <div className="w-full h-[400px] xl:flex-1 xl:h-[500px] relative mt-16 xl:mt-0">
           
+          {/* Card 1: Morning Grinds */}
           <motion.div 
             initial={{ opacity: 0, rotate: -15, scale: 0.8, x: -50 }}
             whileInView={{ opacity: 1, rotate: -6, scale: 1, x: 0 }}
             whileHover={{ scale: 1.05, rotate: -2, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100 }}
-            className="absolute top-0 left-0 md:left-10 w-48 h-56 md:w-64 md:h-72 bg-[#1C1C1E] p-3 md:p-4 rounded-xl shadow-2xl shadow-black/50 rotate-[-6deg] z-10 cursor-pointer"
+            className="absolute top-0 left-10 xl:left-10 w-36 h-44 xl:w-64 xl:h-72 bg-[#1C1C1E] p-3 md:p-4 rounded-xl shadow-2xl shadow-black/50 rotate-[-6deg] z-10 cursor-pointer"
           >
-            <div className="w-full h-4/5 bg-[#BFC0C2] rounded-lg overflow-hidden flex items-center justify-center p-3 md:p-4 isolate">
+            <div className="w-full h-4/5 bg-[#BFC0C2] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
               <img src="/images/human_customer_transparent.png" alt="Creative Space" className="w-full h-full object-contain opacity-90" />
             </div>
-            <p className="text-[#BFC0C2] font-bold text-center mt-2 md:mt-3 text-sm md:text-base" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Morning Grinds</p>
+            <p className="text-[#BFC0C2] font-bold text-center mt-2 xl:mt-3 text-[11px] xl:text-base leading-tight" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Morning Grinds</p>
           </motion.div>
 
+          {/* Card 2: Midnight Epiphanies */}
           <motion.div 
             initial={{ opacity: 0, rotate: 15, scale: 0.8, x: 50 }}
             whileInView={{ opacity: 1, rotate: 8, scale: 1, x: 0 }}
             whileHover={{ scale: 1.05, rotate: 2, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100, delay: 0.2 }}
-            className="absolute top-16 right-0 md:top-20 md:right-10 w-52 h-60 md:w-72 md:h-80 bg-[#1C1C1E] p-3 md:p-4 pb-6 md:pb-8 rounded-xl shadow-2xl shadow-black/50 rotate-[8deg] z-20 cursor-pointer"
+            className="absolute top-8 right-10 xl:top-20 xl:right-10 w-40 h-48 xl:w-72 xl:h-80 bg-[#1C1C1E] p-3 md:p-4 pb-4 md:pb-8 rounded-xl shadow-2xl shadow-black/50 rotate-[6deg] xl:rotate-[8deg] z-20 cursor-pointer"
           >
             <div className="w-full h-[85%] bg-[#2D2D30] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
                <img src="/images/human_barista_transparent.png" className="w-full h-full object-contain filter invert brightness-[2]" alt="Community Vibe" />
             </div>
-            <p className="text-[#BFC0C2] font-bold text-center mt-2 md:mt-4 text-sm md:text-lg" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Midnight Epiphanies</p>
+            <p className="text-[#BFC0C2] font-bold text-center mt-2 xl:mt-4 text-[11px] xl:text-lg leading-tight" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Midnight Epiphanies</p>
           </motion.div>
 
+          {/* Card 3: Code + Caffeine */}
           <motion.div 
             initial={{ opacity: 0, y: 50 }}
             whileInView={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.05, zIndex: 30 }}
             viewport={{ once: true }}
             transition={{ type: "spring", stiffness: 100, delay: 0.4 }}
-            className="absolute bottom-4 left-1/4 md:bottom-0 w-44 h-48 md:w-60 md:h-64 bg-[#1C1C1E] p-3 md:p-4 rounded-xl shadow-2xl shadow-black/50 -rotate-[2deg] z-25 cursor-pointer"
+            className="absolute bottom-10 left-16 xl:bottom-0 xl:left-1/4 w-36 h-40 xl:w-60 xl:h-64 bg-[#1C1C1E] p-2 md:p-4 rounded-xl shadow-2xl shadow-black/50 -rotate-[4deg] xl:-rotate-[2deg] z-25 cursor-pointer"
           >
             <div className="w-full h-4/5 bg-[#D4A24A] rounded-lg overflow-hidden flex items-center justify-center p-2 isolate">
               <img src="/images/human_customer_transparent.png" className="w-full h-full object-contain scale-x-[-1] opacity-80" alt="Code and Coffee" />
             </div>
-            <p className="text-[#BFC0C2] font-bold text-center mt-2 md:mt-3 text-xs md:text-base" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Code + Caffeine</p>
+            <p className="text-[#BFC0C2] font-bold text-center mt-2 xl:mt-3 text-[10px] xl:text-base leading-tight" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>Code + Caffeine</p>
           </motion.div>
 
         </div>

@@ -108,7 +108,7 @@ export function MenuStorySection() {
           >
             <h2 className="text-5xl md:text-7xl font-black tracking-tighter mb-6">
               Our Curated <br/>
-              <span className="text-[#D4A24A]">Arsenal.</span>
+              <span className="text-[#D4A24A]">Lineup.</span>
             </h2>
             <p className="text-xl md:text-2xl opacity-80 font-medium">
               Everything you need to fuel your focus. Presented transparently, crafted intentionally.
