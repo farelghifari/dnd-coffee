@@ -50,13 +50,13 @@ export function HeroSection() {
       </motion.div>
 
       {/* Center content */}
-      <div className="container mx-auto px-6 relative z-10 w-full h-full text-center flex flex-col items-center pb-20 md:pb-24">
+      <div className="container mx-auto px-6 relative z-10 w-full h-full text-center flex flex-col items-center pb-12 md:pb-16">
         
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#2D2D30] text-[#BFC0C2] font-bold text-sm tracking-widest shadow-2xl mb-2 border-2 border-[#D4A24A]/30"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#2D2D30] text-[#BFC0C2] font-bold text-sm tracking-widest shadow-2xl mb-0 border-2 border-[#D4A24A]/30"
         >
           <MapPin size={16} className="text-[#D4A24A]" />
           <span>EST. KOTA SEMARANG</span>
@@ -67,7 +67,7 @@ export function HeroSection() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ type: "spring", stiffness: 100, damping: 20 }}
-          className="-mt-12 -mb-10 md:-mt-24 md:-mb-20 relative z-0"
+          className="-mt-16 -mb-14 md:-mt-32 md:-mb-28 relative z-0"
         >
           <img 
             src="/images/logo-text-only.png" 
@@ -81,7 +81,7 @@ export function HeroSection() {
           whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ delay: 0.3 }}
-          className="relative max-w-3xl mx-auto mb-8 px-8 -mt-6 md:-mt-10"
+          className="relative max-w-3xl mx-auto mb-8 px-8 -mt-10 md:-mt-20"
         >
            <div className="absolute -left-6 top-0 text-[#D4A24A] text-6xl font-sans opacity-40">"</div>
            <p className="text-2xl md:text-3xl lg:text-4xl font-medium text-[#BFC0C2] leading-tight" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>

@@ -207,7 +207,6 @@ export function MenuStorySection() {
               { label: "FRESH MILK", icon: <Droplets size={24} /> },
               { label: "BROWN SUGAR", icon: <Flame size={24} /> },
               { label: "PURE MATCHA", icon: <Leaf size={24} /> },
-              { label: "PREMIUM FRUIT", icon: <Cloud size={24} /> },
               { label: "EUROPEAN BUTTER", icon: <Sparkles size={24} /> }
             ].map((ing, idx) => (
               <motion.div 

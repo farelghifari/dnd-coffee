@@ -76,32 +76,19 @@ export function Footer() {
             <div className="col-span-2 md:col-span-1 flex flex-col items-center md:items-start">
               <div className="h-40 w-full relative mb-3 group flex items-center justify-center md:justify-start">
                 <div className="absolute inset-0 bg-[#D4A24A]/10 blur-[60px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                <svg
-                  viewBox="0 0 200 200"
-                  className="h-full w-auto filter drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]"
-                >
-                  {/* Architectural Minimalist Storefront */}
-                  <rect x="30" y="65" width="140" height="105" fill="none" stroke="white" strokeWidth="2.5" />
-                  <rect x="45" y="95" width="40" height="75" fill="none" stroke="white" strokeWidth="2" />
-                  <rect x="100" y="95" width="55" height="45" fill="none" stroke="white" strokeWidth="2" />
-
-                  {/* WIDER Signage to fit COFFEE */}
-                  <rect x="15" y="35" width="170" height="30" fill="none" stroke="white" strokeWidth="2.5" />
-                  <image
-                    href="/images/logo-text-only.png"
-                    x="25"
-                    y="38"
-                    width="150"
-                    height="24"
-                    preserveAspectRatio="xMidYMid meet"
-                    style={{ filter: "brightness(0) invert(1)" }}
-                  />
-
-                  {/* Details */}
-                  <line x1="30" y1="170" x2="170" y2="170" stroke="white" strokeWidth="4" strokeLinecap="round" />
-                  <circle cx="55" cy="135" r="2" fill="white" />
-                  <rect x="110" y="105" width="35" height="25" fill="none" stroke="white" strokeWidth="1" opacity="0.3" />
-                </svg>
+                <div 
+                  className="h-full w-48 bg-[#BFC0C2] group-hover:bg-white transition-colors duration-500"
+                  style={{
+                    maskImage: 'url(/images/footer-building.png)',
+                    maskSize: 'contain',
+                    maskRepeat: 'no-repeat',
+                    maskPosition: 'center',
+                    WebkitMaskImage: 'url(/images/footer-building.png)',
+                    WebkitMaskSize: 'contain',
+                    WebkitMaskRepeat: 'no-repeat',
+                    WebkitMaskPosition: 'center',
+                  }}
+                />
               </div>
               <h3 className="text-xl font-bold uppercase tracking-widest mb-3">DONOTDISTURB</h3>
               <p className="opacity-40 leading-relaxed text-[13px] italic pr-4 max-w-[220px]">"Quietly brewing since 2026. Architecting havens for your restless ideas."</p>
