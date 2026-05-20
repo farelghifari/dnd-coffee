@@ -1168,7 +1168,7 @@ export async function updateInventoryStock(itemId: string, quantity: number, typ
         .order('received_date', { ascending: false })
         .limit(1);
       
-      const lastCost = (lastBatch && lastBatch.length > 0) ? lastBatch[0].cost_per_unit : 0;
+      const lastCost = (lastBatch && lastBatch.length > 0) ? lastBatch[0].cost_per_unit : (item.unit_cost || 0);
 
       // Create a default batch for Ops Stock In
       const result = await addBatch({
