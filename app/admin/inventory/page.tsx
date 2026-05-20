@@ -358,7 +358,7 @@ export default function InventoryPage() {
   }
 
   const handleAddItem = async () => {
-    if (!formData.name || !formData.currentStock) return
+    if (!formData.name) return
     
     try {
       const multiplier = parseFloat(formData.conversionRate) || 
@@ -371,13 +371,13 @@ export default function InventoryPage() {
       const dailyVal = (parseFloat(formData.dailyUsage) || 0) * multiplier
       const normalizedCost = (parseFloat(formData.unitCost) || 0) / multiplier
       
-      await upsertInventory({
+      const createdItem = await upsertInventory({
         name: formData.name,
         category: formData.category as any,
         unit: formData.unit,
         display_unit: formData.displayUnit,
         conversion_rate: multiplier,
-        stock: stockVal,
+        stock: 0,
         min_stock: minVal,
         max_stock: maxVal,
         daily_usage: dailyVal,
@@ -385,6 +385,20 @@ export default function InventoryPage() {
         supplier_name: formData.supplierName,
         notes: formData.notes
       }, actorName)
+      
+      if (createdItem && stockVal > 0) {
+        await addBatch({
+          item_id: createdItem.id,
+          quantity: stockVal,
+          unit: formData.displayUnit,
+          unit_cost: normalizedCost,
+          supplier_name: formData.supplierName || 'Initial Stock',
+          received_date: formData.receivedDate || new Date().toISOString().split("T")[0],
+          expired_date: formData.expiryDate || null,
+          notes: formData.notes || 'Initial batch upon item creation',
+          is_opened: true
+        }, actorName)
+      }
       
       toast.success("Item added successfully")
       setIsAddItemModalOpen(false)
@@ -396,7 +410,7 @@ export default function InventoryPage() {
   }
 
   const handleEditItem = async () => {
-    if (!formData.id || !formData.name || !formData.currentStock) return
+    if (!formData.id || !formData.name) return
     
     try {
       const multiplier = parseFloat(formData.conversionRate) || 
@@ -1412,8 +1426,18 @@ export default function InventoryPage() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="current-stock">Current Stock</Label>
-                <Input id="current-stock" type="number" value={formData.currentStock} disabled className="bg-muted cursor-not-allowed" />
-                <p className="text-[10px] text-muted-foreground">Managed via Stock In / Stock Out</p>
+                <Input 
+                  id="current-stock" 
+                  type="number" 
+                  placeholder="0"
+                  value={formData.currentStock} 
+                  disabled={isEditItemModalOpen} 
+                  onChange={(e) => setFormData(p => ({ ...p, currentStock: e.target.value }))}
+                  className={cn(isEditItemModalOpen && "bg-muted cursor-not-allowed")} 
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {isEditItemModalOpen ? "Managed via Stock In / Stock Out" : "Initial batch stock will be created"}
+                </p>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
