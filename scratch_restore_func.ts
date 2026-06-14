@@ -1,3 +1,5 @@
+import type { AttendanceLog, ShiftAssignment, OvertimeRequest } from '@/lib/api/supabase-service'
+
 // Helper for regulated session calculation
 export function calculateRegulatedSession(
   clockInLog: AttendanceLog, 

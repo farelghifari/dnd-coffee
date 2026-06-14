@@ -254,6 +254,7 @@ export interface DBInventoryItem {
   expiry_date?: string
   supplier_name?: string
   notes?: string
+  status?: string
 }
 
 // DB Schema: inventory_transactions(id, item_id, employee_id, type, quantity)
@@ -1106,6 +1107,7 @@ export async function updateInventoryItem(id: string, updates: Partial<Inventory
     if (updates.max_stock !== undefined) dbUpdates.max_stock = updates.max_stock
     if (updates.daily_usage !== undefined) dbUpdates.daily_usage = updates.daily_usage
     if (updates.unit_cost !== undefined) dbUpdates.unit_cost = updates.unit_cost
+    if (updates.status !== undefined) dbUpdates.status = updates.status
     
     const { data, error } = await supabase
       .from('inventory_items')
@@ -3621,13 +3623,15 @@ export async function calculateRollingDailyUsage(itemId: string): Promise<number
 }
 
 export function getOverallStockHealth(inventory: InventoryItem[]): number {
-  if (inventory.length === 0) return 100
-  const healthyItems = inventory.filter(item => getStockHealth(item) === "healthy").length
-  return Math.round((healthyItems / inventory.length) * 100)
+  const activeInventory = inventory.filter(item => item.status !== 'inactive')
+  if (activeInventory.length === 0) return 100
+  const healthyItems = activeInventory.filter(item => getStockHealth(item) === "healthy").length
+  return Math.round((healthyItems / activeInventory.length) * 100)
 }
 
 export function getLowStockItems(inventory: InventoryItem[]) {
   return inventory
+    .filter(item => item.status !== 'inactive')
     .map(item => ({ ...item, daysRemaining: getDaysRemaining(item) }))
     .filter(item => {
       // 1. Time-based: Will run out in <= 7 days (1 week buffer)
@@ -3644,16 +3648,18 @@ export function getLowStockItems(inventory: InventoryItem[]) {
 }
 
 export function getOperationalCapacity(inventory: InventoryItem[]): number {
-  if (inventory.length === 0) return 0
-  const criticalItems = inventory.filter(item => getStockHealth(item) === "critical")
+  const activeInventory = inventory.filter(item => item.status !== 'inactive')
+  if (activeInventory.length === 0) return 0
+  const criticalItems = activeInventory.filter(item => getStockHealth(item) === "critical")
   if (criticalItems.length > 0) return 1
   
-  const minDays = Math.min(...inventory.map(item => getDaysRemaining(item)))
+  const minDays = Math.min(...activeInventory.map(item => getDaysRemaining(item)))
   return Math.round(minDays * 10) / 10
 }
 
 export function getPurchaseRecommendations(inventory: InventoryItem[]) {
   return inventory
+    .filter(item => item.status !== 'inactive')
     .filter(item => getDaysRemaining(item) <= 7)
     .map(item => {
       const coverageDays = 7
@@ -4962,7 +4968,7 @@ export async function lockPayrollToAnalytics(month: string, amount: number): Pro
   return false
 }
 
-export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id'>): Promise<MonthlyOpex | null> {
+export async function addMonthlyOpex(data: Omit<MonthlyOpex, 'id' | 'created_at'> & { created_at?: string }): Promise<MonthlyOpex | null> {
   if (isSupabaseConfigured()) {
     const { data: result, error } = await supabase
       .from('monthly_opex')

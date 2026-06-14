@@ -1,3 +1,6 @@
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { InventoryBatch } from '@/lib/data'
+
 // Transfer from Warehouse to Floor (Stock Out to Bar)
 export async function transferToFloor(batchId: string, quantity: number, actorName: string, reason?: string, splitSize?: number): Promise<boolean> {
   if (!isSupabaseConfigured()) return false;
@@ -25,22 +28,25 @@ export async function transferToFloor(batchId: string, quantity: number, actorNa
       return false;
     }
 
+    const batchesTyped = warehouseBatches as InventoryBatch[];
+
     // Find the starting index (the selected batch)
-    let startIndex = warehouseBatches.findIndex(b => b.id === batchId);
+    let startIndex = batchesTyped.findIndex(b => b.id === batchId);
     if (startIndex === -1) startIndex = 0; // Fallback to oldest if not found
 
     let remainingToTransfer = quantity;
     let totalDeducted = 0;
     const sourceBatches = []; // Store batches we took from
 
-    for (let i = startIndex; i < warehouseBatches.length; i++) {
+    for (let i = startIndex; i < batchesTyped.length; i++) {
       if (remainingToTransfer <= 0) break;
-      const b = warehouseBatches[i];
-      const deduct = Math.min(b.remaining_quantity, remainingToTransfer);
+      const b = batchesTyped[i];
+      const batchQty = b.remaining_quantity || 0;
+      const deduct = Math.min(batchQty, remainingToTransfer);
       
       const { error: updErr } = await supabase
         .from('inventory_batches')
-        .update({ remaining_quantity: b.remaining_quantity - deduct })
+        .update({ remaining_quantity: batchQty - deduct })
         .eq('id', b.id);
       
       if (updErr) {
@@ -153,18 +159,21 @@ export async function stockOutManual(
 
     if (batchErr || !batches) return false;
 
-    let startIndex = batches.findIndex(b => b.id === batchId);
+    const batchesTyped = batches as InventoryBatch[];
+
+    let startIndex = batchesTyped.findIndex(b => b.id === batchId);
     if (startIndex === -1) startIndex = 0;
 
     let remainingToDeduct = quantity;
     let totalDeducted = 0;
 
-    for (let i = startIndex; i < batches.length; i++) {
+    for (let i = startIndex; i < batchesTyped.length; i++) {
       if (remainingToDeduct <= 0) break;
-      const b = batches[i];
-      const deduct = Math.min(b.remaining_quantity, remainingToDeduct);
+      const b = batchesTyped[i];
+      const batchQty = b.remaining_quantity || 0;
+      const deduct = Math.min(batchQty, remainingToDeduct);
       
-      await supabase.from('inventory_batches').update({ remaining_quantity: b.remaining_quantity - deduct }).eq('id', b.id);
+      await supabase.from('inventory_batches').update({ remaining_quantity: batchQty - deduct }).eq('id', b.id);
       
       await supabase.from('inventory_transactions').insert({
         item_id: itemId,

@@ -5,6 +5,7 @@ import {
   getInventory, 
   upsertInventory,
   deleteInventoryItem,
+  updateInventoryItem,
   getStockHealth,
   getDaysRemaining,
   addBatch,
@@ -107,9 +108,12 @@ import {
   Warehouse,
   X,
   ClipboardList,
-  Check
+  Check,
+  Ban,
+  CheckCircle
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -141,6 +145,15 @@ export default function InventoryPage() {
   const [salesReport, setSalesReport] = useState<SalesReport[]>([])
   const [opnameHistory, setOpnameHistory] = useState<InventoryOpname[]>([])
   const [isLoading, setIsLoading] = useState(true)
+
+  // History Filters
+  const [historyFilterMode, setHistoryFilterMode] = useState<"single" | "range">("single")
+  const [historyDate, setHistoryDate] = useState<Date>(new Date())
+  const [historyDateRange, setHistoryDateRange] = useState({ 
+    from: new Date().toISOString().split('T')[0], 
+    to: new Date().toISOString().split('T')[0] 
+  })
+  const [historySearchTerm, setHistorySearchTerm] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [menuSearchQuery, setMenuSearchQuery] = useState("")
@@ -745,6 +758,27 @@ export default function InventoryPage() {
     }
   }
 
+  const handleToggleItemStatus = async (item: InventoryItem) => {
+    const newStatus = item.status === 'inactive' ? 'active' : 'inactive'
+    
+    // Optimistic update: instantly reflect in UI
+    setInventory(prev => prev.map(i => 
+      i.id === item.id ? { ...i, status: newStatus } : i
+    ))
+    toast.success(`${item.name} ${newStatus === 'active' ? 'enabled' : 'disabled'}`)
+
+    // Sync to database in background
+    try {
+      await updateInventoryItem(item.id, { status: newStatus })
+    } catch (err) {
+      // Revert on failure
+      setInventory(prev => prev.map(i => 
+        i.id === item.id ? { ...i, status: item.status } : i
+      ))
+      toast.error('Failed to update item status')
+    }
+  }
+
   // Monthly Opex / BOP Handling
 
   // Stock Opname Handling
@@ -911,14 +945,16 @@ export default function InventoryPage() {
                   </thead>
                   <tbody>
                     {filteredInventory.map((item) => {
-                      const health = getStockHealth(item)
-                      const daysRemaining = getDaysRemaining(item)
+                      const health = item.status === 'inactive' ? 'disabled' : ((item.stock ?? 0) <= (item.min_stock ?? 0) ? 'critical' : (item.stock ?? 0) <= (item.min_stock ?? 0) * 1.5 ? 'warning' : 'healthy')
+                      const daysRemaining = (item.daily_usage ?? 0) > 0 && item.stock !== undefined ? Math.floor(item.stock / (item.daily_usage ?? 1)) : '-'
 
                       return (
-                        <tr key={item.id} className="border-b border-border hover:bg-muted/50 transition-colors">
-                          <td className="py-4 px-4"><span className="font-medium">{item.name}</span></td>
-                          <td className="py-4 px-4 text-sm text-muted-foreground capitalize">{item.category}</td>
-                          <td className="py-4 px-4 text-right font-mono">
+                        <tr key={item.id} className={cn("border-b border-border transition-colors hover:bg-muted/30", item.status === 'inactive' && "bg-muted/5")}>
+                          <td className={cn("py-4 px-4 font-medium", item.status === 'inactive' && "text-muted-foreground opacity-60")}>
+                            <span>{item.name}</span>
+                          </td>
+                          <td className={cn("py-4 px-4 capitalize", item.status === 'inactive' ? "text-muted-foreground/50" : "text-muted-foreground")}>{item.category}</td>
+                          <td className={cn("py-4 px-4 text-right font-mono", item.status === 'inactive' && "opacity-40")}>
                             {(() => {
                               const dUnit = item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit
                               let multiplier = item.conversion_rate || 1
@@ -929,7 +965,7 @@ export default function InventoryPage() {
                               return `${parseFloat(val.toFixed(4))} ${dUnit}`
                             })()}
                           </td>
-                          <td className="py-4 px-4 text-right">
+                          <td className={cn("py-4 px-4 text-right", item.status === 'inactive' && "opacity-40")}>
                             {(() => {
                               const dUnit = (item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit) as DisplayUnit
                               let multiplier = item.conversion_rate || 1;
@@ -940,13 +976,25 @@ export default function InventoryPage() {
                               return `${parseFloat(val.toFixed(4))} ${dUnit}/day`
                             })()}
                           </td>
-                          <td className="py-4 px-4 text-right font-mono">{daysRemaining}</td>
+                          <td className={cn("py-4 px-4 text-right font-mono", item.status === 'inactive' && "opacity-40")}>{daysRemaining}</td>
                           <td className="py-4 px-4 text-center">
-                            <span className={cn("inline-block px-3 py-1 rounded-sm text-xs font-medium capitalize", 
-                              health === 'critical' ? 'bg-destructive/10 text-destructive' : 
-                              health === 'warning' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500')}>
-                              {health}
-                            </span>
+                            <div className="flex items-center justify-center gap-3">
+                              <span className={cn("inline-block px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider", 
+                                health === 'disabled' ? 'bg-muted text-muted-foreground border border-border/50' :
+                                health === 'critical' ? 'bg-destructive/10 text-destructive' : 
+                                health === 'warning' ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-600')}>
+                                {health}
+                              </span>
+                              {canEdit && (
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    checked={item.status !== 'inactive'}
+                                    onCheckedChange={() => handleToggleItemStatus(item)}
+                                    className="data-[state=checked]:bg-emerald-500"
+                                  />
+                                </div>
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 px-4 text-center">
                             {canEdit ? (
@@ -1144,62 +1192,173 @@ export default function InventoryPage() {
             </Button>
           </div>
 
-          <Card className="rounded-sm overflow-x-auto">
-            <CardHeader><CardTitle className="flex items-center gap-2"><History className="w-5 h-5"/>History</CardTitle></CardHeader>
-            <CardContent>
-              <table className="w-full text-sm min-w-[700px]">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-3 px-4 text-muted-foreground">Date</th>
-                    <th className="text-left py-3 px-4 text-muted-foreground">Item</th>
-                    <th className="text-right py-3 px-4 text-muted-foreground">System</th>
-                    <th className="text-right py-3 px-4 text-muted-foreground">Actual</th>
-                    <th className="text-right py-3 px-4 text-muted-foreground">Adjustment</th>
-                    <th className="text-left py-3 px-4 text-muted-foreground">Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                    {opnameHistory.map((opname) => {
-                      const item = inventory.find(i => i.id === opname.item_id);
-                      const dUnit = (item?.display_unit || getDefaultDisplayUnit(item?.unit || 'pcs') || item?.unit || 'pcs') as DisplayUnit;
-                      let multiplier = item?.conversion_rate || 1;
-                      if (multiplier === 1 && dUnit.toLowerCase() !== (item?.unit || '').toLowerCase()) {
-                        multiplier = getConversionRate(dUnit, item?.unit || 'pcs');
-                      }
-                      
-                      return (
-                        <tr key={opname.id} className="border-b border-border">
-                          <td className="py-4 px-4 text-xs">
-                            {(() => {
-                              let normalized = opname.created_at;
-                              if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
-                              if (!normalized.includes('Z') && !normalized.includes('+')) normalized += 'Z';
-                              const date = new Date(normalized);
-                              return new Intl.DateTimeFormat('id-ID', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: false,
-                                timeZone: 'Asia/Jakarta'
-                              }).format(date).replace(/\./g, ':');
-                            })()}
-                          </td>
-                          <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
-                          <td className="py-4 px-4 text-right font-mono">{parseFloat(((opname.theoretical_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
-                          <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(((opname.actual_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
-                          <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
-                            {opname.difference > 0 ? '+' : ''}{parseFloat(((opname.difference || 0) / multiplier).toFixed(4))} {dUnit}
-                          </td>
-                          <td className="py-4 px-4 text-xs text-muted-foreground break-words" title={opname.reason || ""}>
-                            {opname.reason || "-"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
+          <Card className="rounded-sm overflow-hidden">
+            <CardHeader className="pb-3 border-b border-border/50">
+              <CardTitle className="flex items-center gap-2 text-lg"><History className="w-5 h-5"/>History</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+               <div className="flex flex-col gap-3 p-4 sm:flex-row border-b border-border bg-muted/10">
+                 <div className="flex flex-col sm:flex-row gap-2 flex-1">
+                   <div className="relative">
+                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                     <Input 
+                       placeholder="Search item..." 
+                       className="pl-9 h-9 text-xs sm:w-[200px]" 
+                       value={historySearchTerm}
+                       onChange={(e) => setHistorySearchTerm(e.target.value)}
+                     />
+                   </div>
+                   <Select value={historyFilterMode} onValueChange={(v: "single" | "range") => setHistoryFilterMode(v)}>
+                     <SelectTrigger className="w-full sm:w-[150px] h-9 text-xs bg-background">
+                       <SelectValue />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="single">Single Day</SelectItem>
+                       <SelectItem value="range">Date Range</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
+
+                 {historyFilterMode === "single" ? (
+                   <div className="flex items-center justify-between sm:justify-start gap-2 bg-background p-1 border border-border rounded-md w-full sm:w-auto">
+                     <Button variant="ghost" size="sm" onClick={() => {
+                        const d = new Date(historyDate);
+                        d.setDate(d.getDate() - 1);
+                        setHistoryDate(d);
+                     }}>
+                       &lt;
+                     </Button>
+                     <Button variant="outline" size="sm" className="flex-1 sm:min-w-[130px] font-semibold text-xs" onClick={() => setHistoryDate(new Date())}>
+                        {new Date().toDateString() === historyDate.toDateString() ? "Today" : new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }).format(historyDate)}
+                     </Button>
+                     <Button variant="ghost" size="sm" onClick={() => {
+                         const d = new Date(historyDate);
+                         d.setDate(d.getDate() + 1);
+                         setHistoryDate(d);
+                     }}>
+                       &gt;
+                     </Button>
+                   </div>
+                 ) : (
+                   <div className="flex items-center gap-2 w-full sm:w-auto">
+                     <Input 
+                        type="date" 
+                        value={historyDateRange.from} 
+                        onChange={(e) => setHistoryDateRange(p => ({...p, from: e.target.value}))}
+                        className="h-9 text-xs flex-1 sm:w-[130px]"
+                     />
+                     <span className="text-muted-foreground text-xs">-</span>
+                     <Input 
+                        type="date" 
+                        value={historyDateRange.to} 
+                        onChange={(e) => setHistoryDateRange(p => ({...p, to: e.target.value}))}
+                        className="h-9 text-xs flex-1 sm:w-[130px]"
+                     />
+                   </div>
+                 )}
+               </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="text-left py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">Date</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">Item</th>
+                      <th className="text-right py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">System</th>
+                      <th className="text-right py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">Actual</th>
+                      <th className="text-right py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">Adjustment</th>
+                      <th className="text-left py-3 px-4 text-muted-foreground text-xs uppercase tracking-wider font-semibold">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                      {(() => {
+                        let filtered = opnameHistory.filter(opname => {
+                           const item = inventory.find(i => i.id === opname.item_id);
+                           if (historySearchTerm && item && !item.name.toLowerCase().includes(historySearchTerm.toLowerCase())) {
+                             return false;
+                           }
+
+                           // Normalize created_at for robust date parsing (consistent with renderer)
+                           let normalized = opname.created_at;
+                           if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
+                           if (!normalized.includes('Z') && !normalized.includes('+')) normalized += 'Z';
+                           const opDate = new Date(normalized);
+
+                           if (historyFilterMode === "single") {
+                              return opDate.getFullYear() === historyDate.getFullYear() &&
+                                     opDate.getMonth() === historyDate.getMonth() &&
+                                     opDate.getDate() === historyDate.getDate();
+                           } else {
+                              if (historyDateRange.from) {
+                                const fromD = new Date(historyDateRange.from);
+                                fromD.setHours(0,0,0,0);
+                                if (opDate < fromD) return false;
+                              }
+                              if (historyDateRange.to) {
+                                const toD = new Date(historyDateRange.to);
+                                toD.setHours(23,59,59,999);
+                                if (opDate > toD) return false;
+                              }
+                              return true;
+                           }
+                        });
+
+                        if (filtered.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={6} className="py-12">
+                                <div className="text-center text-muted-foreground flex flex-col items-center justify-center w-full">
+                                   <ClipboardCheck className="w-8 h-8 opacity-20 mb-2" />
+                                   No history found for the selected filter.
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        }
+
+                        return filtered.map((opname) => {
+                          const item = inventory.find(i => i.id === opname.item_id);
+                          const dUnit = (item?.display_unit || getDefaultDisplayUnit(item?.unit || 'pcs') || item?.unit || 'pcs') as DisplayUnit;
+                          let multiplier = item?.conversion_rate || 1;
+                          if (multiplier === 1 && dUnit.toLowerCase() !== (item?.unit || '').toLowerCase()) {
+                            multiplier = getConversionRate(dUnit, item?.unit || 'pcs');
+                          }
+                          
+                          return (
+                            <tr key={opname.id} className="border-b border-border hover:bg-muted/30">
+                              <td className="py-4 px-4 text-xs">
+                                {(() => {
+                                  let normalized = opname.created_at;
+                                  if (normalized.includes(' ')) normalized = normalized.replace(' ', 'T');
+                                  if (!normalized.includes('Z') && !normalized.includes('+')) normalized += 'Z';
+                                  const date = new Date(normalized);
+                                  return new Intl.DateTimeFormat('id-ID', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false,
+                                    timeZone: 'Asia/Jakarta'
+                                  }).format(date).replace(/\./g, ':');
+                                })()}
+                              </td>
+                              <td className="py-4 px-4 font-medium">{item?.name || "Unknown"}</td>
+                              <td className="py-4 px-4 text-right font-mono">{parseFloat(((opname.theoretical_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
+                              <td className="py-4 px-4 text-right font-mono font-bold">{parseFloat(((opname.actual_stock || 0) / multiplier).toFixed(4))} {dUnit}</td>
+                              <td className={`py-4 px-4 text-right font-mono font-bold ${opname.difference < 0 ? 'text-destructive' : 'text-emerald-500'}`}>
+                                {opname.difference > 0 ? '+' : ''}{parseFloat(((opname.difference || 0) / multiplier).toFixed(4))} {dUnit}
+                              </td>
+                              <td className="py-4 px-4 text-xs text-muted-foreground break-words" title={opname.reason || ""}>
+                                {opname.reason || "-"}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      })()}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1549,6 +1708,7 @@ export default function InventoryPage() {
                   <SelectTrigger className="rounded-sm"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
                     {inventory
+                      .filter(i => i.status !== 'inactive')
                       .filter(i => stockInForm.category === "all" || i.category === stockInForm.category)
                       .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
                     }
@@ -1838,6 +1998,7 @@ export default function InventoryPage() {
                   <SelectTrigger className="rounded-sm w-full [&>span]:truncate"><SelectValue placeholder="Select Item"/></SelectTrigger>
                   <SelectContent>
                     {inventory
+                      .filter(i => i.status !== 'inactive')
                       .filter(i => opnameForm.category === "all" || i.category === opnameForm.category)
                       .map(i => <SelectItem key={i.id} value={i.id}>{i.name}</SelectItem>)
                     }

@@ -445,45 +445,48 @@ export default function SchedulingPage() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <header className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="h-full flex flex-col p-0">
+      <header className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-6 py-3 border-b border-border/50 bg-card/30">
         <div>
-          <h1 className="text-3xl font-light tracking-tight">Shift Scheduling</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-light tracking-tight">Shift Scheduling</h1>
+          <p className="text-[10px] sm:text-xs text-muted-foreground">
             {canEdit ? "Drag employees to assign shifts" : "View shift schedules (Read Only)"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={goToPreviousWeek} className="rounded-sm">
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToCurrentWeek} className="rounded-sm">
-            Today
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToNextWeek} className="rounded-sm">
-            <ChevronRight className="w-4 h-4" />
-          </Button>
+
+        {/* Month Header - Integrated */}
+        <div className="flex items-center justify-center">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/5 rounded-sm text-xs sm:text-sm font-semibold border border-primary/10 shadow-sm">
+            <Calendar className="w-3.5 h-3.5 text-primary" />
+            {weekRangeStr}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-center md:justify-end gap-1.5 sm:gap-2">
+          <div className="flex items-center bg-muted/50 p-1 rounded-sm border border-border/50">
+            <Button variant="ghost" size="sm" onClick={goToPreviousWeek} className="h-7 w-7 p-0 rounded-xs">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={goToCurrentWeek} className="h-7 px-3 text-[10px] uppercase font-bold tracking-wider rounded-xs">
+              Today
+            </Button>
+            <Button variant="ghost" size="sm" onClick={goToNextWeek} className="h-7 w-7 p-0 rounded-xs">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </header>
 
-      {/* Month Header */}
-      <div className="flex items-center justify-center mb-4">
-        <div className="flex items-center gap-2 text-lg font-medium">
-          <Calendar className="w-5 h-5" />
-          {weekRangeStr}
-        </div>
-      </div>
-
-      <div className="flex gap-4 flex-1 min-h-0">
+      <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
         {/* Employee List - Draggable */}
-        <Card className="w-64 rounded-sm shrink-0">
-          <CardHeader className="pb-3">
+        <Card className="w-full lg:w-64 rounded-sm shrink-0 shadow-none sm:shadow-sm border-none sm:border bg-transparent sm:bg-card">
+          <CardHeader className="pb-2 px-2 sm:px-6 hidden sm:flex">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Users className="w-4 h-4" />
               Employees
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 max-h-[calc(100vh-350px)] overflow-y-auto">
+          <CardContent className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-y-auto px-2 sm:px-6 py-2 lg:py-4 no-scrollbar lg:max-h-[calc(100vh-350px)]">
             {employees.map((employee) => (
               <div
                 key={employee.id}
@@ -491,19 +494,22 @@ export default function SchedulingPage() {
                 onDragStart={() => canEdit && handleDragStart(employee.id)}
                 onDragEnd={handleDragEnd}
                 className={cn(
-                  "flex items-center gap-3 p-3 rounded-sm border bg-card transition-all",
+                  "flex items-center gap-2 lg:gap-3 p-2 lg:p-3 rounded-sm border bg-card shrink-0 transition-all",
+                  "w-[140px] lg:w-full", // Fixed width on mobile, full on desktop
                   canEdit && "cursor-grab active:cursor-grabbing hover:border-foreground/30 hover:shadow-sm",
                   !canEdit && "cursor-default opacity-70",
                   draggedEmployee === employee.id && "opacity-50 scale-95"
                 )}
               >
-                <GripVertical className="w-4 h-4 text-muted-foreground" />
-                <div className="w-8 h-8 rounded-sm bg-foreground/5 flex items-center justify-center text-sm font-medium">
+                <div className="hidden lg:block">
+                  <GripVertical className="w-3 h-3 text-muted-foreground" />
+                </div>
+                <div className="w-7 h-7 lg:w-8 lg:h-8 rounded-sm bg-foreground/5 flex items-center justify-center text-xs lg:text-sm font-medium shrink-0">
                   {(employee.nickname || employee.name || "?").charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{employee.nickname || employee.name}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{employee.employment_type || "full-time"}</p>
+                  <p className="text-[11px] lg:text-sm font-medium truncate leading-tight">{employee.nickname || employee.name}</p>
+                  <p className="hidden lg:block text-[10px] text-muted-foreground capitalize">{employee.employment_type || "full-time"}</p>
                 </div>
               </div>
             ))}
@@ -511,19 +517,21 @@ export default function SchedulingPage() {
         </Card>
 
         {/* Schedule Grid */}
-        <Card className="flex-1 rounded-sm overflow-hidden flex flex-col">
-          <CardContent className="p-0 flex-1 flex flex-col h-[calc(100vh-280px)]">
-            {/* Days of week header */}
-            <div className="grid grid-cols-7 border-b shrink-0 bg-muted/20">
-              {SHORT_DAYS.map((day, idx) => (
-                <div key={day} className={cn("text-center py-2 text-xs font-medium text-muted-foreground border-r last:border-r-0", (idx === 0 || idx === 6) && "text-orange-700 dark:text-orange-300")}>
-                  {day}
+        <Card className="flex-1 rounded-sm overflow-hidden flex flex-col border-none sm:border shadow-none sm:shadow-sm bg-transparent sm:bg-card">
+          <CardContent className="p-0 flex-1 flex flex-col min-h-[350px] sm:min-h-[450px] lg:h-[calc(100vh-280px)]">
+            <div className="flex-1 flex flex-col overflow-x-auto scrollbar-thin scrollbar-thumb-muted-foreground/20">
+              <div className="min-w-[850px] flex-1 flex flex-col bg-card border rounded-sm sm:border-none sm:rounded-none">
+                {/* Days of week header */}
+                <div className="grid grid-cols-7 border-b shrink-0 bg-muted/20">
+                  {SHORT_DAYS.map((day, idx) => (
+                    <div key={day} className={cn("text-center py-2 text-xs font-medium text-muted-foreground border-r last:border-r-0", (idx === 0 || idx === 6) && "text-orange-700 dark:text-orange-300")}>
+                      {day}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            
-            {/* Week Calendar Grid */}
-            <div className="grid grid-cols-7 auto-rows-fr flex-1 overflow-y-auto">
+                
+                {/* Week Calendar Grid */}
+                <div className="grid grid-cols-7 auto-rows-fr flex-1 overflow-y-auto">
               {weekDates.map(({ date, dateStr, dayOfWeek, isCurrentMonth }) => {
                 const isWeekendDay = isWeekend(date)
                 const isTodayDate = getLocalYYYYMMDD() === dateStr
@@ -586,7 +594,7 @@ export default function SchedulingPage() {
                           {canEdit && !isLocked && !isPastDate(dateStr) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRemoveShift(shift.id); }}
-                              className="absolute -top-1 -right-1 w-4 h-4 bg-destructive text-destructive-foreground rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                              className="absolute -top-1 -right-1 w-4 h-4 bg-destructive text-destructive-foreground rounded-full md:opacity-0 md:group-hover:opacity-100 opacity-100 transition-opacity flex items-center justify-center z-10"
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -612,38 +620,42 @@ export default function SchedulingPage() {
                 </div>
               );
               })}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
       {/* Shift Config Legend */}
-      <div className="mt-4 flex flex-col gap-2 items-center">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Shift Legend</p>
-        <div className="flex items-center gap-4 justify-center flex-wrap">
-          {[...shiftConfigs]
-            .sort((a, b) => {
-              const aIsFT = a.name.includes("Full-time")
-              const bIsFT = b.name.includes("Full-time")
-              if (aIsFT && !bIsFT) return -1
-              if (!aIsFT && bIsFT) return 1
-              return a.start_time.localeCompare(b.start_time)
-            })
-            .map((config) => {
-              const configIndex = shiftConfigs.findIndex(c => c.id === config.id)
-              return (
-                <div key={config.id} className="flex items-center gap-2">
-                  <div className={cn("w-4 h-4 rounded-sm border", SHIFT_COLORS[configIndex % SHIFT_COLORS.length])} />
-                  <span className="text-xs text-muted-foreground">
-                    {config.name} ({config.start_time.substring(0, 5)}-{config.end_time.substring(0, 5)})
-                  </span>
-                </div>
-              )
-            })
-          }
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-sm border bg-muted border-border" />
-            <span className="text-xs text-muted-foreground">Custom</span>
+      <div className="mt-auto pt-4 border-t border-border flex flex-col gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground text-center">Shift Legend</p>
+        <div className="flex items-center gap-4 justify-start sm:justify-center overflow-x-auto pb-2 px-2 no-scrollbar">
+          <div className="flex items-center gap-4 shrink-0">
+            {[...shiftConfigs]
+              .sort((a, b) => {
+                const aIsFT = a.name.includes("Full-time")
+                const bIsFT = b.name.includes("Full-time")
+                if (aIsFT && !bIsFT) return -1
+                if (!aIsFT && bIsFT) return 1
+                return a.start_time.localeCompare(b.start_time)
+              })
+              .map((config) => {
+                const configIndex = shiftConfigs.findIndex(c => c.id === config.id)
+                return (
+                  <div key={config.id} className="flex items-center gap-1.5 whitespace-nowrap">
+                    <div className={cn("w-3 h-3 rounded-xs border", SHIFT_COLORS[configIndex % SHIFT_COLORS.length])} />
+                    <span className="text-[10px] text-muted-foreground">
+                      {config.name.split(':')[0]} ({config.start_time.substring(0, 5)})
+                    </span>
+                  </div>
+                )
+              })
+            }
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <div className="w-3 h-3 rounded-xs border bg-muted border-border" />
+              <span className="text-[10px] text-muted-foreground">Custom</span>
+            </div>
           </div>
         </div>
       </div>
@@ -852,6 +864,18 @@ export default function SchedulingPage() {
             >
               {editingShift ? "Save Changes" : "Add Shift"}
             </Button>
+            {editingShift && (
+              <Button 
+                variant="destructive" 
+                onClick={() => {
+                  handleRemoveShift(editingShift.id)
+                  setIsAddShiftOpen(false)
+                }}
+                className="rounded-sm"
+              >
+                Delete Shift
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

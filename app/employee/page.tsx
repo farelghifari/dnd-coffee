@@ -539,16 +539,23 @@ export default function EmployeeDashboard() {
             {format(new Date(), "EEEE, MMMM d, yyyy")}
           </p>
         </div>
-        
-        {/* Show Admin Dashboard button only for admin/super_admin */}
-        {canAccessAdmin() && (
-          <Button asChild className="rounded-sm">
-            <Link href="/admin">
-              <LayoutDashboard className="w-4 h-4 mr-2" />
-              View Dashboard
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild className="rounded-sm bg-indigo-600 hover:bg-indigo-700 text-white">
+            <Link href="/employee/inventory">
+              <Package className="w-4 h-4 mr-2" />
+              Stock Opname
             </Link>
           </Button>
-        )}
+          {/* Show Admin Dashboard button only for admin/super_admin */}
+          {canAccessAdmin() && (
+            <Button asChild className="rounded-sm">
+              <Link href="/admin">
+                <LayoutDashboard className="w-4 h-4 mr-2" />
+                View Admin Dashboard
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Status Cards */}
