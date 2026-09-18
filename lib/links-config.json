@@ -1,0 +1,123 @@
+{
+  "shopName": "DONOTDISTURB",
+  "tagline": "Specialty Coffee & Creative Space",
+  "logo": "/images/logo-placeholder.png",
+  "backgroundImage": "/images/background-links.jpg",
+  "promos": [
+    {
+      "enabled": false,
+      "text": "🔥 Buy 1 Get 1 – Setiap Jumat",
+      "bg": "linear-gradient(135deg, #634832, #3d2b1f)",
+      "color": "#ffffff"
+    },
+    {
+      "enabled": false,
+      "text": "✨ Koleksi Merchandise Baru!",
+      "bg": "linear-gradient(135deg, #111, #444)",
+      "color": "#ffffff"
+    }
+  ],
+  "showFeaturedMenu": false,
+  "featuredMenu": [
+    {
+      "name": "Butterscotch",
+      "price": "24k",
+      "image": "/images/gallery/coffee-4.jpg"
+    },
+    {
+      "name": "Mango Sticky Rice",
+      "price": "24k",
+      "image": "/images/gallery/coffee-1.jpg"
+    },
+    {
+      "name": "Cafe Latte",
+      "price": "25k",
+      "image": "/images/gallery/coffee-2.jpg"
+    },
+    {
+      "name": "Americano",
+      "price": "20k",
+      "image": "/images/gallery/coffee-3.jpg"
+    }
+  ],
+  "quickLinks": [
+    {
+      "label": "📍 Visit Our Shop (Semarang)",
+      "url": "https://maps.app.goo.gl/UPDFyDJ3YWEDNQWE7",
+      "icon": "MapPin",
+      "highlight": true,
+      "visible": true
+    },
+    {
+      "label": "🛵 Order via GoFood",
+      "url": "https://gofood.link",
+      "icon": "ShoppingBag",
+      "highlight": false,
+      "visible": false
+    },
+    {
+      "label": "💬 Chat with Us",
+      "url": "https://wa.me/628817801926",
+      "icon": "MessageCircle",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "📖 Full Menu",
+      "url": "/menu",
+      "icon": "FileText",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "📸 Follow Our Instagram",
+      "url": "https://instagram.com/house.of.dnd",
+      "icon": "Instagram",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "🛵 Follow Our TikTok",
+      "url": "https://tiktok.com/@house.of.dnd",
+      "icon": "Music",
+      "highlight": false,
+      "visible": true
+    },
+    {
+      "label": "🌐 Official Website",
+      "url": "https://coffeedonotdisturb.com",
+      "icon": "Globe",
+      "highlight": false,
+      "visible": true
+    }
+  ],
+  "operatingHours": [
+    {
+      "days": "Monday - Thursday",
+      "time": "09:00 - 00:00"
+    },
+    {
+      "days": "Friday - Sunday",
+      "time": "09:00 - 02:00"
+    }
+  ],
+  "googleMapsEmbedUrl": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3960.258179902994!2d110.40710899999999!3d-6.978833199999995!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e708b85cbe263fb%3A0x33e46ec6b85f5d89!2sDo%20Not%20Disturb!5e0!3m2!1sen!2ssg!4v1777114121203!5m2!1sen!2ssg",
+  "socials": [
+    {
+      "platform": "Instagram",
+      "url": "https://instagram.com/house.of.dnd"
+    },
+    {
+      "platform": "TikTok",
+      "url": "https://tiktok.com/@house.of.dnd"
+    },
+    {
+      "platform": "WhatsApp",
+      "url": "https://wa.me/628817801926"
+    },
+    {
+      "platform": "Website",
+      "url": "https://coffeedonotdisturb.com"
+    }
+  ]
+}

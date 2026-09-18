@@ -1,0 +1,657 @@
+"use client"
+
+import { useState, useEffect, useCallback } from "react"
+import { 
+  Clock, 
+  LogIn, 
+  LogOut, 
+  Package, 
+  PackageOpen, 
+  Trash2, 
+  ClipboardList,
+  ArrowLeft,
+  Check,
+  AlertTriangle,
+  BarChart3
+} from "lucide-react"
+import { NFCModal } from "./nfc-modal"
+import { StockActionModal } from "./stock-action-modal"
+import { DailyReportModal } from "./daily-report-modal"
+import { StockWidgets } from "./stock-widgets"
+import { Button } from "@/components/ui/button"
+import { cn, getLocalYYYYMMDD, getDeviceFingerprint } from "@/lib/utils"
+import {
+  getInventory,
+  getBatches,
+  addAttendanceLog,
+  addStockLog,
+  getShiftOnDate,
+  getScheduledOvertime,
+  hasShiftOnDate,
+  addOvertimeRequest,
+  getDailyWorkDuration,
+  type InventoryItem,
+  type InventoryBatch,
+  type OvertimeRequest
+} from "@/lib/api/supabase-service"
+
+interface OpsMenuProps {
+  onIdle: () => void
+  idleTimeout?: number
+}
+
+type ActionType = "clock-in" | "clock-out" | "stock-in" | "opname" | "report" | "stock-out" | "waste" | null
+
+const menuItems: { id: ActionType; label: string; icon: React.ComponentType<{ className?: string }>; color: string; textColor: string }[] = [
+  { id: "clock-in", label: "Clock In", icon: LogIn, color: "bg-[var(--status-healthy)]", textColor: "text-background" },
+  { id: "clock-out", label: "Clock Out", icon: LogOut, color: "bg-muted", textColor: "text-foreground" },
+  { id: "stock-in", label: "Stock In", icon: Package, color: "bg-foreground", textColor: "text-background" },
+  { id: "opname", label: "Stock Opname", icon: ClipboardList, color: "bg-secondary", textColor: "text-foreground" },
+  { id: "report", label: "Daily Report", icon: BarChart3, color: "bg-blue-600", textColor: "text-white" },
+]
+
+export function OpsMenu({ onIdle, idleTimeout = 30 }: OpsMenuProps) {
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [batches, setBatches] = useState<InventoryBatch[]>([])
+  const [selectedAction, setSelectedAction] = useState<ActionType>(null)
+  const [countdown, setCountdown] = useState(idleTimeout)
+  const [lastActivity, setLastActivity] = useState(Date.now())
+  const [showSuccessMessage, setShowSuccessMessage] = useState<string | null>(null)
+  const [showErrorMessage, setShowErrorMessage] = useState<string | null>(null)
+  const [showWarningMessage, setShowWarningMessage] = useState<string | null>(null)
+  const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null)
+  const [currentEmployeeName, setCurrentEmployeeName] = useState<string | null>(null)
+  const [showStockModal, setShowStockModal] = useState(false)
+  const [showOTPrompt, setShowOTPrompt] = useState(false)
+  const [otPromptMessage, setOTPromptMessage] = useState("")
+  const [pendingOTData, setPendingOTData] = useState<{ employeeId: string; employeeName: string; today: string } | null>(null)
+  const [pendingStockAction, setPendingStockAction] = useState<"stock-in" | "stock-out" | "waste" | "opname" | null>(null)
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [currentTime, setCurrentTime] = useState(new Date())
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Load inventory on mount
+  useEffect(() => {
+    let isMounted = true
+    const loadInventory = async () => {
+      const [invData, batchData] = await Promise.all([
+        getInventory(),
+        getBatches()
+      ])
+      if (isMounted) {
+        setInventory(invData)
+        setBatches(batchData)
+      }
+    }
+    loadInventory()
+    return () => { isMounted = false }
+  }, [])
+
+  const resetCountdown = useCallback(() => {
+    setLastActivity(Date.now())
+    setCountdown(idleTimeout)
+  }, [idleTimeout])
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - lastActivity) / 1000)
+      const remaining = Math.max(0, idleTimeout - elapsed)
+      setCountdown(remaining)
+
+      if (remaining === 0) {
+        onIdle()
+      }
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [lastActivity, idleTimeout, onIdle])
+
+  // Update local clock every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const handleActivity = () => resetCountdown()
+
+    window.addEventListener("touchstart", handleActivity)
+    window.addEventListener("mousemove", handleActivity)
+    window.addEventListener("keydown", handleActivity)
+
+    return () => {
+      window.removeEventListener("touchstart", handleActivity)
+      window.removeEventListener("mousemove", handleActivity)
+      window.removeEventListener("keydown", handleActivity)
+    }
+  }, [resetCountdown])
+
+  const handleActionSelect = (action: ActionType) => {
+    resetCountdown()
+    if (action === "report") {
+      setShowReportModal(true)
+    } else {
+      setSelectedAction(action)
+    }
+  }
+
+  const handleNFCSuccess = async (employeeId: string, employeeName: string) => {
+    setCurrentEmployeeId(employeeId)
+    setCurrentEmployeeName(employeeName)
+    
+    setIsSubmitting(true)
+    // Capture the action type before closing the modal
+    const actionType = selectedAction
+    setSelectedAction(null)
+    
+    try {
+      if (actionType === "clock-in" || actionType === "clock-out") {
+        const today = getLocalYYYYMMDD()
+        const todayShift = await getShiftOnDate(employeeId, today)
+        const hasShift = !!todayShift
+
+        if (actionType === "clock-in") {
+          // 1. Check for scheduled overtime first
+          const scheduledOT = await getScheduledOvertime(employeeId, today)
+          
+          if (scheduledOT) {
+            // Pre-approved! Just clock in
+            await addAttendanceLog({
+              employee_id: employeeId,
+              employee_name: employeeName,
+              type: actionType as any,
+              method: 'nfc',
+              is_ops_device: true,
+              device_info: getDeviceFingerprint()
+            })
+            
+            setShowSuccessMessage(`${employeeName} clocked in for SCHEDULED overtime.`)
+            setSelectedAction(null)
+            setTimeout(() => {
+              setShowSuccessMessage(null)
+              setCurrentEmployeeId(null)
+              setCurrentEmployeeName(null)
+            }, 4000)
+            return
+          }
+
+          // 2. Check regular shift rules
+          if (todayShift) {
+            const shiftStart = new Date(`${todayShift.date}T${todayShift.start_time}`)
+            const shiftEnd = new Date(`${todayShift.date}T${todayShift.end_time}`)
+            if (todayShift.end_time < todayShift.start_time) shiftEnd.setDate(shiftEnd.getDate() + 1)
+            
+            const now = new Date()
+            const earlyMins = Math.round((shiftStart.getTime() - now.getTime()) / 60000)
+            
+            // Rule 1: Too early - show interactive prompt
+            if (earlyMins > 45) {
+              const earliestTime = new Date(shiftStart.getTime() - 45 * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+              setOTPromptMessage(`Clock-in too early. ${employeeName} can only clock in from ${earliestTime} (45 mins before shift). Do you want to request overtime instead?`)
+              setPendingOTData({ employeeId, employeeName, today })
+              setShowOTPrompt(true)
+              setSelectedAction(null)
+              return
+            }
+
+            // Rule 3: Post-shift - auto-request OT
+            if (now > shiftEnd) {
+              const attendanceLog = await addAttendanceLog({
+                employee_id: employeeId,
+                employee_name: employeeName,
+                type: actionType as any,
+                method: 'nfc',
+                is_ops_device: true,
+                device_info: getDeviceFingerprint()
+              })
+              
+              if (attendanceLog) {
+                await addOvertimeRequest({
+                  employee_id: employeeId,
+                  employee_name: employeeName,
+                  attendance_log_id: attendanceLog.id,
+                  request_date: today,
+                  clock_in_time: new Date().toISOString(),
+                  status: "pending"
+                })
+              }
+              
+              setShowWarningMessage(`${employeeName} clocked in (Post-shift work — Overtime request submitted automatically)`)
+              setSelectedAction(null)
+              setTimeout(() => {
+                setShowWarningMessage(null)
+                setCurrentEmployeeId(null)
+                setCurrentEmployeeName(null)
+              }, 4000)
+              return
+            }
+          }
+
+          // 3. Normal Clock-in Flow (Regular or No-shift OT)
+          const attendanceLog = await addAttendanceLog({
+            employee_id: employeeId,
+            employee_name: employeeName,
+            type: actionType as any,
+            method: 'nfc',
+            is_ops_device: true,
+            device_info: getDeviceFingerprint()
+          })
+          
+          const duration = await getDailyWorkDuration(employeeId, today)
+          
+          if (hasShift) {
+            if (duration.isLate) {
+              setShowWarningMessage(`${employeeName} clocked in successfully — LATE (> 15 mins)`)
+            } else {
+              setShowSuccessMessage(`${employeeName} clocked in successfully — Punctual`)
+            }
+          } else {
+            // No shift - create overtime request
+            if (attendanceLog) {
+              await addOvertimeRequest({
+                employee_id: employeeId,
+                employee_name: employeeName,
+                attendance_log_id: attendanceLog.id,
+                request_date: today,
+                clock_in_time: new Date().toISOString(),
+                status: "pending"
+              })
+            }
+            
+            setShowWarningMessage(`${employeeName} clocked in (No shift scheduled — Overtime request submitted for approval)`)
+          }
+        } else {
+          // Clock-out - always allowed
+          await addAttendanceLog({
+            employee_id: employeeId,
+            employee_name: employeeName,
+            type: actionType as any,
+            method: 'nfc',
+            is_ops_device: true,
+            device_info: getDeviceFingerprint()
+          })
+
+          // Reminder for Daily Report during closing hours
+          const hour = new Date().getHours()
+          const isClosingTime = hour >= 1 && hour < 4
+          
+          // Calculate regulated duration
+          const today = getLocalYYYYMMDD()
+          const duration = await getDailyWorkDuration(employeeId, today)
+          const regHours = Math.floor(duration.regularMinutes / 60)
+          const regMins = duration.regularMinutes % 60
+          const otHours = Math.floor(duration.overtimeMinutes / 60)
+          const otMins = duration.overtimeMinutes % 60
+          
+          if (isClosingTime) {
+            setShowWarningMessage(`Clock-out Success! DON'T FORGET to submit the Daily Report before leaving, ${employeeName}!`)
+          } else if (duration.overtimeMinutes > 0) {
+            setShowWarningMessage(`${employeeName} clocked out — Regular: ${regHours}h ${regMins}m | OT: ${otHours}h ${otMins}m (Pending Approval)`)
+          } else {
+            setShowSuccessMessage(`${employeeName} clocked out — Shift Total: ${regHours}h ${regMins}m`)
+          }
+        }
+        
+        setSelectedAction(null)
+        setTimeout(() => {
+          setShowSuccessMessage(null)
+          setShowWarningMessage(null)
+          setCurrentEmployeeId(null)
+          setCurrentEmployeeName(null)
+        }, 4000)
+      } else {
+        // For stock actions, show stock modal
+        setPendingStockAction(actionType as "stock-in" | "stock-out" | "waste" | "opname")
+        setSelectedAction(null)
+        setShowStockModal(true)
+      }
+    } catch (error) {
+      console.error("NFC Action Error:", error)
+      setShowErrorMessage("Action failed. Please try again.")
+      setTimeout(() => setShowErrorMessage(null), 3000)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleStockActionComplete = async (data: { itemId: string; amount: number; notes?: string; batchId?: string }) => {
+    if (!currentEmployeeId || !currentEmployeeName || !pendingStockAction) return
+
+    const item = inventory.find(i => i.id === data.itemId)
+    if (!item) return
+
+    setIsSubmitting(true)
+    try {
+      // Validate stock out doesn't exceed available stock
+    if ((pendingStockAction === "stock-out" || pendingStockAction === "waste") && data.amount > (item.current_stock ?? 0)) {
+      setShowErrorMessage(`Cannot ${pendingStockAction === "stock-out" ? "take out" : "waste"} more than available stock (${item.current_stock ?? 0} ${item.unit})`)
+      setTimeout(() => setShowErrorMessage(null), 3000)
+      return
+    }
+
+    // Map action types to log types
+    const logTypeMap: Record<string, "in" | "out" | "waste" | "opname"> = {
+      "stock-in": "in",
+      "stock-out": "out",
+      "waste": "waste",
+      "opname": "opname"
+    }
+
+    // Routing to specific specialized functions if batchId is provided
+    if (pendingStockAction === "stock-out" && data.batchId) {
+      // Calculate split size: use conversion_rate if available, otherwise default to 1 unit (in base units)
+      const splitSize = item.conversion_rate || 1;
+      
+      await import("@/lib/api/supabase-service").then(m => 
+        m.transferToFloor(data.batchId!, data.amount, currentEmployeeName, data.notes, splitSize)
+      );
+    } else if (pendingStockAction === "waste" && data.batchId) {
+      await import("@/lib/api/supabase-service").then(m => 
+        m.stockOutManual(data.batchId!, data.amount, data.notes || "Wasted via Ops", currentEmployeeName)
+      );
+    } else {
+      // Default to general stock log (which uses FIFO batches internally now)
+      await addStockLog({
+        item_id: data.itemId,
+        item_name: item.name,
+        type: logTypeMap[pendingStockAction],
+        amount: data.amount,
+        employee_id: currentEmployeeId,
+        employee_name: currentEmployeeName,
+        notes: data.notes
+      })
+    }
+
+    const actionLabels: Record<string, string> = {
+      "stock-in": "Stock received recorded",
+      "stock-out": "Stock usage recorded",
+      "waste": "Waste report submitted",
+      "opname": "Stock count submitted",
+    }
+
+    // Close modal and show success immediately for better UX
+    setShowStockModal(false)
+    setShowSuccessMessage(actionLabels[pendingStockAction] || "Action completed")
+    
+    // Reset selections
+    setPendingStockAction(null)
+    setCurrentEmployeeId(null)
+    setCurrentEmployeeName(null)
+
+    // Refresh inventory in background
+    const updatedInventory = await getInventory()
+    setInventory(updatedInventory)
+
+    setTimeout(() => {
+      setShowSuccessMessage(null)
+    }, 3000)
+    } catch (error) {
+      console.error("Stock Action Error:", error)
+      setShowErrorMessage("Failed to record stock movement.")
+      setTimeout(() => setShowErrorMessage(null), 3000)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleApplyOvertime = async () => {
+    if (!pendingOTData) return
+    const { employeeId, employeeName, today } = pendingOTData
+    
+    setIsSubmitting(true)
+    try {
+      const attendanceLog = await addAttendanceLog({
+      employee_id: employeeId,
+      employee_name: employeeName,
+      type: "clock-in",
+      method: 'nfc',
+      is_ops_device: true,
+      device_info: getDeviceFingerprint()
+    })
+    
+    if (attendanceLog) {
+      await addOvertimeRequest({
+        employee_id: employeeId,
+        employee_name: employeeName,
+        attendance_log_id: attendanceLog.id,
+        request_date: today,
+        clock_in_time: new Date().toISOString(),
+        status: "pending"
+      })
+    }
+    
+    setShowOTPrompt(false)
+    setPendingOTData(null)
+    setShowWarningMessage(`${employeeName} — Overtime request submitted for early clock-in`)
+      setTimeout(() => {
+        setShowWarningMessage(null)
+        setCurrentEmployeeId(null)
+        setCurrentEmployeeName(null)
+      }, 4000)
+    } catch (error) {
+      console.error("Overtime Error:", error)
+      setShowErrorMessage("Failed to submit overtime request.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const getActionTitle = (action: ActionType): string => {
+    const titles: Record<string, string> = {
+      "clock-in": "Clock In",
+      "clock-out": "Clock Out",
+      "stock-in": "Stock In",
+      "stock-out": "Stock Out",
+      "waste": "Waste Report",
+      "opname": "Stock Opname",
+    }
+    return titles[action!] || ""
+  }
+
+  return (
+    <div className="h-screen w-full bg-background p-4 md:p-6 lg:p-6 flex flex-col overflow-hidden select-none">
+      {/* Header */}
+      <header className="flex items-center justify-between mb-4 flex-shrink-0">
+        <button
+          onClick={onIdle}
+          className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors p-2"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          <span className="text-sm">Lock</span>
+        </button>
+
+        <div className="text-center">
+          <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="h-4 w-auto object-contain mx-auto" />
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-xs text-muted-foreground">Operations Dashboard</p>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-mono font-bold">
+              {currentTime.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} WIB
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-end">
+            <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Auto-Lock</span>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock className="w-4 h-4" />
+              <span className={cn(
+                "text-sm font-mono tabular-nums w-6",
+                countdown <= 10 && "text-[var(--status-warning)]",
+                countdown <= 5 && "text-[var(--status-critical)] animate-pulse"
+              )}>
+                {countdown}
+              </span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Closing Shift Reminder Banner */}
+      {(() => {
+        const hour = currentTime.getHours()
+        if (hour >= 1 && hour < 4) {
+          return (
+            <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-sm flex items-center justify-between animate-in slide-in-from-top-2 duration-500 flex-shrink-0">
+              <div className="flex items-center gap-3 text-amber-600">
+                <AlertTriangle className="w-5 h-5 animate-bounce" />
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-tight">Closing Shift Reminder</p>
+                  <p className="text-[11px] opacity-80">Please ensure the **Daily Report** is submitted before ending your shift.</p>
+                </div>
+              </div>
+              <Button 
+                size="sm" 
+                className="bg-amber-600 hover:bg-amber-700 text-white rounded-sm text-xs font-bold"
+                onClick={() => setShowReportModal(true)}
+              >
+                Fill Report Now
+              </Button>
+            </div>
+          )
+        }
+        return null
+      })()}
+
+      {/* Success Message */}
+      {showSuccessMessage && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50">
+          <div className="bg-[var(--status-healthy)] text-background px-12 py-8 rounded-sm flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-200">
+            <Check className="w-12 h-12" />
+            <span className="text-xl font-medium text-center">{showSuccessMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Warning Message (Overtime) */}
+      {showWarningMessage && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50">
+          <div className="bg-[var(--status-warning)] text-background px-12 py-8 rounded-sm flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-200 max-w-md">
+            <AlertTriangle className="w-12 h-12" />
+            <span className="text-lg font-medium text-center">{showWarningMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {showErrorMessage && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50">
+          <div className="bg-[var(--status-critical)] text-background px-12 py-8 rounded-sm flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-200">
+            <AlertTriangle className="w-12 h-12" />
+            <span className="text-xl font-medium text-center max-w-xs">{showErrorMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Overtime Prompt Message */}
+      {showOTPrompt && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-background border border-border max-w-md w-full p-8 rounded-sm shadow-2xl flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-200">
+            <span className="text-xl font-bold text-center">Overtime Required</span>
+            <div className="text-center flex flex-col gap-2">
+              <p className="text-[var(--status-critical)] font-semibold">You are more than 45 minutes early for your shift.</p>
+              <p className="text-muted-foreground text-sm leading-relaxed">Regular clock-in is only permitted within 45 minutes of your scheduled start time. To clock in now, please submit an **Overtime Request** for admin approval.</p>
+            </div>
+            <div className="flex gap-4 w-full">
+              <Button 
+                variant="outline" 
+                className="flex-1 rounded-sm py-6 h-auto text-lg" 
+                onClick={() => {
+                  setShowOTPrompt(false)
+                  setPendingOTData(null)
+                  setCurrentEmployeeId(null)
+                  setCurrentEmployeeName(null)
+                }}
+              >
+                Wait for Shift
+              </Button>
+              <Button 
+                className="flex-1 rounded-sm py-6 h-auto text-lg bg-[var(--status-warning)] hover:bg-[var(--status-warning)]/90 text-background" 
+                onClick={handleApplyOvertime}
+              >
+                Request Overtime
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Grid Area - Flex-1 to fill space */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 overflow-hidden">
+        {/* Menu Buttons Area */}
+        <div className="lg:col-span-8 flex flex-col">
+          <div className="grid grid-cols-2 gap-3 md:gap-4 h-full">
+            {menuItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => handleActionSelect(item.id)}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-2 md:gap-4 transition-all duration-200 active:scale-95 hover:opacity-90 rounded-sm relative overflow-hidden",
+                  item.color,
+                  item.textColor,
+                  item.id === "report" && currentTime.getHours() >= 1 && currentTime.getHours() < 4 && "ring-4 ring-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.4)]"
+                )}
+              >
+                {item.id === "report" && currentTime.getHours() >= 1 && currentTime.getHours() < 4 && (
+                  <div className="absolute top-2 right-2 flex items-center gap-1 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest animate-pulse">
+                    Required
+                  </div>
+                )}
+                <item.icon className="w-10 h-10 md:w-16 md:h-16" />
+                <span className="text-base md:text-xl font-medium">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Widgets Sidebar Area */}
+        <div className="lg:col-span-4 overflow-y-auto pr-2 custom-scrollbar">
+          <StockWidgets />
+        </div>
+      </div>
+
+      {/* NFC Modal */}
+      <NFCModal
+        isOpen={selectedAction !== null && !showStockModal}
+        onClose={() => {
+          setSelectedAction(null)
+          setCurrentEmployeeId(null)
+          setCurrentEmployeeName(null)
+        }}
+        onSuccess={handleNFCSuccess}
+        action={`Confirm ${getActionTitle(selectedAction)}`}
+        title={getActionTitle(selectedAction)}
+        isSubmitting={isSubmitting}
+      />
+
+      {/* Stock Action Modal */}
+      <StockActionModal
+        isOpen={showStockModal}
+        onClose={() => {
+          setShowStockModal(false)
+          setPendingStockAction(null)
+          setCurrentEmployeeId(null)
+          setCurrentEmployeeName(null)
+        }}
+        onSubmit={handleStockActionComplete}
+        actionType={pendingStockAction}
+        title={getActionTitle(pendingStockAction)}
+        inventory={inventory}
+        batches={batches}
+        isSubmitting={isSubmitting}
+      />
+
+      {/* Daily Report Modal */}
+      <DailyReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        onSubmitSuccess={() => {
+          setShowReportModal(false)
+          // Refresh widgets data if needed
+        }}
+      />
+    </div>
+  )
+}

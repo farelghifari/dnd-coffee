@@ -1,0 +1,93 @@
+"use client"
+
+import { AuthProvider, useAuth } from "@/lib/auth-context"
+import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
+import { Spinner } from "@/components/ui/spinner"
+import { Toaster } from "@/components/ui/sonner"
+import { Button } from "@/components/ui/button"
+import { LogOut, Coffee, User, KeyRound } from "lucide-react"
+import Link from "next/link"
+import { ChangePasswordDialog } from "@/components/change-password-dialog"
+
+function EmployeeLayoutContent({ children }: { children: React.ReactNode }) {
+  const { user, isLoading, logout } = useAuth()
+  const router = useRouter()
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push("/login")
+    }
+    // NO automatic redirect for admins - all users stay on /employee
+    // Admin/super_admin can manually click "View Dashboard" button to access /admin
+  }, [user, isLoading, router])
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Spinner className="w-8 h-8" />
+      </div>
+    )
+  }
+
+  // Allow ALL authenticated users to view employee page
+  // Admin/super_admin can manually navigate to /admin via "View Dashboard" button
+  if (!user) {
+    return null
+  }
+
+  const handleLogout = () => {
+    logout()
+    router.push("/login")
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="sticky top-0 z-50 border-b bg-card">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+          <Link href="/employee" className="flex items-center gap-2">
+            <span className="font-bold text-lg tracking-wider">DONOTDISTURB</span>
+          </Link>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <User className="h-4 w-4" />
+              <span>{user.nickname || user.name || user.email}</span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setIsChangePasswordOpen(true)}>
+              <KeyRound className="h-4 w-4 mr-2" />
+              Ganti Password
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </header>
+      
+      <main className="container mx-auto px-4 py-6">
+        {children}
+      </main>
+      <Toaster />
+      <ChangePasswordDialog
+        open={isChangePasswordOpen}
+        onOpenChange={setIsChangePasswordOpen}
+      />
+    </div>
+  )
+}
+
+export default function EmployeeLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <AuthProvider>
+      <EmployeeLayoutContent>{children}</EmployeeLayoutContent>
+    </AuthProvider>
+  )
+}

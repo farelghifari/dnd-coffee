@@ -1,0 +1,124 @@
+"use client"
+
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { ArrowRight, MapPin, Coffee, Laptop, BookOpen, Clock } from "lucide-react"
+import { motion } from "framer-motion"
+
+export function HeroSection() {
+  return (
+    <section className="relative w-full overflow-hidden bg-[#1C1C1E] text-[#BFC0C2] font-sans min-h-[80vh] flex flex-col justify-center items-center pt-32 pb-20">
+      
+      {/* Background Animated Coffee Pattern - Optimized for performance */}
+      <motion.div 
+        animate={{ rotate: 360, scale: [1, 1.05, 1] }}
+        transition={{ rotate: { repeat: Infinity, duration: 240, ease: "linear" }, scale: { repeat: Infinity, duration: 25, ease: "easeInOut", type: "tween" } }}
+        style={{ willChange: "transform" }}
+        className="absolute inset-0 z-0 flex items-center justify-center opacity-5 pointer-events-none"
+      >
+        <div className="grid grid-cols-4 md:grid-cols-6 gap-32 transform scale-125">
+           {/* Reduced count slightly for mobile performance */}
+           {Array(24).fill(0).map((_, i) => (
+             <div key={i} className="text-[#BFC0C2] rotate-12">
+                <Coffee size={120} strokeWidth={0.5} />
+             </div>
+           ))}
+        </div>
+      </motion.div>
+
+      {/* Floating Story Elements - Using once:true for viewport performance */}
+      <motion.div 
+        drag 
+        dragMomentum={true} 
+        whileHover={{ scale: 1.1 }} 
+        animate={{ y: [0, -20, 0] }} 
+        transition={{ repeat: Infinity, duration: 6, ease: "easeInOut" }} 
+        className="absolute top-[20%] left-[10%] z-20 text-[#D4A24A] bg-[#1C1C1E] p-4 rounded-full border-2 border-[#D4A24A]/30 shadow-xl cursor-grab hidden sm:flex"
+      >
+        <Coffee size={40} />
+      </motion.div>
+
+      <motion.div 
+        drag 
+        dragMomentum={true} 
+        whileHover={{ scale: 1.1 }} 
+        animate={{ y: [0, 25, 0] }} 
+        transition={{ repeat: Infinity, duration: 8, ease: "easeInOut", delay: 1 }} 
+        className="absolute top-[30%] right-[15%] z-20 text-[#2D2D30] bg-[#1C1C1E] p-4 rounded-3xl border-2 border-[#2D2D30]/20 shadow-2xl cursor-grab rotate-12 hidden sm:flex"
+      >
+        <Laptop size={48} />
+      </motion.div>
+
+      {/* Center content */}
+      <div className="container mx-auto px-6 relative z-10 w-full h-full text-center flex flex-col items-center pb-12 md:pb-16">
+        
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          whileInView={{ opacity: 1, scale: 1 }}
+          viewport={{ once: true }}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-[#2D2D30] text-[#BFC0C2] font-bold text-sm tracking-widest shadow-2xl mb-0 border-2 border-[#D4A24A]/30"
+        >
+          <MapPin size={16} className="text-[#D4A24A]" />
+          <span>EST. KOTA SEMARANG</span>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ type: "spring", stiffness: 100, damping: 20 }}
+          className="-mt-16 -mb-14 md:-mt-32 md:-mb-28 relative z-0"
+        >
+          <img 
+            src="/images/logo-text-only.png" 
+            alt="Do Not Disturb" 
+            className="w-[80%] max-w-[800px] mx-auto drop-shadow-2xl brightness-0 invert"
+          />
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.3 }}
+          className="relative max-w-3xl mx-auto mb-8 px-8 -mt-10 md:-mt-20"
+        >
+           <div className="absolute -left-6 top-0 text-[#D4A24A] text-6xl font-sans opacity-40">"</div>
+           <p className="text-2xl md:text-3xl lg:text-4xl font-medium text-[#BFC0C2] leading-tight" style={{ fontFamily: "'Bryndan Write', 'Kalam', cursive" }}>
+             From the first morning grind to your midnight eureka moment. Find your sanctuary amidst the pulse of the city.
+           </p>
+           <div className="absolute -right-2 bottom-0 text-[#D4A24A] text-6xl font-sans opacity-40">"</div>
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.4 }}
+          className="flex flex-col sm:flex-row gap-6 justify-center items-center mt-4"
+        >
+          <Button asChild size="lg" className="bg-[#D4A24A] text-white hover:bg-[#BFC0C2] hover:scale-105 transition-all duration-300 rounded-full px-12 py-8 text-xl font-bold shadow-2xl">
+            <Link href="/visit">Drop By <ArrowRight className="ml-3 h-6 w-6" /></Link>
+          </Button>
+          <Button asChild size="lg" variant="outline" className="bg-[#1C1C1E]/50 backdrop-blur-sm border-[3px] border-[#BFC0C2] text-[#BFC0C2] hover:bg-[#BFC0C2] hover:text-[#1C1C1E] hover:scale-105 transition-all duration-300 rounded-full px-12 py-8 text-xl font-bold">
+            <Link href="#menu">Explore Menu</Link>
+          </Button>
+        </motion.div>
+      </div>
+
+      {/* Marquee - Optimized with hardware acceleration */}
+      <div className="absolute bottom-4 left-0 w-full bg-[#2D2D30] text-white py-5 overflow-hidden flex whitespace-nowrap z-20 transform rotate-1 scale-105 origin-center shadow-2xl">
+        <motion.div 
+          animate={{ x: ["0%", "-50%"] }}
+          transition={{ repeat: Infinity, duration: 30, ease: "linear" }}
+          style={{ willChange: "transform" }}
+          className="flex gap-10 text-2xl font-black tracking-widest uppercase items-center"
+        >
+          {Array(8).fill("DONOTDISTURB • 24/7 Creative Space").map((text, i) => (
+            <span key={i} className="flex-shrink-0">{text}</span>
+          ))}
+        </motion.div>
+      </div>
+    </section>
+  )
+}
