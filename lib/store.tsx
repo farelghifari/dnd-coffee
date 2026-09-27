@@ -463,7 +463,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .filter(item => getDaysRemaining(item) <= 7)
       .map(item => {
         const coverageDays = 7
-        const recommendedQty = Math.ceil((item.dailyUsage ?? 0) * coverageDays)
+        const dailyUsage = item.daily_usage || item.dailyUsage || 0
+        const currentStock = item.current_stock ?? item.stock ?? item.currentStock ?? 0
+        const minStock = item.min_stock ?? item.minStock ?? 0
+        const maxStock = item.max_stock ?? item.maxStock ?? 0
+
+        let recommendedQty = 0
+
+        if (dailyUsage > 0) {
+          const targetStock = dailyUsage * coverageDays
+          const needed = targetStock - currentStock
+          recommendedQty = Math.max(needed, minStock - currentStock)
+        } else {
+          if (maxStock > 0 && maxStock > currentStock) {
+            recommendedQty = maxStock - currentStock
+          } else if (minStock > 0) {
+            const target = minStock > currentStock ? Math.max(minStock * 2 - currentStock, minStock) : minStock
+            recommendedQty = target
+          } else {
+            const unit = (item.unit || '').toLowerCase()
+            if (unit === 'gram' || unit === 'g' || unit === 'ml') {
+              recommendedQty = 1000
+            } else if (unit === 'kg' || unit === 'l' || unit === 'liter') {
+              recommendedQty = 5
+            } else {
+              recommendedQty = 10
+            }
+          }
+        }
+
+        recommendedQty = Math.max(1, Math.ceil(recommendedQty))
         return { item, recommendedQty, coverageDays }
       })
       .sort((a, b) => getDaysRemaining(a.item) - getDaysRemaining(b.item))

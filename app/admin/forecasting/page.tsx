@@ -6,6 +6,9 @@ import {
   getPurchaseRecommendations,
   getDaysRemaining,
   getStockHealth,
+  getDisplayStock,
+  getDisplayUnit,
+  calculateRollingDailyUsage,
   type InventoryItem
 } from "@/lib/api/supabase-service"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -39,7 +42,21 @@ export default function ForecastingPage() {
     const fetchData = async () => {
       setIsLoading(true)
       const data = await getInventory()
-      setInventory(data)
+
+      // Calculate real-time daily usage from Sales Report logs
+      const enriched = await Promise.all(
+        data.map(async (item) => {
+          const usageFromSales = await calculateRollingDailyUsage(item.id)
+          const finalUsage = usageFromSales > 0 ? usageFromSales : (item.daily_usage || item.dailyUsage || 0)
+          return {
+            ...item,
+            daily_usage: finalUsage,
+            dailyUsage: finalUsage,
+          }
+        })
+      )
+
+      setInventory(enriched)
       setIsLoading(false)
     }
     fetchData()
@@ -233,14 +250,14 @@ export default function ForecastingPage() {
                         <div>
                           <p className="font-medium">{item.name}</p>
                           <p className="text-sm text-muted-foreground">
-                            Current: {item.current_stock ?? 0} {item.unit} ({daysRemaining.toFixed(1)} days)
+                            Current: {getDisplayStock(item.current_stock ?? item.stock ?? 0, item)} {getDisplayUnit(item)} ({daysRemaining.toFixed(1)} days)
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-6">
                         <div className="text-right">
                           <p className="font-medium">
-                            Buy {recommendedQty} {item.unit}
+                            Buy {getDisplayStock(recommendedQty, item)} {getDisplayUnit(item)}
                           </p>
                           <p className="text-sm text-muted-foreground">
                             {coverageDays} days coverage
