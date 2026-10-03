@@ -20,14 +20,14 @@ import {
   Check
 } from 'lucide-react';
 
-import { TikTokIcon, WhatsAppIcon } from '@/components/ui/social-icons';
+import { TikTokIcon, WhatsAppIcon, ShopeeIcon } from '@/components/ui/social-icons';
 
 const iconMap: Record<string, any> = {
-  MapPin, ShoppingBag, MessageCircle: WhatsAppIcon, FileText, Instagram, Globe, ExternalLink, Send, Music: TikTokIcon
+  MapPin, ShoppingBag, MessageCircle: WhatsAppIcon, FileText, Instagram, Globe, ExternalLink, Send, Music: TikTokIcon, Shopee: ShopeeIcon
 };
 
 const socialIconMap: Record<string, any> = {
-  Instagram, TikTok: TikTokIcon, WhatsApp: WhatsAppIcon, Website: Globe
+  Instagram, TikTok: TikTokIcon, WhatsApp: WhatsAppIcon, Website: Globe, Shopee: ShopeeIcon
 };
 
 export default function LinksPage() {

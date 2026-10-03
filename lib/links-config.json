@@ -63,6 +63,13 @@
       "visible": true
     },
     {
+      "label": "🛍️ Shop on Shopee",
+      "url": "https://spf.shopee.co.id/5q6uIaSlwY",
+      "icon": "Shopee",
+      "highlight": false,
+      "visible": true
+    },
+    {
       "label": "📖 Full Menu",
       "url": "/menu",
       "icon": "FileText",
