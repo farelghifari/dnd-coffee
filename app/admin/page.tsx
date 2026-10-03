@@ -118,9 +118,9 @@ export default function AdminDashboard() {
 
   return (
     <div>
-      <header className="mb-8 flex items-center justify-between">
+      <header className="mb-4 md:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-light tracking-tight">Dashboard</h1>
+          <h1 className="text-xl md:text-3xl font-light tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground uppercase tracking-widest text-[10px] font-bold">Welcome to DONOTDISTURB management system</p>
         </div>
         <div className="flex items-center gap-2">
@@ -128,15 +128,15 @@ export default function AdminDashboard() {
             <Button 
               variant="outline" 
               size="sm" 
-              className="rounded-sm border-yellow-500/50 text-yellow-600 hover:bg-yellow-50"
+              className="rounded-sm border-yellow-500/50 text-yellow-600 hover:bg-yellow-50 text-xs"
               onClick={() => window.location.href = "/admin/overtime"}
             >
-              <ClockIcon className="w-4 h-4 mr-2" />
+              <ClockIcon className="w-4 h-4 mr-1.5" />
               {pendingOvertimeRequests.length} Overtime
             </Button>
           )}
-          <Button variant="outline" size="sm" className="rounded-sm">
-            <Bell className="w-4 h-4 mr-2" />
+          <Button variant="outline" size="sm" className="rounded-sm text-xs">
+            <Bell className="w-4 h-4 mr-1.5" />
             {lowStockItems.length} Alerts
           </Button>
         </div>

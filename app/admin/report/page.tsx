@@ -422,13 +422,13 @@ export default function ReportPage() {
 
   return (
     <div>
-      <header className="mb-8">
-        <h1 className="text-3xl font-light tracking-tight">Report</h1>
-        <p className="text-muted-foreground">Daily operations, sales, and expenses</p>
+      <header className="mb-4 md:mb-8">
+        <h1 className="text-xl md:text-3xl font-light tracking-tight">Report</h1>
+        <p className="text-xs md:text-base text-muted-foreground">Daily operations, sales, and expenses</p>
       </header>
 
       {/* Unified Statistics Header - Premium Glassmorphism Style */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 md:gap-6 mb-4 md:mb-8">
         {/* Today's Focus */}
         <Card className="lg:col-span-3 rounded-sm border-none shadow-sm bg-gradient-to-br from-background to-muted/30 overflow-hidden relative">
           <div className="absolute top-0 right-0 p-4 opacity-10">
@@ -441,28 +441,28 @@ export default function ReportPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-blue-600/70 uppercase tracking-tight mb-1">Total Revenue</span>
-                <span className="text-2xl font-bold tracking-tight text-blue-700">{formatPrice(totalRevenue)}</span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium">All-time accumulation</span>
+                <span className="text-lg md:text-2xl font-bold tracking-tight text-blue-700">{formatPrice(totalRevenue)}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium hidden md:block">All-time accumulation</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-rose-600/70 uppercase tracking-tight mb-1">Total Expenses</span>
-                <span className="text-2xl font-bold tracking-tight text-rose-700">-{formatPrice(selectedExpenses)}</span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium">Daily purchases</span>
+                <span className="text-[10px] font-bold text-rose-600/70 uppercase tracking-tight mb-1">Expenses</span>
+                <span className="text-lg md:text-2xl font-bold tracking-tight text-rose-700">-{formatPrice(selectedExpenses)}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium hidden md:block">Daily purchases</span>
               </div>
-              <div className="flex flex-col border-l border-border/50 pl-6">
+              <div className="flex flex-col border-l border-border/50 pl-3 md:pl-6">
                 <span className="text-[10px] font-bold text-emerald-600/70 uppercase tracking-tight mb-1">Net Balance</span>
-                <span className={cn("text-2xl font-bold tracking-tight", selectedIncomeData.revenue - selectedExpenses >= 0 ? "text-emerald-700" : "text-rose-600")}>
+                <span className={cn("text-lg md:text-2xl font-bold tracking-tight", selectedIncomeData.revenue - selectedExpenses >= 0 ? "text-emerald-700" : "text-rose-600")}>
                   {formatPrice(selectedIncomeData.revenue - selectedExpenses)}
                 </span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Available margin</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic hidden md:block">Available margin</span>
               </div>
-              <div className="flex flex-col border-l border-border/50 pl-6">
+              <div className="flex flex-col border-l border-border/50 pl-3 md:pl-6">
                 <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight mb-1">Items Sold</span>
-                <span className="text-2xl font-bold tracking-tight">{selectedIncomeData.count}</span>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic">Portions</span>
+                <span className="text-lg md:text-2xl font-bold tracking-tight">{selectedIncomeData.count}</span>
+                <span className="text-[10px] text-muted-foreground mt-1 font-medium italic hidden md:block">Portions</span>
               </div>
             </div>
           </CardContent>
@@ -488,15 +488,15 @@ export default function ReportPage() {
       </div>
 
       <Tabs defaultValue="sales" className="w-full">
-        <TabsList className="mb-6">
-          <TabsTrigger value="sales" className="gap-2"><ShoppingCart className="w-4 h-4" />Sales Input</TabsTrigger>
-          <TabsTrigger value="expenditure" className="gap-2"><Receipt className="w-4 h-4" />Expenditure</TabsTrigger>
-          <TabsTrigger value="inventory" className="gap-2"><Package className="w-4 h-4" />Inventory Impact</TabsTrigger>
+        <TabsList className="mb-4 md:mb-6 w-full md:w-auto">
+          <TabsTrigger value="sales" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial"><ShoppingCart className="w-4 h-4" /><span className="hidden sm:inline">Sales Input</span><span className="sm:hidden">Sales</span></TabsTrigger>
+          <TabsTrigger value="expenditure" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial"><Receipt className="w-4 h-4" /><span className="hidden sm:inline">Expenditure</span><span className="sm:hidden">Expense</span></TabsTrigger>
+          <TabsTrigger value="inventory" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial"><Package className="w-4 h-4" /><span className="hidden sm:inline">Inventory Impact</span><span className="sm:hidden">Impact</span></TabsTrigger>
         </TabsList>
 
         <TabsContent value="sales">
       <Card className="rounded-sm mb-8">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-2 gap-2">
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
@@ -722,7 +722,7 @@ export default function ReportPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-6 mt-4 md:mt-8">
         {/* Sales Summary Table */}
         <Card className="rounded-sm">
           <CardHeader>

@@ -68,7 +68,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     <div className="h-screen bg-background flex overflow-hidden">
       <AdminSidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-border flex items-center justify-between px-6 md:px-8 bg-card/50 backdrop-blur-sm z-10 shrink-0">
+        <header className="h-14 md:h-16 border-b border-border flex items-center justify-between pl-14 pr-4 md:px-8 bg-card/50 backdrop-blur-sm z-10 shrink-0">
           <div className="flex items-center gap-2">
             <div className={cn(
               "flex items-center gap-1.5 px-2 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider",
@@ -80,7 +80,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
                 "w-1.5 h-1.5 rounded-full animate-pulse",
                 isSupabaseConfigured() ? "bg-green-500" : "bg-amber-500"
               )} />
-              {isSupabaseConfigured() ? "System Live" : "Local / Mock Mode"}
+              {isSupabaseConfigured() ? "Live" : "Local"}
             </div>
             {!isSupabaseConfigured() && (
               <span className="text-[10px] text-muted-foreground hidden sm:inline">
@@ -92,7 +92,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
             <NotificationBell />
           </div>
         </header>
-        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 p-3 md:p-6 lg:p-8 overflow-y-auto">
           {children}
         </main>
       </div>

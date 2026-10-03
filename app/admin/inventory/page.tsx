@@ -852,42 +852,42 @@ export default function InventoryPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <header className="mb-8">
-        <h1 className="text-3xl font-light tracking-tight">Inventory</h1>
-        <p className="text-muted-foreground">
+      <header className="mb-4 md:mb-8">
+        <h1 className="text-xl md:text-3xl font-light tracking-tight">Inventory</h1>
+        <p className="text-xs md:text-base text-muted-foreground">
           {canEdit ? "Manage raw materials and menu items" : "View inventory (Read Only)"}
         </p>
       </header>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-6">
-          <TabsTrigger value="raw-materials" className="gap-2">
+        <TabsList className="mb-4 md:mb-6 w-full md:w-auto flex-wrap">
+          <TabsTrigger value="raw-materials" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial">
             <Package className="w-4 h-4" />
-            Raw Materials
+            <span className="hidden sm:inline">Raw Materials</span><span className="sm:hidden">Stock</span>
           </TabsTrigger>
-          <TabsTrigger value="menu-items" className="gap-2">
+          <TabsTrigger value="menu-items" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial">
             <Coffee className="w-4 h-4" />
-            Menu Items
+            <span className="hidden sm:inline">Menu Items</span><span className="sm:hidden">Menu</span>
           </TabsTrigger>
-          <TabsTrigger value="opname" className="gap-2">
+          <TabsTrigger value="opname" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial">
             <ClipboardCheck className="w-4 h-4" />
-            Stock Take (Opname)
+            <span className="hidden sm:inline">Stock Take (Opname)</span><span className="sm:hidden">Opname</span>
           </TabsTrigger>
-          <TabsTrigger value="movement" className="gap-2">
+          <TabsTrigger value="movement" className="gap-1.5 text-xs md:text-sm flex-1 md:flex-initial">
             <History className="w-4 h-4" />
-            Movement Record
+            <span className="hidden sm:inline">Movement Record</span><span className="sm:hidden">History</span>
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="raw-materials">
           {canEdit && (
-            <div className="flex gap-2 mb-6">
-              <Button className="rounded-sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
-                <PackagePlus className="w-4 h-4 mr-2" />
+          <div className="flex flex-wrap gap-2 mb-4 md:mb-6">
+              <Button className="rounded-sm text-xs md:text-sm" size="sm" onClick={() => { setStockInForm({ category: "all", itemId: "", quantity: "", displayUnit: "pcs", unitCost: "", supplierName: "", receivedDate: new Date().toISOString().split("T")[0], expiredDate: "", notes: "" }); setIsAddStockModalOpen(true); }}>
+                <PackagePlus className="w-4 h-4 mr-1.5" />
                 Stock In
               </Button>
-              <Button variant="outline" className="rounded-sm" onClick={() => { resetItemForm(); setIsAddItemModalOpen(true); }}>
-                <Plus className="w-4 h-4 mr-2" />
+              <Button variant="outline" className="rounded-sm text-xs md:text-sm" size="sm" onClick={() => { resetItemForm(); setIsAddItemModalOpen(true); }}>
+                <Plus className="w-4 h-4 mr-1.5" />
                 Add Item
               </Button>
             </div>
@@ -931,16 +931,16 @@ export default function InventoryPage() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto max-h-[calc(100vh-450px)] overflow-y-auto">
-                <table className="w-full">
+                <table className="w-full min-w-[700px]">
                   <thead className="sticky top-0 bg-card z-10">
                     <tr className="border-b border-border">
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Name</th>
-                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Category</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Current Stock</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Daily Usage</th>
-                      <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Days Left</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Status</th>
-                      <th className="text-center py-3 px-4 text-sm font-medium text-muted-foreground bg-card">Actions</th>
+                      <th className="text-left py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card">Name</th>
+                      <th className="text-left py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card hidden sm:table-cell">Category</th>
+                      <th className="text-right py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card">Stock</th>
+                      <th className="text-right py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card hidden md:table-cell">Daily Usage</th>
+                      <th className="text-right py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card">Days Left</th>
+                      <th className="text-center py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card">Status</th>
+                      <th className="text-center py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-muted-foreground bg-card">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -950,10 +950,10 @@ export default function InventoryPage() {
 
                       return (
                         <tr key={item.id} className={cn("border-b border-border transition-colors hover:bg-muted/30", item.status === 'inactive' && "bg-muted/5")}>
-                          <td className={cn("py-4 px-4 font-medium", item.status === 'inactive' && "text-muted-foreground opacity-60")}>
+                          <td className={cn("py-3 md:py-4 px-3 md:px-4 font-medium text-sm", item.status === 'inactive' && "text-muted-foreground opacity-60")}>
                             <span>{item.name}</span>
                           </td>
-                          <td className={cn("py-4 px-4 capitalize", item.status === 'inactive' ? "text-muted-foreground/50" : "text-muted-foreground")}>{item.category}</td>
+                          <td className={cn("py-3 md:py-4 px-3 md:px-4 capitalize text-sm hidden sm:table-cell", item.status === 'inactive' ? "text-muted-foreground/50" : "text-muted-foreground")}>{item.category}</td>
                           <td className={cn("py-4 px-4 text-right font-mono", item.status === 'inactive' && "opacity-40")}>
                             {(() => {
                               const dUnit = item.display_unit || getDefaultDisplayUnit(item.unit) || item.unit

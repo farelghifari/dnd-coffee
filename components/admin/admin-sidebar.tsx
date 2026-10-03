@@ -22,10 +22,12 @@ import {
   FileText,
   Wallet,
   Receipt,
-  KeyRound
+  KeyRound,
+  Menu,
+  X
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { Badge } from "@/components/ui/badge"
 import { ChangePasswordDialog } from "@/components/change-password-dialog"
@@ -54,6 +56,7 @@ export function AdminSidebar() {
   const router = useRouter()
   const { logout, isSuperAdmin, isMainSuperAdmin, isAdmin, isHeadbar, user, getRoleDisplayLabel } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
   
   // Build nav items based on role
@@ -88,6 +91,21 @@ export function AdminSidebar() {
     navItems = [...navItems, settingsNavItem]
   }
 
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
+
+  // Prevent body scroll when mobile drawer is open
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [mobileOpen])
+
   const handleLogout = () => {
     logout()
     router.push("/login")
@@ -110,35 +128,41 @@ export function AdminSidebar() {
     return "bg-gray-100 text-gray-800 border-2 border-gray-400 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-500"
   }
 
-  return (
-    <aside 
-      className={cn(
-        "bg-card border-r border-border flex flex-col transition-all duration-300",
-        collapsed ? "w-16" : "w-64"
-      )}
-    >
+  // Shared sidebar content (used in both desktop and mobile)
+  const sidebarContent = (isMobile: boolean) => (
+    <>
       {/* Logo */}
       <div className="p-4 border-b border-border flex items-center justify-between">
-        {!collapsed && (
+        {(isMobile || !collapsed) && (
           <Link href="/admin" className="font-semibold text-sm tracking-wider">
             <img src="/images/logo-text-only.png" alt="DONOTDISTURB" className="h-4 w-auto object-contain" />
           </Link>
         )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-2 rounded-md hover:bg-muted transition-colors"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4" />
-          ) : (
-            <ChevronLeft className="w-4 h-4" />
-          )}
-        </button>
+        {isMobile ? (
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="p-2 rounded-md hover:bg-muted transition-colors"
+            aria-label="Close menu"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        ) : (
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="p-2 rounded-md hover:bg-muted transition-colors"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <ChevronRight className="w-4 h-4" />
+            ) : (
+              <ChevronLeft className="w-4 h-4" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* Account Status Display - Shows: full name on top line, role badge with colored border below */}
-      {!collapsed && user && (
+      {(isMobile || !collapsed) && user && (
         <div className="p-4 border-b border-border">
           <div className="flex items-center gap-3">
             <div className={cn(
@@ -171,7 +195,7 @@ export function AdminSidebar() {
           </div>
         </div>
       )}
-      {collapsed && user && (
+      {!isMobile && collapsed && user && (
         <div className="p-2 border-b border-border flex justify-center">
           <div 
             className={cn(
@@ -213,10 +237,10 @@ export function AdminSidebar() {
                       ? "bg-foreground text-background" 
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
-                  title={collapsed ? item.label : undefined}
+                  title={!isMobile && collapsed ? item.label : undefined}
                 >
                   <item.icon className="w-5 h-5 shrink-0" />
-                  {!collapsed && <span className="text-sm">{item.label}</span>}
+                  {(isMobile || !collapsed) && <span className="text-sm">{item.label}</span>}
                 </Link>
               </li>
             )
@@ -229,26 +253,26 @@ export function AdminSidebar() {
         <Link
           href="/"
           className="flex items-center gap-3 px-3 py-2 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title={collapsed ? "Back to Website" : undefined}
+          title={!isMobile && collapsed ? "Back to Website" : undefined}
         >
           <ChevronLeft className="w-5 h-5 shrink-0" />
-          {!collapsed && <span className="text-sm">Back to Website</span>}
+          {(isMobile || !collapsed) && <span className="text-sm">Back to Website</span>}
         </Link>
         <button
           onClick={() => setIsChangePasswordOpen(true)}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title={collapsed ? "Ganti Password" : undefined}
+          title={!isMobile && collapsed ? "Ganti Password" : undefined}
         >
           <KeyRound className="w-5 h-5 shrink-0" />
-          {!collapsed && <span className="text-sm">Ganti Password</span>}
+          {(isMobile || !collapsed) && <span className="text-sm">Ganti Password</span>}
         </button>
         <button
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-          title={collapsed ? "Logout" : undefined}
+          title={!isMobile && collapsed ? "Logout" : undefined}
         >
           <LogOut className="w-5 h-5 shrink-0" />
-          {!collapsed && <span className="text-sm">Logout</span>}
+          {(isMobile || !collapsed) && <span className="text-sm">Logout</span>}
         </button>
       </div>
 
@@ -256,6 +280,47 @@ export function AdminSidebar() {
         open={isChangePasswordOpen}
         onOpenChange={setIsChangePasswordOpen}
       />
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Mobile Hamburger Button - rendered in the layout header via portal-like approach */}
+      <button
+        onClick={() => setMobileOpen(true)}
+        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-card border border-border shadow-sm hover:bg-muted transition-colors"
+        aria-label="Open menu"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
+      {/* Mobile Overlay */}
+      {mobileOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/50 z-50 backdrop-blur-sm"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      {/* Mobile Drawer */}
+      <aside
+        className={cn(
+          "md:hidden fixed top-0 left-0 h-full w-72 bg-card border-r border-border flex flex-col z-50 transition-transform duration-300 ease-in-out",
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {sidebarContent(true)}
+      </aside>
+
+      {/* Desktop Sidebar */}
+      <aside 
+        className={cn(
+          "hidden md:flex bg-card border-r border-border flex-col transition-all duration-300",
+          collapsed ? "w-16" : "w-64"
+        )}
+      >
+        {sidebarContent(false)}
+      </aside>
+    </>
   )
 }
