@@ -11,7 +11,7 @@ import { isSupabaseConfigured } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 
 function AdminLayoutContent({ children }: { children: React.ReactNode }) {
-  const { user, isLoading, canAccessAdmin, isSuperAdmin } = useAuth()
+  const { user, isLoading, canAccessAdmin, isSuperAdmin, isHeadbar } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
 
@@ -22,7 +22,7 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Logged in but not an admin/super_admin - redirect to employee page
+    // Logged in but not an admin/super_admin/headbar - redirect to employee page
     if (!isLoading && user && !canAccessAdmin()) {
       router.push("/employee")
       return
@@ -33,7 +33,13 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       router.push("/admin")
       return
     }
-  }, [user, isLoading, router, pathname, canAccessAdmin, isSuperAdmin])
+
+    // Protect /admin/report - headbar role cannot access report
+    if (!isLoading && pathname.startsWith("/admin/report") && isHeadbar()) {
+      router.push("/admin")
+      return
+    }
+  }, [user, isLoading, router, pathname, canAccessAdmin, isSuperAdmin, isHeadbar])
 
   if (isLoading) {
     return (
@@ -50,6 +56,11 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   
   // Trying to access settings without super_admin role
   if (pathname === "/admin/settings" && !isSuperAdmin()) {
+    return null
+  }
+
+  // Trying to access report with headbar role
+  if (pathname.startsWith("/admin/report") && isHeadbar()) {
     return null
   }
 

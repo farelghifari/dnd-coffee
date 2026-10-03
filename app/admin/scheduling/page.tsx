@@ -59,6 +59,7 @@ import {
 } from "lucide-react"
 import { cn, getLocalYYYYMMDD, isShiftLocked, isPastDate } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
+import { toast } from "sonner"
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -74,10 +75,10 @@ const SHIFT_COLORS = [
 ]
 
 export default function SchedulingPage() {
-  const { isSuperAdmin, user } = useAuth()
+  const { isSuperAdmin, isAdmin, user } = useAuth()
   
-  // Permission check: Super Admin & Admin = full access
-  const canEdit = isSuperAdmin() || user?.role === 'admin'
+  // Permission check: Super Admin, Admin & Headbar = full access
+  const canEdit = isAdmin()
   
   const [employees, setEmployees] = useState<Employee[]>([])
   const [shiftAssignments, setShiftAssignments] = useState<ShiftAssignment[]>([])
@@ -181,6 +182,17 @@ export default function SchedulingPage() {
     setCurrentWeekStart(sunday)
   }
 
+  const resetFormState = () => {
+    setSelectedEmployeeId("")
+    setCasualName("")
+    setIsCasual(false)
+    setSelectedShiftConfigId("")
+    setEditingShift(null)
+    setShiftType("predefined")
+    setCustomStartTime("09:00")
+    setCustomEndTime("17:00")
+  }
+
   // Drag and drop handlers
   const handleDragStart = (employeeId: string) => {
     setDraggedEmployee(employeeId)
@@ -196,6 +208,7 @@ export default function SchedulingPage() {
 
   const handleDrop = (dateStr: string, dayOfWeek: number) => {
     if (draggedEmployee) {
+      resetFormState()
       setSelectedCell({ date: dateStr, dayOfWeek })
       setSelectedEmployeeId(draggedEmployee)
       setIsAddShiftOpen(true)
@@ -205,12 +218,8 @@ export default function SchedulingPage() {
 
   // Add shift manually
   const handleCellClick = (dateStr: string, dayOfWeek: number) => {
+    resetFormState()
     setSelectedCell({ date: dateStr, dayOfWeek })
-    setSelectedEmployeeId("")
-    setCasualName("")
-    setIsCasual(false)
-    setSelectedShiftConfigId("")
-    setEditingShift(null)
     setIsAddShiftOpen(true)
   }
 
@@ -267,11 +276,13 @@ export default function SchedulingPage() {
       endTime = customEndTime
     }
 
+    const employeeDisplayName = isCasual ? casualName : (employee?.nickname || employee?.name || "Unknown")
+
     if (editingShift) {
       console.log("[v0] Updating shift assignment:", {
         id: editingShift.id,
         employee_id: isCasual ? null : selectedEmployeeId,
-        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
+        employee_name: employeeDisplayName,
         date: selectedCell.date,
         start_time: startTime,
         end_time: endTime,
@@ -281,7 +292,7 @@ export default function SchedulingPage() {
 
       const result = await updateShiftAssignment(editingShift.id, {
         employee_id: isCasual ? null : selectedEmployeeId,
-        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
+        employee_name: employeeDisplayName,
         date: selectedCell.date,
         day_of_week: selectedCell.dayOfWeek,
         start_time: startTime,
@@ -294,14 +305,17 @@ export default function SchedulingPage() {
         await logActivity(
           "shift_change",
           "Admin",
-          isCasual ? casualName : (employee?.nickname || employee?.name || "Unknown"),
+          employeeDisplayName,
           `Updated shift on ${selectedCell.date}: ${startTime} - ${endTime}`
         )
+        toast.success(`Jadwal shift ${employeeDisplayName} berhasil diperbarui`)
+      } else {
+        toast.error("Gagal memperbarui jadwal shift")
       }
     } else {
       console.log("[v0] Adding shift assignment:", {
         employee_id: isCasual ? null : selectedEmployeeId,
-        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
+        employee_name: employeeDisplayName,
         date: selectedCell.date,
         start_time: startTime,
         end_time: endTime,
@@ -311,7 +325,7 @@ export default function SchedulingPage() {
 
       const result = await addShiftAssignment({
         employee_id: isCasual ? null : selectedEmployeeId,
-        employee_name: isCasual ? casualName : (employee?.nickname || employee?.name),
+        employee_name: employeeDisplayName,
         date: selectedCell.date,
         day_of_week: selectedCell.dayOfWeek,
         start_time: startTime,
@@ -324,9 +338,12 @@ export default function SchedulingPage() {
         await logActivity(
           "shift_change",
           "Admin",
-          isCasual ? casualName : (employee?.nickname || employee?.name || "Unknown"),
+          employeeDisplayName,
           `Assigned shift on ${selectedCell.date}: ${startTime} - ${endTime}`
         )
+        toast.success(`Jadwal shift baru untuk ${employeeDisplayName} berhasil dibuat`)
+      } else {
+        toast.error("Gagal menambahkan jadwal shift baru")
       }
     }
 
@@ -335,29 +352,25 @@ export default function SchedulingPage() {
     setShiftAssignments(shiftsData)
 
     setIsAddShiftOpen(false)
+    resetFormState()
     setSelectedCell(null)
-    setSelectedEmployeeId("")
-    setCasualName("")
-    setIsCasual(false)
-    setSelectedShiftConfigId("")
-    setEditingShift(null)
-    setShiftType("predefined")
-    setCustomStartTime("09:00")
-    setCustomEndTime("17:00")
   }
 
   const handleRemoveShift = async (shiftId: string) => {
     const shift = shiftAssignments.find(s => s.id === shiftId)
-    await deleteShiftAssignment(shiftId)
+    const success = await deleteShiftAssignment(shiftId)
     
     // Log the shift removal
-    if (shift) {
+    if (success && shift) {
       await logActivity(
         "shift_change",
         "Admin",
         shift.employee_name || "Unknown",
         `Removed shift on ${shift.date}: ${shift.start_time} - ${shift.end_time}`
       )
+      toast.success("Jadwal shift berhasil dihapus")
+    } else if (!success) {
+      toast.error("Gagal menghapus jadwal shift")
     }
     
     const shiftsData = await getShiftAssignments()
@@ -463,6 +476,20 @@ export default function SchedulingPage() {
         </div>
 
         <div className="flex items-center justify-center md:justify-end gap-1.5 sm:gap-2">
+          {canEdit && (
+            <Button 
+              size="sm" 
+              className="h-8 text-xs rounded-sm gap-1"
+              onClick={() => {
+                const todayStr = getLocalYYYYMMDD()
+                const todayDate = new Date()
+                handleCellClick(todayStr, todayDate.getDay())
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Shift</span>
+            </Button>
+          )}
           <div className="flex items-center bg-muted/50 p-1 rounded-sm border border-border/50">
             <Button variant="ghost" size="sm" onClick={goToPreviousWeek} className="h-7 w-7 p-0 rounded-xs">
               <ChevronLeft className="w-4 h-4" />
@@ -478,7 +505,7 @@ export default function SchedulingPage() {
       </header>
 
       <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
-        {/* Employee List - Draggable */}
+        {/* Employee List - Draggable & Clickable */}
         <Card className="w-full lg:w-64 rounded-sm shrink-0 shadow-none sm:shadow-sm border-none sm:border bg-transparent sm:bg-card">
           <CardHeader className="pb-2 px-2 sm:px-6 hidden sm:flex">
             <CardTitle className="flex items-center gap-2 text-sm">
@@ -493,10 +520,20 @@ export default function SchedulingPage() {
                 draggable={canEdit}
                 onDragStart={() => canEdit && handleDragStart(employee.id)}
                 onDragEnd={handleDragEnd}
+                onClick={() => {
+                  if (canEdit) {
+                    const todayStr = getLocalYYYYMMDD()
+                    const todayDate = new Date()
+                    resetFormState()
+                    setSelectedCell({ date: todayStr, dayOfWeek: todayDate.getDay() })
+                    setSelectedEmployeeId(employee.id)
+                    setIsAddShiftOpen(true)
+                  }
+                }}
                 className={cn(
                   "flex items-center gap-2 lg:gap-3 p-2 lg:p-3 rounded-sm border bg-card shrink-0 transition-all",
                   "w-[140px] lg:w-full", // Fixed width on mobile, full on desktop
-                  canEdit && "cursor-grab active:cursor-grabbing hover:border-foreground/30 hover:shadow-sm",
+                  canEdit && "cursor-pointer lg:cursor-grab active:cursor-grabbing hover:border-foreground/30 hover:shadow-sm",
                   !canEdit && "cursor-default opacity-70",
                   draggedEmployee === employee.id && "opacity-50 scale-95"
                 )}
@@ -661,7 +698,15 @@ export default function SchedulingPage() {
       </div>
 
       {/* Add Shift Dialog */}
-      <Dialog open={isAddShiftOpen} onOpenChange={setIsAddShiftOpen}>
+      <Dialog 
+        open={isAddShiftOpen} 
+        onOpenChange={(open) => {
+          setIsAddShiftOpen(open)
+          if (!open) {
+            resetFormState()
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto rounded-sm">
           <DialogHeader>
             <DialogTitle>{editingShift ? "Edit Shift" : "Add Shift"}</DialogTitle>

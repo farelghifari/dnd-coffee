@@ -60,6 +60,7 @@ export interface InventoryItem {
   displayUnit?: string
   conversionRate?: number
   expiryDate?: string
+  supplierName?: string
   status?: string
 
   // Database Aliases (for backward compatibility)

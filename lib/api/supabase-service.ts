@@ -210,7 +210,7 @@ export interface Employee {
   name: string
   email: string
   password?: string
-  role: "employee" | "admin" | "super_admin"
+  role: "employee" | "headbar" | "admin" | "super_admin"
   position?: "barista" | "employee"
   employment_type: "full-time" | "part-time"
   nfc_uid: string | null
@@ -1006,6 +1006,9 @@ export async function getInventory(): Promise<InventoryItem[]> {
         display_unit: row.display_unit || row.unit || 'pcs',
         expiryDate: row.expiry_date,
         expiry_date: row.expiry_date,
+        supplier_name: row.supplier_name,
+        supplierName: row.supplier_name,
+        notes: row.notes,
         status: row.status || 'active'
       }
     })
@@ -1057,6 +1060,11 @@ export async function addInventoryItem(item: {
   max_stock?: number;
   daily_usage?: number;
   unit_cost?: number;
+  supplier_name?: string;
+  notes?: string;
+  display_unit?: string;
+  conversion_rate?: number;
+  expiry_date?: string;
 }): Promise<InventoryItem | null> {
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
@@ -1069,7 +1077,12 @@ export async function addInventoryItem(item: {
         min_stock: item.min_stock || 0,
         max_stock: item.max_stock || 100,
         daily_usage: item.daily_usage || 0,
-        unit_cost: item.unit_cost || 0
+        unit_cost: item.unit_cost || 0,
+        supplier_name: item.supplier_name || null,
+        notes: item.notes || null,
+        display_unit: item.display_unit || null,
+        conversion_rate: item.conversion_rate || 1,
+        expiry_date: item.expiry_date || null
       }])
       .select()
       .single()
@@ -1080,7 +1093,7 @@ export async function addInventoryItem(item: {
     if (error) {
       return null
     }
-    return data ? { ...data, current_stock: data.stock } : null
+    return data ? { ...data, current_stock: data.stock, supplierName: data.supplier_name } : null
   }
   
   const inventory = await getInventory()
@@ -1108,6 +1121,12 @@ export async function updateInventoryItem(id: string, updates: Partial<Inventory
     if (updates.daily_usage !== undefined) dbUpdates.daily_usage = updates.daily_usage
     if (updates.unit_cost !== undefined) dbUpdates.unit_cost = updates.unit_cost
     if (updates.status !== undefined) dbUpdates.status = updates.status
+    if (updates.supplier_name !== undefined) dbUpdates.supplier_name = updates.supplier_name
+    if (updates.supplierName !== undefined) dbUpdates.supplier_name = updates.supplierName
+    if (updates.notes !== undefined) dbUpdates.notes = updates.notes
+    if (updates.display_unit !== undefined) dbUpdates.display_unit = updates.display_unit
+    if (updates.conversion_rate !== undefined) dbUpdates.conversion_rate = updates.conversion_rate
+    if (updates.expiry_date !== undefined) dbUpdates.expiry_date = updates.expiry_date
     
     const { data, error } = await supabase
       .from('inventory_items')
@@ -1328,13 +1347,17 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
       // RPC succeeded. Now optionally patch the columns that RPC might have missed
       const targetId = result?.id || data.id
       
-      if (targetId && (data.display_unit || data.conversion_rate)) {
+      const patchFields: Record<string, any> = {}
+      if (data.display_unit !== undefined) patchFields.display_unit = data.display_unit
+      if (data.conversion_rate !== undefined) patchFields.conversion_rate = data.conversion_rate || 1
+      if (data.supplier_name !== undefined) patchFields.supplier_name = data.supplier_name
+      if (data.notes !== undefined) patchFields.notes = data.notes
+      if (sanitizedExpiry !== null) patchFields.expiry_date = sanitizedExpiry
+
+      if (targetId && Object.keys(patchFields).length > 0) {
         await supabase
           .from('inventory_items')
-          .update({
-            display_unit: data.display_unit,
-            conversion_rate: data.conversion_rate || 1
-          })
+          .update(patchFields)
           .eq('id', targetId)
       }
       
@@ -1350,14 +1373,32 @@ export async function upsertInventory(data: UpsertInventoryData, actorName: stri
         category: data.category as InventoryItem['category'],
         unit: data.unit,
         stock: data.stock,
-        current_stock: data.stock
+        current_stock: data.stock,
+        min_stock: data.min_stock,
+        max_stock: data.max_stock,
+        daily_usage: data.daily_usage,
+        unit_cost: data.unit_cost,
+        supplier_name: data.supplier_name,
+        notes: data.notes,
+        display_unit: data.display_unit,
+        conversion_rate: data.conversion_rate,
+        expiry_date: data.expiry_date
       })
     } else {
       resultItem = await addInventoryItem({
         name: data.name,
         category: data.category,
         unit: data.unit,
-        stock: data.stock
+        stock: data.stock,
+        min_stock: data.min_stock,
+        max_stock: data.max_stock,
+        daily_usage: data.daily_usage,
+        unit_cost: data.unit_cost,
+        supplier_name: data.supplier_name,
+        notes: data.notes,
+        display_unit: data.display_unit,
+        conversion_rate: data.conversion_rate,
+        expiry_date: data.expiry_date
       })
     }
   }
@@ -4085,6 +4126,8 @@ export async function bulkSellMenu(items: BulkSaleItem[], customDate?: string): 
       finalTimestamp = d.toISOString();
     }
     
+    let successCount = 0;
+    
     for (const item of items) {
       // ... same finalPrice logic ...
       let finalPrice = item.total_price;
@@ -4110,6 +4153,8 @@ export async function bulkSellMenu(items: BulkSaleItem[], customDate?: string): 
         console.error("Failed to insert sales_log:", logErr);
         continue;
       }
+      
+      successCount++;
 
       // 2. SKIP inventory deduction if it's a past date
       if (isPastDate) {
@@ -4167,7 +4212,8 @@ export async function bulkSellMenu(items: BulkSaleItem[], customDate?: string): 
       }
     }
 
-    return true;
+    console.log(`bulkSellMenu completed: ${successCount}/${items.length} items saved`);
+    return successCount > 0;
   } catch (err) {
     console.error("CRITICAL ERROR (bulkSellMenu JS):", err);
     return false;

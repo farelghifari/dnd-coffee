@@ -47,6 +47,7 @@ import {
   ArrowUp,
   ArrowDown,
   ShieldCheck,
+  UserCheck,
   User,
   FileText,
   Download,
@@ -314,16 +315,22 @@ export default function SettingsPage() {
     
     switch (currentRole) {
       case 'employee':
-        // Employee can only be promoted to admin
-        return [{ role: 'admin', label: 'Promote to Admin', isPromotion: true }]
+        return [
+          { role: 'headbar', label: 'Promote to Headbar', isPromotion: true },
+          { role: 'admin', label: 'Promote to Admin', isPromotion: true }
+        ]
+      case 'headbar':
+        return [
+          { role: 'admin', label: 'Promote to Admin', isPromotion: true },
+          { role: 'employee', label: 'Demote to Employee', isPromotion: false }
+        ]
       case 'admin':
-        // Admin can be promoted to super_admin (temporary) or demoted to employee
         return [
           { role: 'super_admin', label: 'Promote to Super Admin', isPromotion: true },
+          { role: 'headbar', label: 'Demote to Headbar', isPromotion: false },
           { role: 'employee', label: 'Demote to Employee', isPromotion: false }
         ]
       case 'super_admin':
-        // Super admin can only be demoted to admin (not employee)
         return [{ role: 'admin', label: 'Demote to Admin', isPromotion: false }]
       default:
         return [{ role: 'admin', label: 'Promote to Admin', isPromotion: true }]
@@ -481,6 +488,8 @@ export default function SettingsPage() {
             )}
           </div>
         )
+      case 'headbar':
+        return <Badge className="bg-cyan-100 text-cyan-800 border-cyan-200 dark:bg-cyan-900/30 dark:text-cyan-300"><UserCheck className="w-3 h-3 mr-1" />Headbar</Badge>
       case 'admin':
         return <Badge className="bg-blue-100 text-blue-800 border-blue-200"><ShieldCheck className="w-3 h-3 mr-1" />Admin</Badge>
       default:
@@ -627,7 +636,7 @@ export default function SettingsPage() {
   }
   
   // Filter employees by role for display
-  const adminsAndSuperAdmins = employees.filter(e => e.role === 'admin' || e.role === 'super_admin')
+  const adminsAndSuperAdmins = employees.filter(e => e.role === 'admin' || e.role === 'super_admin' || e.role === 'headbar')
   const regularEmployees = employees.filter(e => e.role === 'employee' || !e.role)
 
   // Don't render if not main super admin
@@ -984,7 +993,7 @@ export default function SettingsPage() {
                 <div>
                   <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4" />
-                    Admins & Super Admins ({adminsAndSuperAdmins.length})
+                    Admins, Headbars & Super Admins ({adminsAndSuperAdmins.length})
                   </h3>
                   {adminsAndSuperAdmins.length === 0 ? (
                     <p className="text-sm text-muted-foreground py-2">No admins assigned yet</p>
@@ -1039,9 +1048,11 @@ export default function SettingsPage() {
                                   ) : (
                                     <ArrowDown className="w-3 h-3 mr-1" />
                                   )}
-                                  {change.role === 'admin' && emp.role === 'employee' ? 'Promote' :
+                                  {change.role === 'headbar' ? 'Headbar' :
+                                   change.role === 'admin' && emp.role === 'employee' ? 'Admin' :
+                                   change.role === 'admin' && emp.role === 'headbar' ? 'Admin' :
                                    change.role === 'super_admin' ? 'Super Admin' :
-                                   'Demote'}
+                                   'Employee'}
                                 </Button>
                               ))}
                             </div>
@@ -1079,15 +1090,18 @@ export default function SettingsPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             {getRoleBadge(emp)}
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="rounded-sm text-xs"
-                              onClick={() => initiateRoleChange(emp, 'admin')}
-                            >
-                              <ArrowUp className="w-3 h-3 mr-1" />
-                              Promote to Admin
-                            </Button>
+                            {getAllowedRoleChanges(emp).map(change => (
+                              <Button 
+                                key={change.role}
+                                variant="outline" 
+                                size="sm"
+                                className="rounded-sm text-xs"
+                                onClick={() => initiateRoleChange(emp, change.role)}
+                              >
+                                <ArrowUp className="w-3 h-3 mr-1" />
+                                {change.role === 'headbar' ? 'To Headbar' : 'To Admin'}
+                              </Button>
+                            ))}
                           </div>
                         </div>
                       ))}
@@ -1107,6 +1121,7 @@ export default function SettingsPage() {
             <AlertDialogTitle>
               {targetRole === 'employee' ? 'Demote to Employee' : 
                targetRole === 'super_admin' ? 'Promote to Super Admin' : 
+               targetRole === 'headbar' ? (selectedEmployee?.role === 'admin' ? 'Demote to Headbar' : 'Promote to Headbar') :
                targetRole === 'admin' && selectedEmployee?.role === 'super_admin' ? 'Demote to Admin' :
                'Promote to Admin'}
             </AlertDialogTitle>
@@ -1114,6 +1129,8 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 {targetRole === 'employee' ? (
                   <p>Are you sure you want to demote <strong>{selectedEmployee?.name}</strong> to employee? They will lose access to the admin dashboard.</p>
+                ) : targetRole === 'headbar' ? (
+                  <p>Are you sure you want to change the role of <strong>{selectedEmployee?.name}</strong> to Headbar? They will have Admin access except for the Report menu.</p>
                 ) : targetRole === 'super_admin' ? (
                   <>
                     <p>Are you sure you want to promote <strong>{selectedEmployee?.name}</strong> to super admin? They will have full system access including Settings.</p>

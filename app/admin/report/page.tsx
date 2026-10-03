@@ -262,6 +262,10 @@ export default function ReportPage() {
     // Success - reset form
     setBulkSaleItems([{ menu_id: "", quantity: 0 }])
     setIsSubmitting(false)
+    toast.success(`${validItems.length} item berhasil dicatat! Total: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(validItems.reduce((sum, item) => {
+      const menu = menuItems.find(m => m.id === item.menu_id)
+      return sum + (item.total_price ?? (menu ? menu.price * item.quantity : 0))
+    }, 0))}`)
     
     // Auto-refresh the page data so changes reflect immediately
     fetchData()

@@ -17,6 +17,7 @@ import {
   Clock,
   Crown,
   ShieldCheck,
+  UserCheck,
   Layers,
   FileText,
   Wallet,
@@ -51,12 +52,12 @@ const settingsNavItem = { href: "/admin/settings", label: "Settings", icon: Sett
 export function AdminSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { logout, isSuperAdmin, isMainSuperAdmin, user, getRoleDisplayLabel } = useAuth()
+  const { logout, isSuperAdmin, isMainSuperAdmin, isHeadbar, user, getRoleDisplayLabel } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
   
   // Build nav items based on role
-  // Employees, Overtime, Outlets, and Logs are restricted for regular Admins
+  // Employees, Overtime, Outlets, and Logs are restricted for regular Admins & Headbar
   let navItems = [...baseNavItems]
   
   if (!isSuperAdmin()) {
@@ -67,6 +68,11 @@ export function AdminSidebar() {
       item.href !== "/admin/logs" &&
       item.href !== "/admin/analytics"
     )
+  }
+
+  // Report menu is hidden for Headbar
+  if (isHeadbar()) {
+    navItems = navItems.filter(item => item.href !== "/admin/report")
   }
 
   // Add sensitive items for Main Super Admin
@@ -83,14 +89,16 @@ export function AdminSidebar() {
   const getRoleIcon = () => {
     if (isMainSuperAdmin()) return <Crown className="w-3 h-3" />
     if (isSuperAdmin()) return <Crown className="w-3 h-3" />
+    if (isHeadbar()) return <UserCheck className="w-3 h-3" />
     return <ShieldCheck className="w-3 h-3" />
   }
 
   // Get role badge style with colored borders
-  // admin = gray border, super_admin = yellow border, main_super_admin = purple border
+  // admin = gray border, headbar = cyan border, super_admin = yellow border, main_super_admin = purple border
   const getRoleBadgeStyle = () => {
     if (isMainSuperAdmin()) return "bg-purple-100 text-purple-800 border-2 border-purple-500 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-400"
     if (isSuperAdmin()) return "bg-amber-100 text-amber-800 border-2 border-yellow-500 dark:bg-amber-900/30 dark:text-amber-300 dark:border-yellow-400"
+    if (isHeadbar()) return "bg-cyan-100 text-cyan-800 border-2 border-cyan-500 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-400"
     return "bg-gray-100 text-gray-800 border-2 border-gray-400 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-500"
   }
 
@@ -129,6 +137,7 @@ export function AdminSidebar() {
               "w-8 h-8 rounded-full flex items-center justify-center",
               isMainSuperAdmin() ? "bg-purple-100 dark:bg-purple-900/30" :
               isSuperAdmin() ? "bg-amber-100 dark:bg-amber-900/30" :
+              isHeadbar() ? "bg-cyan-100 dark:bg-cyan-900/30" :
               "bg-gray-100 dark:bg-gray-800"
             )}>
               {isMainSuperAdmin() || isSuperAdmin() ? (
@@ -136,6 +145,8 @@ export function AdminSidebar() {
                   "w-4 h-4",
                   isMainSuperAdmin() ? "text-purple-600 dark:text-purple-400" : "text-amber-600 dark:text-amber-400"
                 )} />
+              ) : isHeadbar() ? (
+                <UserCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
               ) : (
                 <ShieldCheck className="w-4 h-4 text-gray-600 dark:text-gray-400" />
               )}
@@ -159,6 +170,7 @@ export function AdminSidebar() {
               "w-8 h-8 rounded-full flex items-center justify-center border-2",
               isMainSuperAdmin() ? "bg-purple-100 border-purple-500 dark:bg-purple-900/30 dark:border-purple-400" :
               isSuperAdmin() ? "bg-amber-100 border-yellow-500 dark:bg-amber-900/30 dark:border-yellow-400" :
+              isHeadbar() ? "bg-cyan-100 border-cyan-500 dark:bg-cyan-900/30 dark:border-cyan-400" :
               "bg-gray-100 border-gray-400 dark:bg-gray-800 dark:border-gray-500"
             )}
             title={`${user.nickname || user.name} - ${getRoleDisplayLabel()}`}
@@ -167,6 +179,8 @@ export function AdminSidebar() {
               <Crown className="w-4 h-4 text-purple-600 dark:text-purple-400" />
             ) : isSuperAdmin() ? (
               <Crown className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            ) : isHeadbar() ? (
+              <UserCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
             ) : (
               <ShieldCheck className="w-4 h-4 text-gray-600 dark:text-gray-400" />
             )}

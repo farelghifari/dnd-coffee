@@ -3,8 +3,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react"
 import { authenticateUser, getEmployeeById } from "./api/supabase-service"
 
-// Role hierarchy: main_super_admin > super_admin > admin > employee
-type UserRole = "super_admin" | "admin" | "employee"
+// Role hierarchy: main_super_admin > super_admin > admin > headbar > employee
+type UserRole = "super_admin" | "admin" | "headbar" | "employee"
 
 interface User {
   id: string
@@ -25,6 +25,7 @@ interface AuthContextType {
   isSuperAdmin: () => boolean
   isMainSuperAdmin: () => boolean
   isAdmin: () => boolean
+  isHeadbar: () => boolean
   canAccessAdmin: () => boolean
   getRoleDisplayLabel: () => string
   refreshUser: () => Promise<void>
@@ -69,6 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } else if (employee.role === "admin") {
           effectiveRole = "admin"
+        } else if (employee.role === "headbar") {
+          effectiveRole = "headbar"
         }
         
         const updatedUser: User = {
@@ -142,6 +145,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         } else if (employee.role === "admin") {
           role = "admin"
+        } else if (employee.role === "headbar") {
+          role = "headbar"
         }
         // Otherwise stays as "employee"
         
@@ -177,8 +182,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Helper functions for role checking
   const isSuperAdmin = () => user?.role === "super_admin"
   const isMainSuperAdmin = () => user?.isMainSuperAdmin === true
-  const isAdmin = () => user?.role === "admin" || user?.role === "super_admin"
-  const canAccessAdmin = () => user?.role === "admin" || user?.role === "super_admin"
+  const isHeadbar = () => user?.role === "headbar"
+  const isAdmin = () => user?.role === "admin" || user?.role === "super_admin" || user?.role === "headbar"
+  const canAccessAdmin = () => user?.role === "admin" || user?.role === "super_admin" || user?.role === "headbar"
   
   // Get display label for role
   const getRoleDisplayLabel = (): string => {
@@ -190,6 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (user?.role === "admin") {
       return "Admin"
+    }
+    if (user?.role === "headbar") {
+      return "Headbar"
     }
     return "Employee"
   }
@@ -203,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSuperAdmin, 
       isMainSuperAdmin,
       isAdmin, 
+      isHeadbar,
       canAccessAdmin,
       getRoleDisplayLabel,
       refreshUser

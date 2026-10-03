@@ -68,8 +68,8 @@ export default function AnalyticsPage() {
   const [target, setTarget] = useState<MonthlyTarget | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   
-  // Period filter state: default current month (yyyy-MM) or 'all'
-  const [selectedPeriod, setSelectedPeriod] = useState<string>(format(new Date(), "yyyy-MM"))
+  // Period filter state: default to 'all' so users immediately see all sales data
+  const [selectedPeriod, setSelectedPeriod] = useState<string>("all")
 
   const fetchData = async () => {
     setIsLoading(true)
@@ -228,18 +228,50 @@ export default function AnalyticsPage() {
             </SelectTrigger>
             <SelectContent align="end" className="font-sans text-xs">
               <SelectItem value="all" className="font-bold">✨ All-Time (Semua)</SelectItem>
-              <SelectItem value="2026-08">Agustus 2026</SelectItem>
-              <SelectItem value="2026-07">Juli 2026</SelectItem>
-              <SelectItem value="2026-06">Juni 2026</SelectItem>
-              <SelectItem value="2026-05">Mei 2026</SelectItem>
-              <SelectItem value="2026-04">April 2026</SelectItem>
-              <SelectItem value="2026-03">Maret 2026</SelectItem>
-              <SelectItem value="2026-02">Februari 2026</SelectItem>
-              <SelectItem value="2026-01">Januari 2026</SelectItem>
+              {(() => {
+                const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+                const now = new Date()
+                const currentYear = now.getFullYear()
+                const currentMonth = now.getMonth() // 0-indexed
+                const startYear = 2026
+                const startMonth = 0 // January
+                const months: { value: string; label: string }[] = []
+                for (let y = startYear; y <= currentYear; y++) {
+                  const mStart = y === startYear ? startMonth : 0
+                  const mEnd = y === currentYear ? currentMonth : 11
+                  for (let m = mStart; m <= mEnd; m++) {
+                    months.push({
+                      value: `${y}-${String(m + 1).padStart(2, '0')}`,
+                      label: `${monthNames[m]} ${y}`
+                    })
+                  }
+                }
+                return months.reverse().map(m => (
+                  <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                ))
+              })()}
             </SelectContent>
           </Select>
         </div>
       </header>
+
+      {/* Helper Banner when selected period has no sales data */}
+      {salesReport.length === 0 && !isLoading && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs rounded-sm flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              Belum ada catatan penjualan di bulan <strong>{selectedPeriod}</strong>. Pilih <strong>✨ All-Time (Semua)</strong> atau bulan <strong>Agustus 2026</strong> untuk melihat data historis.
+            </span>
+          </div>
+          <button 
+            onClick={() => setSelectedPeriod("all")} 
+            className="px-2 py-1 bg-amber-600 text-white font-medium text-[10px] rounded-xs shrink-0 hover:bg-amber-700"
+          >
+            Tampilkan All-Time
+          </button>
+        </div>
+      )}
 
       {/* Key Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
