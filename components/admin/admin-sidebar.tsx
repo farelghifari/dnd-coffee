@@ -52,7 +52,7 @@ const settingsNavItem = { href: "/admin/settings", label: "Settings", icon: Sett
 export function AdminSidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { logout, isSuperAdmin, isMainSuperAdmin, isHeadbar, user, getRoleDisplayLabel } = useAuth()
+  const { logout, isSuperAdmin, isMainSuperAdmin, isAdmin, isHeadbar, user, getRoleDisplayLabel } = useAuth()
   const [collapsed, setCollapsed] = useState(false)
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
   
@@ -65,19 +65,27 @@ export function AdminSidebar() {
       item.href !== "/admin/employees" && 
       item.href !== "/admin/overtime" && 
       item.href !== "/admin/outlets" &&
-      item.href !== "/admin/logs" &&
-      item.href !== "/admin/analytics"
+      item.href !== "/admin/logs"
     )
   }
 
-  // Report menu is hidden for Headbar
+  // Report and Analytics menus are hidden for Headbar
   if (isHeadbar()) {
-    navItems = navItems.filter(item => item.href !== "/admin/report")
+    navItems = navItems.filter(item => item.href !== "/admin/report" && item.href !== "/admin/analytics")
   }
 
-  // Add sensitive items for Main Super Admin
-  if (isMainSuperAdmin()) {
-    navItems = [...navItems, { href: "/admin/expenses", label: "Expenses", icon: Receipt }, payrollNavItem, settingsNavItem]
+  // Expenses & Payroll for Admin, Super Admin, and Main Super Admin (not Headbar)
+  if (isAdmin() && !isHeadbar()) {
+    navItems = [
+      ...navItems,
+      { href: "/admin/expenses", label: "Expenses", icon: Receipt },
+      payrollNavItem
+    ]
+  }
+
+  // Settings is only for Super Admin / Main Super Admin
+  if (isSuperAdmin()) {
+    navItems = [...navItems, settingsNavItem]
   }
 
   const handleLogout = () => {

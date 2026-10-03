@@ -42,15 +42,15 @@ import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
 
 export default function ExpensesPage() {
-  const { isMainSuperAdmin } = useAuth()
+  const { isAdmin, isHeadbar } = useAuth()
   const [opex, setOpex] = useState<MonthlyOpex[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-  if (!isMainSuperAdmin()) {
+  if (!isAdmin() || isHeadbar()) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center">
         <h1 className="text-2xl font-bold text-destructive">Access Denied</h1>
-        <p className="text-muted-foreground mt-2">Only the Main Super Admin can manage expenses.</p>
+        <p className="text-muted-foreground mt-2">Only Admins and Super Admins can manage expenses.</p>
       </div>
     )
   }

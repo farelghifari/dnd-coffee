@@ -34,8 +34,8 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Protect /admin/report - headbar role cannot access report
-    if (!isLoading && pathname.startsWith("/admin/report") && isHeadbar()) {
+    // Protect /admin/report, /admin/analytics, /admin/expenses, /admin/payroll - headbar role cannot access
+    if (!isLoading && (pathname.startsWith("/admin/report") || pathname.startsWith("/admin/analytics") || pathname.startsWith("/admin/expenses") || pathname.startsWith("/admin/payroll")) && isHeadbar()) {
       router.push("/admin")
       return
     }
@@ -59,8 +59,8 @@ function AdminLayoutContent({ children }: { children: React.ReactNode }) {
     return null
   }
 
-  // Trying to access report with headbar role
-  if (pathname.startsWith("/admin/report") && isHeadbar()) {
+  // Trying to access report, analytics, expenses, or payroll with headbar role
+  if ((pathname.startsWith("/admin/report") || pathname.startsWith("/admin/analytics") || pathname.startsWith("/admin/expenses") || pathname.startsWith("/admin/payroll")) && isHeadbar()) {
     return null
   }
 

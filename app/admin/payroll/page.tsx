@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { 
   getAttendanceReportData,
-  getEmployees,
+  getActiveEmployees,
   getPayrolls,
   upsertPayroll,
   settlePayrollBatch,
@@ -83,7 +83,7 @@ export default function PayrollAdminPage() {
     
     try {
       const [empData, reportData, payrollData] = await Promise.all([
-        getEmployees(),
+        getActiveEmployees(),
         getAttendanceReportData(startStr, endStr),
         getPayrolls(startStr, endStr)
       ])
